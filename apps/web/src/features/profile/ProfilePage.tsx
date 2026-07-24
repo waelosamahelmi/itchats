@@ -1,6 +1,6 @@
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Settings, CreditCard, User } from 'lucide-react';
+import { LogOut, Settings, CreditCard, User, Compass, Search, Bot } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch } from '@/app/store';
 import { Avatar, Card } from '@itchats/ui';
@@ -22,22 +22,28 @@ export default function ProfilePage() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="px-4 py-3 safe-top"><h1 className="text-xl font-bold text-text-primary">Profile</h1></header>
-      <div className="px-4">
-        <Card className="flex items-center gap-4 mb-4">
+      <header className="safe-top px-5 pt-5 pb-3">
+        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Profile</h1>
+      </header>
+      <div className="flex-1 overflow-y-auto px-5 space-y-1">
+        <Card className="flex items-center gap-4 mb-4 !p-4">
           <Avatar size="xl" fallback={user.username?.[0]?.toUpperCase()} />
           <div><p className="font-semibold text-text-primary">{user.username}</p><p className="text-sm text-text-secondary">{user.email}</p></div>
         </Card>
-        <div className="space-y-1">
-          {[{ icon: CreditCard, label: 'Billing & Credits' }, { icon: Settings, label: 'Settings' }].map(({ icon: Icon, label }) => (
-            <button key={label} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl hover:bg-surface-elevated transition-colors text-left">
-              <Icon size={20} className="text-text-secondary" /><span className="text-sm text-text-primary">{label}</span>
-            </button>
-          ))}
-          <button onClick={() => dispatch(logout())} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl hover:bg-surface-elevated transition-colors text-left text-danger">
-            <LogOut size={20} /><span className="text-sm">Sign Out</span>
+        {[
+          { icon: Bot, label: 'My Characters', onClick: () => nav('/ai') },
+          { icon: Compass, label: 'Discover', onClick: () => nav('/discover') },
+          { icon: Search, label: 'Search Characters', onClick: () => nav('/search') },
+          { icon: CreditCard, label: 'Billing & Credits', onClick: () => nav('/billing') },
+          { icon: Settings, label: 'Settings', onClick: () => {} },
+        ].map(({ icon: Icon, label, onClick }) => (
+          <button key={label} onClick={onClick} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl glass hover:bg-white/8 transition-colors text-left">
+            <Icon size={20} className="text-text-secondary" /><span className="text-sm text-text-primary">{label}</span>
           </button>
-        </div>
+        ))}
+        <button onClick={() => dispatch(logout())} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl glass hover:bg-danger/10 transition-colors text-left text-danger mt-4">
+          <LogOut size={20} /><span className="text-sm">Sign Out</span>
+        </button>
       </div>
     </div>
   );

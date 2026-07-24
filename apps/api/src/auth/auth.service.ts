@@ -21,10 +21,11 @@ export class AuthService {
 
   async register(email: string, username: string, password: string) {
     const db = getDb();
-    const [e] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (e) throw new UnauthorizedException('Email already registered');
-    const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
-    if (u) throw new UnauthorizedException('Username taken');
+    // Use raw SQL for citext comparison
+    const eResult = await db.execute(sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`);
+    if (eResult.rows.length > 0) throw new UnauthorizedException('Email already registered');
+    const uResult = await db.execute(sql`SELECT id FROM users WHERE username = ${username} LIMIT 1`);
+    if (uResult.rows.length > 0) throw new UnauthorizedException('Username taken');
     const pw = await this.hashPassword(password);
 
     // Use raw SQL insert to avoid Drizzle enum/citext issues
@@ -47,13 +48,21 @@ export class AuthService {
 
   async login(email: string, password: string, deviceInfo?: { userAgent?: string; ip?: string }) {
     const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (!user || !(await this.verifyPassword(user.passwordHash!, password))) throw new UnauthorizedException('Invalid credentials');
-    if (user.status !== 'active') throw new UnauthorizedException('Account inactive');
-    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
-    if (deviceInfo?.userAgent) await db.insert(devices).values({ userId: user.id, userAgent: deviceInfo.userAgent, lastIp: deviceInfo.ip, lastSeenAt: new Date() });
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, ...tokens };
+    // Use raw SQL to avoid Drizzle citext/enum issues
+    const result = await db.execute(sql`
+      SELECT id, email, username, password_hash, role, status::text as status
+      FROM users WHERE email = ${email} LIMIT 1
+    `);
+    const row = result.rows[0] as { id: string; email: string; username: string; password_hash: string; role: string; status: string } | undefined;
+    if (!row || !(await this.verifyPassword(row.password_hash, password))) throw new UnauthorizedException('Invalid credentials');
+    if (row.status !== 'active') throw new UnauthorizedException('Account inactive');
+
+    await db.execute(sql`UPDATE users SET last_login_at = NOW() WHERE id = ${row.id}`);
+    if (deviceInfo?.userAgent) {
+      await db.execute(sql`INSERT INTO devices (user_id, user_agent, last_ip, last_seen_at) VALUES (${row.id}, ${deviceInfo.userAgent}, ${deviceInfo.ip ?? null}, NOW())`);
+    }
+    const tokens = await this.generateTokens(row.id, row.email, row.role);
+    return { user: { id: row.id, email: row.email, username: row.username, role: row.role }, ...tokens };
   }
 
   async generateTokens(userId: string, email: string, role: string): Promise<TokenPair> {
@@ -72,20 +81,21 @@ export class AuthService {
     const [s] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash)).limit(1);
     if (!s || s.revokedAt || s.expiresAt < new Date()) throw new UnauthorizedException('Invalid token');
     await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.id, s.id));
-    const [user] = await db.select().from(users).where(eq(users.id, s.userId)).limit(1);
+    const uResult = await db.execute(sql`SELECT id, email, role FROM users WHERE id = ${s.userId} LIMIT 1`);
+    const user = uResult.rows[0] as { id: string; email: string; role: string } | undefined;
     if (!user) throw new UnauthorizedException('User not found');
     return this.generateTokens(user.id, user.email, user.role);
   }
 
   async logout(userId: string) {
-    await getDb().update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.userId, userId));
+    await getDb().execute(sql`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ${userId}`);
     return { loggedOut: true };
   }
 
   async validateUserById(userId: string) {
     const db = getDb();
-    const [u] = await db.select({ id: users.id, email: users.email, username: users.username, role: users.role, status: users.status })
-      .from(users).where(eq(users.id, userId)).limit(1);
+    const result = await db.execute(sql`SELECT id, email, username, role, status::text as status FROM users WHERE id = ${userId} LIMIT 1`);
+    const u = result.rows[0] as { id: string; email: string; username: string; role: string; status: string } | undefined;
     return u && u.status === 'active' ? u : null;
   }
 }

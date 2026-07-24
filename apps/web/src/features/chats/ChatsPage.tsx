@@ -1,10 +1,9 @@
 import { useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, ChevronRight, Sparkles } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { fetchConvs, useAppDispatch } from '@/app/store';
-import { Avatar, Card } from '@itchats/ui';
 
 export default function ChatsPage() {
   const dispatch = useAppDispatch();
@@ -15,24 +14,54 @@ export default function ChatsPage() {
   useEffect(() => { if (user) dispatch(fetchConvs()); }, [user, dispatch]);
 
   if (!user) {
-    return <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
-      <MessageCircle size={48} className="text-text-muted" />
-      <p className="text-text-secondary text-center">Sign in to see your conversations</p>
-      <button onClick={() => navigate('/auth')} className="rounded-full bg-brand-primary px-6 py-2 text-white text-sm">Sign In</button>
-    </div>;
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-5 p-6">
+        <div className="w-20 h-20 rounded-3xl glass flex items-center justify-center">
+          <MessageCircle size={36} className="text-brand-secondary" />
+        </div>
+        <div className="text-center">
+          <h2 className="text-lg font-semibold text-text-primary mb-1">Your Messages</h2>
+          <p className="text-text-muted text-sm max-w-xs">Sign in to chat with AI characters and real people</p>
+        </div>
+        <button onClick={() => navigate('/auth')} className="rounded-full bg-brand-primary px-8 py-3 text-white text-sm font-medium accent-glow hover:brightness-110 transition-all">Sign In</button>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col h-full">
-      <header className="px-4 py-3 safe-top"><h1 className="text-xl font-bold text-text-primary">Chats</h1></header>
-      <div className="flex-1 overflow-y-auto px-4">
+      <header className="safe-top px-5 pt-5 pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-text-primary tracking-tight">Messages</h1>
+            <p className="text-text-muted text-xs mt-0.5">Your conversations</p>
+          </div>
+          <button className="glass rounded-full p-2.5 text-text-secondary hover:text-brand-primary transition-colors">
+            <Sparkles size={18} />
+          </button>
+        </div>
+      </header>
+      <div className="flex-1 overflow-y-auto px-5">
         {convs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20"><MessageCircle size={40} className="text-text-muted mb-2" /><p className="text-text-muted text-sm">No conversations yet</p></div>
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <MessageCircle size={36} className="text-text-muted opacity-40" />
+            <p className="text-text-muted text-sm">No conversations yet</p>
+            <p className="text-text-muted text-xs">Start chatting with an AI character</p>
+          </div>
         ) : (
-          convs.map((c: any) => (
-            <button key={c.id} onClick={() => navigate(`/chats`)} className="flex w-full items-center gap-3 py-3 border-b border-border-subtle hover:bg-surface-elevated px-2 rounded-lg transition-colors text-left">
-              <Avatar size="md" fallback={c.title?.[0] || '?'} />
-              <div className="flex-1 min-w-0"><p className="text-sm font-medium text-text-primary truncate">{c.title || 'Conversation'}</p><p className="text-xs text-text-muted truncate">{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleDateString() : 'New'}</p></div>
+          convs.map((c: any, i: number) => (
+            <button key={c.id} onClick={() => navigate(`/chats`)} className="flex w-full items-center gap-4 py-3.5 border-b border-border-subtle hover:bg-white/[0.02] px-1 rounded-xl transition-colors text-left animate-slide-up" style={{ animationDelay: `${i * 40}ms` }}>
+              <div className="w-11 h-11 rounded-full bg-brand-glow flex items-center justify-center shrink-0">
+                <span className="text-brand-secondary font-semibold text-sm">{c.title?.[0] || 'C'}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-text-primary truncate">{c.title || 'Conversation'}</p>
+                  <span className="text-[10px] text-text-muted shrink-0">{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'New'}</span>
+                </div>
+                <p className="text-xs text-text-muted truncate mt-0.5">Tap to open conversation</p>
+              </div>
+              <ChevronRight size={14} className="text-text-muted shrink-0" />
             </button>
           ))
         )}
