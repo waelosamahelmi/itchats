@@ -1,29 +1,33 @@
-import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { conversations, messages } from '@itchats/database/schema';
 import { eq, desc } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/conversations')
 export class ConversationsController {
   @Get()
-  async list() {
+  @UseGuards(JwtAuthGuard)
+  async list(@Req() req: any) {
     const db = getDb();
     return db.select().from(conversations).orderBy(desc(conversations.lastMessageAt)).limit(50);
   }
 
   @Post()
-  async create(@Body() body: { type: string; characterId?: string }) {
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() body: { type: string; characterId?: string }, @Req() req: any) {
     const db = getDb();
     const [conv] = await db.insert(conversations).values({
       type: body.type as 'human_character',
       characterId: body.characterId,
-      createdByUserId: '00000000-0000-0000-0000-000000000001',
+      createdByUserId: req.user.id,
     }).returning();
     return conv;
   }
 
   @Get(':conversationId/messages')
+  @UseGuards(JwtAuthGuard)
   async getMessages(@Param('conversationId') id: string, @Query('before') before?: string) {
     const db = getDb();
     return db.select().from(messages)
@@ -33,13 +37,14 @@ export class ConversationsController {
   }
 
   @Post(':conversationId/messages')
-  async sendMessage(@Param('conversationId') id: string, @Body() body: unknown) {
+  @UseGuards(JwtAuthGuard)
+  async sendMessage(@Param('conversationId') id: string, @Body() body: unknown, @Req() req: any) {
     const input = SendMessageSchema.parse(body);
     const db = getDb();
     const [msg] = await db.insert(messages).values({
       conversationId: id,
       senderType: 'user',
-      senderUserId: '00000000-0000-0000-0000-000000000001',
+      senderUserId: req.user.id,
       type: input.type,
       content: input.content,
       clientIdempotencyKey: input.clientIdempotencyKey,

@@ -1,17 +1,19 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Req, UseGuards } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { generationJobs, usageEvents } from '@itchats/database/schema';
+import { generationJobs } from '@itchats/database/schema';
 import { eq, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/generations')
 export class GenerationsController {
   @Post('images')
-  async createImage(@Body() body: { prompt: string; model?: string }) {
+  @UseGuards(JwtAuthGuard)
+  async createImage(@Body() body: { prompt: string; model?: string }, @Req() req: any) {
     const db = getDb();
     const idempotencyKey = randomUUID();
     const [job] = await db.insert(generationJobs).values({
-      userId: '00000000-0000-0000-0000-000000000001',
+      userId: req.user.id,
       generationType: 'text_to_image',
       routeKey: 'image.standard',
       idempotencyKey,
@@ -22,15 +24,20 @@ export class GenerationsController {
   }
 
   @Get('jobs')
-  async listJobs() {
+  @UseGuards(JwtAuthGuard)
+  async listJobs(@Req() req: any) {
     const db = getDb();
-    return db.select().from(generationJobs).orderBy(desc(generationJobs.createdAt)).limit(20);
+    return db.select().from(generationJobs)
+      .where(eq(generationJobs.userId, req.user.id))
+      .orderBy(desc(generationJobs.createdAt)).limit(20);
   }
 
   @Get(':jobId')
-  async getJob(@Param('jobId') id: string) {
+  @UseGuards(JwtAuthGuard)
+  async getJob(@Param('jobId') id: string, @Req() req: any) {
     const db = getDb();
     const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, id)).limit(1);
-    return job ?? { error: 'Not found' };
+    if (!job || job.userId !== req.user.id) return { error: 'Not found' };
+    return job;
   }
 }

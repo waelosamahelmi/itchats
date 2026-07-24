@@ -9,6 +9,7 @@ import { MediaModule } from './media/media.module';
 import { StoriesModule } from './stories/stories.module';
 import { SocialModule } from './social/social.module';
 import { BillingModule } from './billing/billing.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { HealthModule } from './health/health.module';
     StoriesModule,
     SocialModule,
     BillingModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

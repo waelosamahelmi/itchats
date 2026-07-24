@@ -35,7 +35,7 @@ export default function ProfilePage() {
           { icon: Compass, label: 'Discover', onClick: () => nav('/discover') },
           { icon: Search, label: 'Search Characters', onClick: () => nav('/search') },
           { icon: CreditCard, label: 'Billing & Credits', onClick: () => nav('/billing') },
-          { icon: Settings, label: 'Settings', onClick: () => {} },
+          { icon: Settings, label: 'Settings', onClick: () => nav('/settings') },
         ].map(({ icon: Icon, label, onClick }) => (
           <button key={label} onClick={onClick} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl glass hover:bg-white/8 transition-colors text-left">
             <Icon size={20} className="text-text-secondary" /><span className="text-sm text-text-primary">{label}</span>

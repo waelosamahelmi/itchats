@@ -1,15 +1,17 @@
-import { Controller, Post, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Post, Delete, Param, Body, Req, UseGuards } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { reports, userBlocks, characterFollows } from '@itchats/database/schema';
-import { eq } from 'drizzle-orm';
+import { reports, userBlocks } from '@itchats/database/schema';
+import { eq, and } from 'drizzle-orm';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1')
 export class SocialController {
   @Post('reports')
-  async report(@Body() body: { entityType: string; entityId: string; reason: string; detail?: string }) {
+  @UseGuards(JwtAuthGuard)
+  async report(@Body() body: { entityType: string; entityId: string; reason: string; detail?: string }, @Req() req: any) {
     const db = getDb();
     const [report] = await db.insert(reports).values({
-      reporterUserId: '00000000-0000-0000-0000-000000000001',
+      reporterUserId: req.user.id,
       entityType: body.entityType,
       entityId: body.entityId,
       reason: body.reason,
@@ -19,19 +21,29 @@ export class SocialController {
   }
 
   @Post('blocks/users/:userId')
-  async blockUser(@Param('userId') userId: string) {
+  @UseGuards(JwtAuthGuard)
+  async blockUser(@Param('userId') userId: string, @Req() req: any) {
     const db = getDb();
     await db.insert(userBlocks).values({
-      blockerUserId: '00000000-0000-0000-0000-000000000001',
+      blockerUserId: req.user.id,
       blockedUserId: userId,
     });
     return { blocked: true };
   }
 
-  @Delete('blocks/users/:userId')
-  async unblockUser(@Param('userId') userId: string) {
+  @Post('blocks/characters/:characterId')
+  @UseGuards(JwtAuthGuard)
+  async blockCharacter(@Param('characterId') id: string, @Req() req: any) {
     const db = getDb();
-    await db.delete(userBlocks).where(eq(userBlocks.blockedUserId, userId));
+    await db.insert(userBlocks).values({ blockerUserId: req.user.id, blockedCharacterId: id });
+    return { blocked: true };
+  }
+
+  @Delete('blocks/users/:userId')
+  @UseGuards(JwtAuthGuard)
+  async unblockUser(@Param('userId') userId: string, @Req() req: any) {
+    const db = getDb();
+    await db.delete(userBlocks).where(and(eq(userBlocks.blockerUserId, req.user.id), eq(userBlocks.blockedUserId, userId)));
     return { unblocked: true };
   }
 }

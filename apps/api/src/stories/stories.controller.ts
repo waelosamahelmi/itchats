@@ -1,28 +1,33 @@
-import { Controller, Get, Post, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Req, UseGuards } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { stories } from '@itchats/database/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/stories')
 export class StoriesController {
   @Get('feed')
+  @UseGuards(JwtAuthGuard)
   async getFeed() {
     const db = getDb();
     return db.select().from(stories)
-      .where(and(eq(stories.status, 'published'), eq(stories.generated, 'false')))
+      .where(eq(stories.status, 'published'))
+      .orderBy(desc(stories.publishedAt))
       .limit(50);
   }
 
   @Get('following')
-  async getFollowing() {
+  @UseGuards(JwtAuthGuard)
+  async getFollowing(@Req() req: any) {
     return { stories: [] };
   }
 
   @Post()
-  async create(@Body() body: { storyType: string; caption?: string; mediaAssetId?: string }) {
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() body: { storyType: string; caption?: string; mediaAssetId?: string }, @Req() req: any) {
     const db = getDb();
     const [story] = await db.insert(stories).values({
-      authorUserId: '00000000-0000-0000-0000-000000000001',
+      authorUserId: req.user.id,
       status: 'draft',
       storyType: body.storyType,
       caption: body.caption,
@@ -32,9 +37,10 @@ export class StoriesController {
   }
 
   @Delete(':storyId')
-  async delete(@Param('storyId') id: string) {
+  @UseGuards(JwtAuthGuard)
+  async delete(@Param('storyId') id: string, @Req() req: any) {
     const db = getDb();
-    await db.update(stories).set({ status: 'removed' }).where(eq(stories.id, id));
+    await db.update(stories).set({ status: 'removed' }).where(and(eq(stories.id, id), eq(stories.authorUserId, req.user.id)));
     return { deleted: true };
   }
 }

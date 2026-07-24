@@ -11,6 +11,7 @@ const CharacterProfilePage = lazy(() => import('@/features/ai/CharacterProfilePa
 const DiscoverPage = lazy(() => import('@/features/discover/DiscoverPage'));
 const SearchPage = lazy(() => import('@/features/search/SearchPage'));
 const StoriesPage = lazy(() => import('@/features/stories/StoriesPage'));
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
 const MapPage = lazy(() => import('@/features/map/MapPage'));
 const ProfilePage = lazy(() => import('@/features/profile/ProfilePage'));
 const BillingPage = lazy(() => import('@/features/billing/BillingPage'));
@@ -38,6 +39,7 @@ export function Router() {
           <Route path="/map" element={<MapPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/billing" element={<BillingPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </Suspense>
