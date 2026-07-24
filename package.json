@@ -28,8 +28,8 @@
   },
   "scripts": {
     "start": "run-os",
-    "start:win32": "set NODE_OPTIONS=--openssl-legacy-provider&&set PUBLIC_URL=/&&react-scripts start",
-    "start:default": "NODE_OPTIONS=--openssl-legacy-provider PUBLIC_URL=/ react-scripts start",
+    "start:win32": "set NODE_OPTIONS=--openssl-legacy-provider&&set HTTPS=true&&set PUBLIC_URL=/&&react-scripts start",
+    "start:default": "NODE_OPTIONS=--openssl-legacy-provider HTTPS=true PUBLIC_URL=/ react-scripts start",
     "start:https:win32": "set NODE_OPTIONS=--openssl-legacy-provider&&set HTTPS=true&&set PUBLIC_URL=/&&react-scripts start",
     "start:https:default": "NODE_OPTIONS=--openssl-legacy-provider HTTPS=true PUBLIC_URL=/ react-scripts start",
     "postinstall": "echo skipping filter install",

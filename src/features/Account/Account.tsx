@@ -1,8 +1,6 @@
 import React from 'react';
-import { useSelector, useDispatch, RootStateOrAny } from 'react-redux';
-import { hideDrawer } from 'AppShell/AppShellStore';
+import { useSelector, RootStateOrAny } from 'react-redux';
 import { language } from 'utils';
-import Button from 'components/Button/Button';
 import Section from 'components/Section/Section';
 import MenuItem from 'components/MenuItem/MenuItem';
 import Icon from 'components/Icon/Icon';
@@ -17,7 +15,6 @@ const currentDate = new Date().toLocaleDateString(language, {
 });
 
 const Account: React.FC = () => {
-  const dispatch = useDispatch();
   const {
     session: { username }
   } = useSelector(({ user }: RootStateOrAny) => user);
@@ -25,11 +22,7 @@ const Account: React.FC = () => {
   return (
     <main className="account">
       <header>
-        <Button
-          icon="faAngleDown"
-          onClick={() => dispatch(hideDrawer('account'))}
-          className="btn-close"
-        />
+        <h2>Profile</h2>
         <Icon name="faCog" className="ico-gear" />
       </header>
       <div className="logo">
