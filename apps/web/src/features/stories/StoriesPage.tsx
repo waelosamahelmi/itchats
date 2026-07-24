@@ -13,7 +13,7 @@ export default function StoriesPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3002/v1/stories/feed', {
+    fetch('http://localhost:3092/v1/stories/feed', {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.json()).then(d => setStories(Array.isArray(d) ? d : [])).catch(() => {}).finally(() => setLoading(false));
   }, [token]);

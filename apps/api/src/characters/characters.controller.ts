@@ -33,11 +33,6 @@ export class CharactersController {
     return this.charactersService.findPublic(Number(page), Number(limit));
   }
 
-  @Get('nearby')
-  async nearby(@Query('lat') lat: string, @Query('lng') lng: string, @Query('radius') radius = '50000') {
-    return { characters: [], message: 'Nearby search requires PostGIS' };
-  }
-
   @Get('search')
   async search(@Query('q') q: string) { return { results: [], query: q }; }
 

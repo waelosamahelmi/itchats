@@ -17,7 +17,7 @@ export default function MapPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3002/v1/characters/nearby?lat=30&lng=31&radius=50000')
+    fetch('http://localhost:3092/v1/characters/nearby?lat=30&lng=31&radius=50000')
       .then(r => r.json()).then(setChars).catch(console.error).finally(() => setLoading(false));
   }, [token]);
 

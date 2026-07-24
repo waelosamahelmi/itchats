@@ -67,9 +67,9 @@ export default defineConfig({
     ],
   },
   server: {
-    port: 3000,
+    port: 3090,
     proxy: {
-      '/v1': 'http://localhost:3002',
+      '/v1': 'http://localhost:3092',
     },
   },
 });

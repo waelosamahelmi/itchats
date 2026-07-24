@@ -20,9 +20,9 @@ pnpm dev
 
 | Service  | Port |
 |----------|------|
-| Web PWA  | 3000 |
-| Admin    | 3001 |
-| API      | 3002 |
+| Web PWA  | 3090 |
+| Admin    | 3091 |
+| API      | 3092 |
 | Worker   | —    |
 | Postgres | 5432 |
 | Redis    | 6379 |

@@ -1,11 +1,12 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { getDb } from '@itchats/database';
-import { users, refreshTokens, devices } from '@itchats/database/schema';
-import { eq, sql } from 'drizzle-orm';
+import { getDb, getPool } from '@itchats/database';
+import { refreshTokens, authAccounts } from '@itchats/database/schema';
+import { eq, and } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import { randomBytes, createHash } from 'node:crypto';
 import { getConfig } from '@itchats/config';
+import type { OAuthProfile } from './google.strategy';
 
 export interface TokenPair { accessToken: string; refreshToken: string; expiresIn: number; }
 export interface JwtPayload { sub: string; email: string; role: string; }
@@ -20,46 +21,38 @@ export class AuthService {
   async verifyPassword(hash: string, password: string) { return argon2.verify(hash, password); }
 
   async register(email: string, username: string, password: string) {
-    const db = getDb();
-    // Use raw SQL for citext comparison
-    const eResult = await db.execute(sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`);
-    if (eResult.rows.length > 0) throw new UnauthorizedException('Email already registered');
-    const uResult = await db.execute(sql`SELECT id FROM users WHERE username = ${username} LIMIT 1`);
-    if (uResult.rows.length > 0) throw new UnauthorizedException('Username taken');
+    const pool = getPool();
+    const eCheck = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+    if (eCheck.rows.length > 0) throw new UnauthorizedException('Email already registered');
+    const uCheck = await pool.query('SELECT id FROM users WHERE username = $1 LIMIT 1', [username]);
+    if (uCheck.rows.length > 0) throw new UnauthorizedException('Username taken');
     const pw = await this.hashPassword(password);
 
-    // Use raw SQL insert to avoid Drizzle enum/citext issues
-    const result = await db.execute(sql`
-      INSERT INTO users (email, username, password_hash, status)
-      VALUES (${email}, ${username}, ${pw}, 'active')
-      RETURNING id, email, username, role
-    `);
+    const result = await pool.query(
+      `INSERT INTO users (email, username, password_hash, status) VALUES ($1, $2, $3, 'active') RETURNING id, email, username, role`,
+      [email, username, pw],
+    );
     const user = result.rows[0] as { id: string; email: string; username: string; role: string };
     if (!user) throw new Error('Failed to create user');
 
-    // Welcome wallet via raw SQL
-    await db.execute(sql`
-      INSERT INTO credit_wallets (user_id, balance) VALUES (${user.id}, 1000) ON CONFLICT DO NOTHING
-    `);
-
+    await pool.query('INSERT INTO credit_wallets (user_id, balance) VALUES ($1, 1000) ON CONFLICT DO NOTHING', [user.id]);
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, ...tokens };
   }
 
   async login(email: string, password: string, deviceInfo?: { userAgent?: string; ip?: string }) {
-    const db = getDb();
-    // Use raw SQL to avoid Drizzle citext/enum issues
-    const result = await db.execute(sql`
-      SELECT id, email, username, password_hash, role, status::text as status
-      FROM users WHERE email = ${email} LIMIT 1
-    `);
+    const pool = getPool();
+    const result = await pool.query(
+      'SELECT id, email, username, password_hash, role, status::text as status FROM users WHERE email = $1 LIMIT 1',
+      [email],
+    );
     const row = result.rows[0] as { id: string; email: string; username: string; password_hash: string; role: string; status: string } | undefined;
     if (!row || !(await this.verifyPassword(row.password_hash, password))) throw new UnauthorizedException('Invalid credentials');
     if (row.status !== 'active') throw new UnauthorizedException('Account inactive');
 
-    await db.execute(sql`UPDATE users SET last_login_at = NOW() WHERE id = ${row.id}`);
+    await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [row.id]);
     if (deviceInfo?.userAgent) {
-      await db.execute(sql`INSERT INTO devices (user_id, user_agent, last_ip, last_seen_at) VALUES (${row.id}, ${deviceInfo.userAgent}, ${deviceInfo.ip ?? null}, NOW())`);
+      await pool.query('INSERT INTO devices (user_id, user_agent, last_ip, last_seen_at) VALUES ($1, $2, $3, NOW())', [row.id, deviceInfo.userAgent, deviceInfo.ip ?? null]);
     }
     const tokens = await this.generateTokens(row.id, row.email, row.role);
     return { user: { id: row.id, email: row.email, username: row.username, role: row.role }, ...tokens };
@@ -71,7 +64,7 @@ export class AuthService {
     const refreshValue = randomBytes(48).toString('hex');
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
     const db = getDb();
-    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt: new Date(Date.now() + 30 * 86400000) });
+    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt: new Date(Date.now() + 30 * 86400000) } as any);
     return { accessToken, refreshToken: refreshValue, expiresIn: 900 };
   }
 
@@ -80,22 +73,96 @@ export class AuthService {
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
     const [s] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash)).limit(1);
     if (!s || s.revokedAt || s.expiresAt < new Date()) throw new UnauthorizedException('Invalid token');
-    await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.id, s.id));
-    const uResult = await db.execute(sql`SELECT id, email, role FROM users WHERE id = ${s.userId} LIMIT 1`);
+    await db.update(refreshTokens).set({ revokedAt: new Date() } as any).where(eq(refreshTokens.id, s.id));
+    const pool = getPool();
+    const uResult = await pool.query('SELECT id, email, role FROM users WHERE id = $1 LIMIT 1', [s.userId]);
     const user = uResult.rows[0] as { id: string; email: string; role: string } | undefined;
     if (!user) throw new UnauthorizedException('User not found');
     return this.generateTokens(user.id, user.email, user.role);
   }
 
   async logout(userId: string) {
-    await getDb().execute(sql`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ${userId}`);
+    const pool = getPool();
+    await pool.query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1', [userId]);
     return { loggedOut: true };
   }
 
   async validateUserById(userId: string) {
-    const db = getDb();
-    const result = await db.execute(sql`SELECT id, email, username, role, status::text as status FROM users WHERE id = ${userId} LIMIT 1`);
+    const pool = getPool();
+    const result = await pool.query('SELECT id, email, username, role, status::text as status FROM users WHERE id = $1 LIMIT 1', [userId]);
     const u = result.rows[0] as { id: string; email: string; username: string; role: string; status: string } | undefined;
     return u && u.status === 'active' ? u : null;
+  }
+
+  /** Find or create a user from an OAuth profile, returning JWT tokens */
+  async oauthLogin(profile: OAuthProfile) {
+    const pool = getPool();
+    const db = getDb();
+
+    // Check if this OAuth account is already linked
+    const [existing] = await db
+      .select()
+      .from(authAccounts)
+      .where(and(eq(authAccounts.provider, profile.provider), eq(authAccounts.providerAccountId, profile.providerId)))
+      .limit(1);
+
+    let userId: string;
+
+    if (existing) {
+      // Already linked — just log in
+      userId = existing.userId;
+    } else {
+      // Check if email already registered
+      const emailRow = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [profile.email]);
+
+      if (emailRow.rows.length > 0) {
+        // Email exists — link this OAuth account to existing user
+        userId = emailRow.rows[0].id as string;
+      } else {
+        // New user — create account
+        const username = this.sanitizeUsername(profile.name);
+        const result = await pool.query(
+          `INSERT INTO users (email, username, password_hash, status, email_verified_at) VALUES ($1, $2, NULL, 'active', NOW()) RETURNING id`,
+          [profile.email, username],
+        );
+        userId = result.rows[0].id as string;
+        await pool.query('INSERT INTO credit_wallets (user_id, balance) VALUES ($1, 1000) ON CONFLICT DO NOTHING', [userId]);
+      }
+
+      // Link the OAuth account
+      await db.insert(authAccounts).values({
+        userId,
+        provider: profile.provider,
+        providerAccountId: profile.providerId,
+      } as any);
+    }
+
+    await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [userId]);
+    const u = await pool.query('SELECT id, email, username, role FROM users WHERE id = $1', [userId]);
+    const user = u.rows[0] as { id: string; email: string; username: string; role: string };
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, ...tokens };
+  }
+
+  /** Link an OAuth account to the currently authenticated user */
+  async linkOAuthAccount(userId: string, profile: OAuthProfile) {
+    const db = getDb();
+    await db.insert(authAccounts).values({
+      userId,
+      provider: profile.provider,
+      providerAccountId: profile.providerId,
+    } as any);
+    return { linked: true, provider: profile.provider };
+  }
+
+  private sanitizeUsername(name: string): string {
+    const base = name
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 30) || 'user';
+    const suffix = Math.random().toString(36).slice(2, 8);
+    return `${base}_${suffix}`;
   }
 }

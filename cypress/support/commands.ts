@@ -1,7 +1,7 @@
 ///<reference path="./index.d.ts"/>
 
 Cypress.Commands.add('loadApp', () => {
-  cy.visit('https://localhost:3000/');
+  cy.visit('https://localhost:3090/');
 });
 
 Cypress.Commands.add('getLastMessage', (getAuthor) => {

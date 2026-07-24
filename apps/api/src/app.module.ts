@@ -15,8 +15,8 @@ import { ModerationModule } from './moderation/moderation.module';
 import { TreasuryModule } from './treasury/treasury.module';
 import { UsageModule } from './usage/usage.module';
 import { ProvidersModule } from './providers/providers.module';
+import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
-import { FinanceController } from './admin/finance.controller';
 
 @Module({
   imports: [
@@ -37,7 +37,7 @@ import { FinanceController } from './admin/finance.controller';
     TreasuryModule,
     UsageModule,
     ProvidersModule,
+    AdminModule,
   ],
-  controllers: [FinanceController],
 })
 export class AppModule {}

@@ -17,7 +17,7 @@ export default function SearchPage() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await fetch(`http://localhost:3002/v1/characters/search?q=${encodeURIComponent(query)}`, {
+      const res = await fetch(`http://localhost:3092/v1/characters/search?q=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setResults(res.ok ? await res.json() : []);

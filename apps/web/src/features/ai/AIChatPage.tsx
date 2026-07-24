@@ -4,7 +4,7 @@ import { useSelector } from 'react-redux';
 import { ArrowLeft, Send, Bot, Sparkles } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
-const API = 'http://localhost:3002/v1';
+const API = 'http://localhost:3092/v1';
 
 export default function AIChatPage() {
   const { characterId } = useParams<{ characterId: string }>();

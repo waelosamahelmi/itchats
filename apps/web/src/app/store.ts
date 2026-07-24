@@ -1,7 +1,7 @@
 import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { useDispatch } from 'react-redux';
 
-const API = 'http://localhost:3002/v1';
+const API = 'http://localhost:3092/v1';
 const token = () => localStorage.getItem('accessToken');
 async function api(path: string, opts?: RequestInit) {
   const t = token();

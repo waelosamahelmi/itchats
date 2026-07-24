@@ -13,7 +13,7 @@ export default function CharacterProfilePage() {
 
   useEffect(() => {
     if (!token || !characterId) return;
-    fetch(`http://localhost:3002/v1/characters/${characterId}`, {
+    fetch(`http://localhost:3092/v1/characters/${characterId}`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.json()).then(setChar).catch(console.error).finally(() => setLoading(false));
   }, [characterId, token]);

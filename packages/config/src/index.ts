@@ -5,7 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(3001),
+  PORT: z.coerce.number().default(3092),
   HOST: z.string().default('0.0.0.0'),
 
   DATABASE_URL: z.string().url(),
@@ -38,8 +38,9 @@ const envSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
 
-  CORS_ORIGIN: z.string().default('http://localhost:3000'),
-  ADMIN_ORIGIN: z.string().default('http://localhost:3001'),
+  CORS_ORIGIN: z.string().default('http://localhost:3090'),
+  ADMIN_ORIGIN: z.string().default('http://localhost:3091'),
+  API_BASE_URL: z.string().optional(),
 
   SENTRY_DSN: z.string().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),

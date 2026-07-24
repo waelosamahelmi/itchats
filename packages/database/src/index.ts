@@ -1,2 +1,2 @@
 export * from './schema';
-export { db, getDb } from './connection';
+export { db, getDb, getPool } from './connection';

@@ -22,7 +22,7 @@ export default function CreateCharacterPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const API = 'http://localhost:3002/v1';
+  const API = 'http://localhost:3092/v1';
 
   const handleCreate = async () => {
     if (!token) { nav('/auth'); return; }

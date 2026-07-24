@@ -15,7 +15,7 @@ export default function DiscoverPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3002/v1/characters/discover?limit=20', {
+    fetch('http://localhost:3092/v1/characters/discover?limit=20', {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.json()).then(d => setChars(Array.isArray(d) ? d : [])).catch(() => {}).finally(() => setLoading(false));
   }, [token]);

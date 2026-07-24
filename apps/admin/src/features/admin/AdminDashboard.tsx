@@ -20,7 +20,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!user || user.role !== 'admin') { nav('/'); return; }
-    fetch('http://localhost:3002/v1/health').then(r => r.json()).then(setStats).catch(() => {});
+    fetch('http://localhost:3092/v1/health').then(r => r.json()).then(setStats).catch(() => {});
   }, [user]);
 
   if (!user || user.role !== 'admin') return null;
