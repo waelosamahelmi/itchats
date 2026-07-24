@@ -10,7 +10,13 @@ import { StoriesModule } from './stories/stories.module';
 import { SocialModule } from './social/social.module';
 import { BillingModule } from './billing/billing.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NearbyModule } from './nearby/nearby.module';
+import { ModerationModule } from './moderation/moderation.module';
+import { TreasuryModule } from './treasury/treasury.module';
+import { UsageModule } from './usage/usage.module';
+import { ProvidersModule } from './providers/providers.module';
 import { HealthModule } from './health/health.module';
+import { FinanceController } from './admin/finance.controller';
 
 @Module({
   imports: [
@@ -26,6 +32,12 @@ import { HealthModule } from './health/health.module';
     SocialModule,
     BillingModule,
     NotificationsModule,
+    NearbyModule,
+    ModerationModule,
+    TreasuryModule,
+    UsageModule,
+    ProvidersModule,
   ],
+  controllers: [FinanceController],
 })
 export class AppModule {}
