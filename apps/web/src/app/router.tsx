@@ -6,6 +6,7 @@ import AnimatedLogo from '@/components/AnimatedLogo';
 
 const CameraPage = lazy(() => import('@/features/camera/CameraPage'));
 const ChatsPage = lazy(() => import('@/features/chats/ChatsPage'));
+const ChatDetailPage = lazy(() => import('@/features/chats/ChatPage'));
 const AIPage = lazy(() => import('@/features/ai/AIPage'));
 const AIChatPage = lazy(() => import('@/features/ai/AIChatPage'));
 const CreateCharacterPage = lazy(() => import('@/features/ai/CreateCharacterPage'));
@@ -43,6 +44,7 @@ export function Router() {
           <Route element={<AppShell />}>
             <Route path="/" element={<CameraPage />} />
             <Route path="/chats" element={<ChatsPage />} />
+            <Route path="/chat/:convId" element={<ChatDetailPage />} />
             <Route path="/ai" element={<AIPage />} />
             <Route path="/ai/create" element={<CreateCharacterPage />} />
             <Route path="/ai/chat/:characterId" element={<AIChatPage />} />

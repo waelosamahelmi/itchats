@@ -67,20 +67,26 @@ export class CharacterCreationService {
   }
 
   async autofillCharacter(name: string, concept: string) {
-    const prompt = `Create a detailed character profile for "${name}" based on: "${concept}". Return a JSON object with these fields: personality (1-2 sentences), description (2-3 sentence physical and style description), backstory (2-3 sentences), ageDisplay (like "mid-20s"), gender, pronouns, occupation, interests (array of 3-5 strings), speakingStyle (like "casual and warm"). Only return the JSON, no other text.`;
+    const isRandom = !name || concept === 'random character';
+    const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const prompt = isRandom
+      ? `Create a random character (seed: ${seed}). Return ONLY valid JSON, nothing else:\n{"name":"Name","description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`
+      : `Character: "${name}". Concept: "${concept}". Return ONLY valid JSON:\n{"description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`;
 
-    const result = await alibabaChatWithFallback({
+    const result = await alibabaChat({
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.9,
-      maxTokens: 500,
+      model: 'qwen-plus',
+      temperature: 1.2,
+      maxTokens: 150,
     });
 
     try {
       const json = JSON.parse(result.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
       return {
-        name,
+        name: isRandom ? (json.name ?? name) : name,
         personality: json.personality ?? '',
         description: json.description ?? '',
+        appearance: json.appearance ?? json.description ?? '',
         backstory: json.backstory ?? '',
         ageDisplay: json.ageDisplay ?? '',
         gender: json.gender ?? '',
@@ -92,7 +98,7 @@ export class CharacterCreationService {
       };
     } catch {
       return {
-        name,
+        name: isRandom ? 'Mystery Character' : name,
         personality: 'Friendly and curious',
         description: 'A unique individual with their own style',
         backstory: 'Living their life one day at a time',

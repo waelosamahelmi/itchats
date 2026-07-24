@@ -52,15 +52,17 @@ export default function AIChatPage() {
               else if (d.type === 'done') {
                 setMsgs(prev => [...prev, { role: 'assistant', content: d.content || fullReply, id: crypto.randomUUID() }]);
                 setStreaming('');
+                fullReply = '';
+              }
+              else if (d.type === 'error') {
+                setMsgs(prev => [...prev, { role: 'assistant', content: d.message || 'AI error', id: crypto.randomUUID() }]);
               }
             } catch {}
           }
         }
       }
-      if (fullReply && !msgs.find(m => m.content === fullReply)) {
-        setMsgs(prev => [...prev, { role: 'assistant', content: fullReply, id: crypto.randomUUID() }]);
-      }
       setStreaming('');
+      setLoading(false);
     } catch {
       setMsgs(prev => [...prev, { role: 'assistant', content: 'Connection error — is the API server running?', id: crypto.randomUUID() }]);
     }

@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { conversations, messages } from '@itchats/database/schema';
-import { eq, desc } from 'drizzle-orm';
+import { conversations, messages, characters } from '@itchats/database/schema';
+import { eq, desc, sql } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -11,7 +11,19 @@ export class ConversationsController {
   @UseGuards(JwtAuthGuard)
   async list(@Req() req: any) {
     const db = getDb();
-    return db.select().from(conversations).orderBy(desc(conversations.lastMessageAt)).limit(50);
+    return db.select({
+      id: conversations.id,
+      type: conversations.type,
+      characterId: conversations.characterId,
+      title: conversations.title,
+      lastMessageAt: conversations.lastMessageAt,
+      createdAt: conversations.createdAt,
+      updatedAt: conversations.updatedAt,
+      characterName: characters.name,
+    }).from(conversations)
+      .leftJoin(characters, eq(conversations.characterId, characters.id))
+      .orderBy(desc(conversations.lastMessageAt))
+      .limit(50);
   }
 
   @Post()

@@ -1,8 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { alibabaChatStream } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
-import { messages, generationJobs, usageEvents, creditWallets, creditLedger } from '@itchats/database/schema';
-import { eq, sql } from 'drizzle-orm';
+import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations } from '@itchats/database/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
 import { MemoryService } from './memory.service';
@@ -19,9 +19,29 @@ export class AiService {
     const db = getDb();
     const clientKey = randomUUID();
 
+    // Find or create a single conversation per character
+    let cid = conversationId;
+    if (!cid && characterId) {
+      const [existing] = await db.select({ id: conversations.id }).from(conversations)
+        .where(and(
+          eq(conversations.characterId, characterId),
+          eq(conversations.createdByUserId, userId),
+        ))
+        .limit(1);
+      cid = existing?.id;
+    }
+    if (!cid) {
+      const [conv] = await db.insert(conversations).values({
+        type: characterId ? 'human_character' : 'human_human',
+        createdByUserId: userId,
+        characterId: characterId,
+      }).returning({ id: conversations.id });
+      cid = conv.id;
+    }
+
     // Persist user message
     await db.insert(messages).values({
-      conversationId, senderType: 'user', senderUserId: userId,
+      conversationId: cid, senderType: 'user', senderUserId: userId,
       type: 'text', content: message, clientIdempotencyKey: clientKey,
     });
 
@@ -40,7 +60,7 @@ export class AiService {
 
     // Create job
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, conversationId, generationType: 'llm_chat',
+      userId, characterId, conversationId: cid, generationType: 'llm_chat',
       routeKey: 'chat.standard', idempotencyKey: randomUUID(),
       requestJson: { message, systemPrompt }, status: 'processing', startedAt: new Date(),
     }).returning();
@@ -64,7 +84,7 @@ export class AiService {
 
     // Persist AI response
     const [aiMsg] = await db.insert(messages).values({
-      conversationId, senderType: 'character', senderCharacterId: characterId,
+      conversationId: cid, senderType: 'character', senderCharacterId: characterId,
       type: 'text', content: fullResponse, modelGenerationId: job!.id,
     }).returning();
 

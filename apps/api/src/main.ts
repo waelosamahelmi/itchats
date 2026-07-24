@@ -40,9 +40,17 @@ async function bootstrap() {
     { logger: config.LOG_LEVEL === 'debug' ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error', 'warn', 'log'] },
   );
 
-  app.enableCors({
-    origin: [config.CORS_ORIGIN, config.ADMIN_ORIGIN],
-    credentials: true,
+  // Manual CORS — handles all requests including SSE raw writes
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.addHook('onRequest', async (request, reply) => {
+    reply.header('Access-Control-Allow-Origin', config.CORS_ORIGIN);
+    reply.header('Access-Control-Allow-Credentials', 'true');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (request.method === 'OPTIONS') {
+      reply.status(204).send();
+    }
   });
 
   const port = config.PORT;

@@ -50,16 +50,16 @@ export default function ChatsPage() {
           </div>
         ) : (
           convs.map((c: any, i: number) => (
-            <button key={c.id} onClick={() => navigate(`/chats`)} className="flex w-full items-center gap-4 py-3.5 border-b border-border-subtle hover:bg-white/[0.02] px-1 rounded-xl transition-colors text-left animate-slide-up" style={{ animationDelay: `${i * 40}ms` }}>
+            <button key={c.id} onClick={() => navigate(c.characterId ? `/ai/chat/${c.characterId}` : `/chat/${c.id}`)} className="flex w-full items-center gap-4 py-3.5 border-b border-border-subtle hover:bg-white/[0.02] px-1 rounded-xl transition-colors text-left animate-slide-up" style={{ animationDelay: `${i * 40}ms` }}>
               <div className="w-11 h-11 rounded-full bg-brand-glow flex items-center justify-center shrink-0">
-                <span className="text-brand-secondary font-semibold text-sm">{c.title?.[0] || 'C'}</span>
+                <span className="text-brand-secondary font-semibold text-sm">{c.characterName?.[0] || c.title?.[0] || 'C'}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-text-primary truncate">{c.title || 'Conversation'}</p>
+                  <p className="text-sm font-medium text-text-primary truncate">{c.characterName || c.title || 'Conversation'}</p>
                   <span className="text-[10px] text-text-muted shrink-0">{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'New'}</span>
                 </div>
-                <p className="text-xs text-text-muted truncate mt-0.5">Tap to open conversation</p>
+                <p className="text-xs text-text-muted truncate mt-0.5">{c.characterName ? `Chat with ${c.characterName}` : 'Conversation'}</p>
               </div>
               <ChevronRight size={14} className="text-text-muted shrink-0" />
             </button>

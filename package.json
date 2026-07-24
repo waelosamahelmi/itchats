@@ -34,8 +34,10 @@
     ]
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "passport-github2": "^0.1.12",
     "passport-google-oauth20": "^2.0.0",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "ws": "^8.21.1"
   }
 }

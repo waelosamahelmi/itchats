@@ -55,25 +55,27 @@ export default function CreateCharacterPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
+      if (data.error) { console.warn('TTS error:', data.error); return; }
       if (data.audioBase64) {
         const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
         audioRef.current = audio;
-        audio.play();
+        audio.volume = 1.0;
+        await audio.play();
       }
-    } catch {}
+    } catch (e) { console.warn('TTS preview failed:', e); }
     setPreviewing(null);
   };
 
   const voices = [
-    { id: 'text-only', label: 'Text only', desc: 'No voice, chat only' },
-    { id: 'Cherry', label: 'Cherry', desc: 'Warm, friendly female — best with [happy] tone' },
-    { id: 'Rosa', label: 'Rosa', desc: 'Soft, gentle female — best with [calm] tone' },
-    { id: 'Stella', label: 'Stella', desc: 'Bright, energetic female — best with [happy] tone' },
-    { id: 'Rita', label: 'Rita', desc: 'Calm, mature female — best with [neutral] tone' },
-    { id: 'Bella', label: 'Bella', desc: 'Young, cheerful female — best with [surprised] tone' },
-    { id: 'Luca', label: 'Luca', desc: 'Deep, smooth male — best with [neutral] tone' },
-    { id: 'Ryan', label: 'Ryan', desc: 'Warm, friendly male — best with [happy] tone' },
-    { id: 'Jack', label: 'Jack', desc: 'Professional, clear male — best with [neutral] tone' },
+    { id: 'longanlingxi', label: 'Emily',  desc: '♀ Soft, natural voice — a warm companion' },
+    { id: 'longxiaochun', label: 'Claire', desc: '♀ Calm, tender voice — a close listener' },
+    { id: 'longxiaoxia',  label: 'Maya',   desc: '♀ Bright, cheerful voice — full of energy' },
+    { id: 'longxiaobai',  label: 'Lily',   desc: '♀ Sweet, playful voice — youthful charm' },
+    { id: 'longyuer',     label: 'Sophie', desc: '♀ Elegant, calm voice — perfect for stories' },
+    { id: 'longshu',      label: 'James',  desc: '♂ Deep, smooth voice — commanding presence' },
+    { id: 'longshao',     label: 'Daniel', desc: '♂ Warm, friendly voice — easy to talk to' },
+    { id: 'longcheng',    label: 'Alex',   desc: '♂ Clear, crisp voice — professional tone' },
+    { id: 'text-only',    label: 'Text only', desc: 'No voice, chat only' },
   ];
   const emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised'];
 
@@ -139,7 +141,29 @@ export default function CreateCharacterPage() {
 
         {step === 1 && (
           <div className="space-y-4 animate-slide-up">
-            <p className="text-text-secondary text-sm">What does your AI character look like?</p>
+            <div className="flex items-center justify-between">
+              <p className="text-text-secondary text-sm">What does your AI character look like?</p>
+              <button onClick={async () => {
+                if (!token) return;
+                setAutofilling(true);
+                try {
+                  const res = await fetch(`${API}/characters/autofill`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ name: '', description: 'random character' }),
+                  });
+                  const data = await res.json();
+                  if (data.name) setName(data.name);
+                  if (data.description) setDesc(data.description);
+                  if (data.appearance) setAppearance(data.appearance);
+                  if (data.personality) setPersonality(data.personality);
+                  if (data.backstory) setBackstory(data.backstory);
+                } catch {}
+                setAutofilling(false);
+              }} disabled={autofilling}
+                className="glass rounded-xl px-3 py-1.5 text-xs text-brand-primary flex items-center gap-1.5 hover:bg-brand-glow/20 transition-all disabled:opacity-50">
+                <Wand2 size={13} /> {autofilling ? 'Generating...' : 'Randomize'}
+              </button>
+            </div>
             <div className="space-y-3">
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Character name *" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Short description" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
@@ -177,8 +201,8 @@ export default function CreateCharacterPage() {
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Choose how they sound</p>
             {voices.map(v => (
-              <button key={v.id} onClick={() => setVoice(v.id)}
-                className={`w-full glass rounded-2xl p-4 text-left flex items-start gap-3 transition-all ${voice === v.id ? 'ring-2 ring-brand-primary bg-brand-glow/20' : 'hover:bg-white/5'}`}>
+              <div key={v.id} onClick={() => setVoice(v.id)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setVoice(v.id)}
+                className={`w-full glass rounded-2xl p-4 text-left flex items-start gap-3 transition-all cursor-pointer ${voice === v.id ? 'ring-2 ring-brand-primary bg-brand-glow/20' : 'hover:bg-white/5'}`}>
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${voice === v.id ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
                   <Mic size={18} className={voice === v.id ? 'text-white' : 'text-text-secondary'} />
                 </div>
@@ -205,7 +229,7 @@ export default function CreateCharacterPage() {
                   </button>
                 )}
                 {voice === v.id && <Check size={18} className="text-brand-primary shrink-0 mt-1" />}
-              </button>
+              </div>
             ))}
           </div>
         )}

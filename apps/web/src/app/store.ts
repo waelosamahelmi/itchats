@@ -78,8 +78,14 @@ const auth = createSlice({
     b.addCase(loginUser.fulfilled, (s, a) => { s.user = a.payload.user; s.token = a.payload.accessToken; s.error = null; });
     b.addCase(registerUser.rejected, (s, a) => { s.error = a.error.message || 'Register failed'; });
     b.addCase(loginUser.rejected, (s, a) => { s.error = a.error.message || 'Login failed'; });
+    b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; });
   },
 });
+
+export const fetchMe = createAsyncThunk('auth/me', async () => {
+  return await api('/users/me');
+});
+
 export const { logout } = auth.actions;
 
 // Characters

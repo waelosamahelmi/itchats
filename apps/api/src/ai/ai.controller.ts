@@ -1,9 +1,14 @@
-import { Controller, Post, Body, Req, Res, UseGuards, Get, Delete, Param, Inject } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, Get, Delete, Param, Inject, Header, HttpCode } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { alibabaTTSWithFallback, alibabaTextToImageWithFallback } from '@itchats/ai-core';
-import type { FastifyReply } from 'fastify';
+import { alibabaTTS, alibabaTextToImageWithFallback } from '@itchats/ai-core';
+import { Readable } from 'node:stream';
+
+/** In-memory cache for voice previews — generated once, served instantly */
+const ttsCache = new Map<string, { audioBase64: string; format: string }>();
+const TTS_SAMPLE = 'Hello! I am an AI character.';
+const CACHED_VOICES = ['longanlingxi', 'longxiaochun', 'longxiaoxia', 'longxiaobai', 'longyuer', 'longshu', 'longshao', 'longcheng'];
 
 @Controller('v1/ai')
 export class AiController {
@@ -13,20 +18,32 @@ export class AiController {
   ) {}
 
   @Post('chat/stream')
+  @HttpCode(200)
   @UseGuards(JwtAuthGuard)
-  async streamChat(@Body() body: { characterId?: string; message: string; conversationId?: string }, @Req() req: any, @Res() res: FastifyReply) {
-    res.header('Content-Type', 'text/event-stream');
-    res.header('Cache-Control', 'no-cache');
-    res.header('Connection', 'keep-alive');
-    res.raw.writeHead(200);
-    try {
-      for await (const chunk of this.aiService.streamChat(req.user.userId, body.characterId ?? null, body.message, body.conversationId)) {
-        res.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  @Header('Content-Type', 'text/event-stream')
+  @Header('Cache-Control', 'no-cache')
+  @Header('X-Accel-Buffering', 'no')
+  async streamChat(@Body() body: { characterId?: string; message: string; conversationId?: string }, @Req() req: any) {
+    const userId = req.user.userId;
+    const characterId = body.characterId ?? null;
+    const conversationId = body.conversationId;
+    const message = body.message;
+
+    const readable = new Readable({ read() {} });
+
+    // Consume the async generator and push SSE chunks into the Readable
+    (async () => {
+      try {
+        for await (const chunk of this.aiService.streamChat(userId, characterId, message, conversationId)) {
+          readable.push(`data: ${JSON.stringify(chunk)}\n\n`);
+        }
+      } catch (err: any) {
+        readable.push(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
       }
-    } catch (err: any) {
-      res.raw.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-    }
-    res.raw.end();
+      readable.push(null); // end stream
+    })();
+
+    return readable;
   }
 
   @Post('image')
@@ -40,22 +57,42 @@ export class AiController {
       });
       return { url: result.url, model: result.usedModel };
     } catch (err: any) {
-      return { error: err.message };
+      console.error('TTS error full:', err.message);
+      return { error: err.message, message: err.message };
     }
   }
 
   @Post('tts')
   @UseGuards(JwtAuthGuard)
   async tts(@Body() body: { text: string; voice?: string; emotion?: string }) {
+    const voice = body.voice ?? 'Cherry';
+    const isSample = body.text === TTS_SAMPLE && !body.emotion;
+
+    // Serve from cache if this is a standard voice preview
+    if (isSample) {
+      const cacheKey = voice;
+      const cached = ttsCache.get(cacheKey);
+      if (cached) return cached;
+    }
+
     try {
-      const audio = await alibabaTTSWithFallback({
+      const audio = await alibabaTTS({
         text: body.text,
-        voice: body.voice ?? 'Cherry',
-        emotion: body.emotion as any,
+        voice,
+        model: 'qwen-tts',
       });
-      return { audioBase64: audio.audioBase64, format: audio.format, model: audio.usedModel };
+
+      console.log('TTS result:', { format: audio.format, size: audio.audioBase64.length });
+
+      // Cache standard voice samples for instant replay
+      if (isSample) {
+        ttsCache.set(voice, { audioBase64: audio.audioBase64, format: audio.format });
+      }
+
+      return { audioBase64: audio.audioBase64, format: audio.format };
     } catch (err: any) {
-      return { error: err.message };
+      console.error('TTS error full:', err.message);
+      return { error: err.message, message: err.message };
     }
   }
 

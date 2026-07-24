@@ -1,14 +1,26 @@
+import { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { Provider } from 'react-redux';
-import { store } from './store';
+import { Provider, useDispatch } from 'react-redux';
+import { store, fetchMe } from './store';
 import { Router } from './router';
+
+function AuthLoader({ children }: { children: React.ReactNode }) {
+  const dispatch = useDispatch<any>();
+  useEffect(() => {
+    const t = localStorage.getItem('accessToken');
+    if (t) dispatch(fetchMe());
+  }, [dispatch]);
+  return <>{children}</>;
+}
 
 export function App() {
   return (
     <Provider store={store}>
-      <BrowserRouter>
-        <Router />
-      </BrowserRouter>
+      <AuthLoader>
+        <BrowserRouter>
+          <Router />
+        </BrowserRouter>
+      </AuthLoader>
     </Provider>
   );
 }

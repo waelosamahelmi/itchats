@@ -23,7 +23,7 @@ export async function alibabaChat(request: ChatRequest): Promise<ChatResponse> {
   const config = getConfig();
   const model = request.model || 'qwen3.5-flash';
 
-  const response = await fetch(`${config.ALIBABA_BASE_URL}/chat/completions`, {
+  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
@@ -59,7 +59,7 @@ export async function* alibabaChatStream(
   const config = getConfig();
   const model = request.model || 'qwen3.5-flash';
 
-  const response = await fetch(`${config.ALIBABA_BASE_URL}/chat/completions`, {
+  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
@@ -129,7 +129,7 @@ export async function alibabaTextToImage(request: TextToImageRequest): Promise<I
 }
 
 async function callImageGen(model: string, request: TextToImageRequest, config: ReturnType<typeof getConfig>): Promise<ImageResult> {
-  const response = await fetch(`${config.ALIBABA_BASE_URL}/images/generations`, {
+  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/images/generations`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, prompt: request.prompt, n: request.n ?? 1, size: request.size ?? '1024x1024' }),
@@ -172,40 +172,18 @@ interface AudioResult {
   format: string;
 }
 
-const TTS_VOICES: Record<string, { label: string; gender: string; style: string }> = {
-  Cherry:  { label: 'Cherry', gender: 'female', style: 'Warm, friendly' },
-  Rosa:    { label: 'Rosa',   gender: 'female', style: 'Soft, gentle' },
-  Stella:  { label: 'Stella', gender: 'female', style: 'Bright, energetic' },
-  Rita:    { label: 'Rita',   gender: 'female', style: 'Calm, mature' },
-  Bella:   { label: 'Bella',  gender: 'female', style: 'Young, cheerful' },
-  Luca:    { label: 'Luca',   gender: 'male',   style: 'Deep, smooth' },
-  Ryan:    { label: 'Ryan',   gender: 'male',   style: 'Warm, friendly' },
-  Jack:    { label: 'Jack',   gender: 'male',   style: 'Professional, clear' },
+const TTS_VOICES: Record<string, { label: string; gender: string; style: string; desc: string }> = {
+  longanlingxi: { label: 'Emily',    gender: 'female', style: 'Warm',    desc: 'Soft, natural — warm companion' },
+  longxiaochun:  { label: 'Claire',  gender: 'female', style: 'Gentle',  desc: 'Calm, tender — close listener' },
+  longxiaoxia:   { label: 'Maya',   gender: 'female', style: 'Bright',   desc: 'Cheerful, lively — social spark' },
+  longxiaobai:   { label: 'Lily',   gender: 'female', style: 'Cute',     desc: 'Sweet, playful — youthful charm' },
+  longyuer:      { label: 'Sophie', gender: 'female', style: 'Mature',   desc: 'Elegant, calm — narrative voice' },
+  longshu:       { label: 'James',  gender: 'male',   style: 'Deep',     desc: 'Rich, smooth — commanding tone' },
+  longshao:      { label: 'Daniel', gender: 'male',   style: 'Warm',     desc: 'Friendly, welcoming — easy talk' },
+  longcheng:     { label: 'Alex',   gender: 'male',   style: 'Clear',    desc: 'Crisp, professional — business voice' },
 };
 
 export function getTTSVoices() { return TTS_VOICES; }
-
-/** TTS models in fallback order — most realistic first */
-const TTS_FALLBACK_MODELS = [
-  'cosyvoice-v3-plus',
-  'cosyvoice-v3-flash',
-  'qwen3-tts-instruct-flash',
-  'qwen3-tts-instruct-flash-realtime',
-  'qwen-audio-3.0-tts-plus',
-  'qwen-audio-3.0-tts-flash',
-  'qwen3-tts-flash',
-  'qwen3-tts-flash-realtime',
-  'qwen3-tts-flash-2025-09-18',
-  'qwen3-tts-flash-realtime-2025-09-18',
-  'qwen3-tts-flash-2025-11-27',
-  'qwen3-tts-flash-realtime-2025-11-27',
-  'qwen3-tts-vd-2026-01-26',
-  'qwen3-tts-vd-realtime-2025-12-16',
-  'qwen3-tts-vd-realtime-2026-01-15',
-  'qwen3-tts-vc-2026-01-22',
-  'qwen3-tts-vc-realtime-2025-11-27',
-  'qwen3-tts-vc-realtime-2026-01-15',
-];
 
 /** Chat / LLM models in fallback order — general-purpose fast models only */
 const CHAT_FALLBACK_MODELS = [
@@ -252,54 +230,107 @@ const IMAGE_FALLBACK_MODELS = [
   'wan2.1-t2i-turbo',
 ];
 
-async function callTTS(model: string, request: TTSRequest, apiKey: string, baseUrl: string): Promise<AudioResult> {
-  const body: any = {
-    model,
-    input: { text: request.text },
-    parameters: {
-      voice: request.voice ?? 'Cherry',
-      format: 'mp3',
-      speed: request.speed ?? 1.0,
-    },
-  };
-  if (request.emotion) body.parameters.emotion = request.emotion;
-
-  const response = await fetch(`${baseUrl}/api/v1/services/aigc/text-to-speech/stream-synthesis`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-DashScope-Async': 'disable' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`TTS ${model} (${response.status}): ${errText.slice(0, 200)}`);
+/** Fetch with timeout and retry for unreliable connections */
+async function fetchWithRetry(url: string, init: RequestInit, retries = 2, timeoutMs = 8000): Promise<Response> {
+  for (let i = 0; i <= retries; i++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal });
+      return res;
+    } catch (err: any) {
+      if (i === retries) throw err;
+      await new Promise(r => setTimeout(r, 500 * (i + 1))); // backoff
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw new Error('Unreachable');
+}
 
-  const data = await response.json();
-  const audioUrl = data?.output?.audio?.url ?? data?.output?.audio_url;
-  if (!audioUrl) throw new Error(`TTS ${model}: no audio URL in response`);
+const TTS_FALLBACK_MODELS = ['qwen-audio-3.0-tts-flash', 'qwen-audio-3.0-tts-plus'];
 
-  const audioRes = await fetch(audioUrl);
-  const buffer = await audioRes.arrayBuffer();
-  return { audioBase64: Buffer.from(buffer).toString('base64'), format: 'mp3' };
+/**
+ * Non-streaming TTS via WebSocket (DashScope native protocol).
+ * Establishes WS connection, sends run-task + continue-task + finish-task, collects binary audio.
+ */
+async function callTTS(model: string, request: TTSRequest, apiKey: string, _baseUrlCompat: string): Promise<AudioResult> {
+  const { WebSocket } = await import('ws');
+  const taskId = crypto.randomUUID();
+  const wsUrl = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=' + model;
+  const text = request.text;
+  const voice = request.voice ?? 'longanlingxi';
+
+  return new Promise((resolve, reject) => {
+    const audioChunks: Buffer[] = [];
+    let resolved = false;
+
+    const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
+    const timeout = setTimeout(() => {
+      if (!resolved) { resolved = true; ws.close(); reject(new Error(`TTS ${model}: WS timeout`)); }
+    }, 25000);
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify({
+        header: { action: 'run-task', task_id: taskId, streaming: 'duplex' },
+        payload: {
+          task_group: 'audio', task: 'tts', function: 'SpeechSynthesizer', model,
+          parameters: { text_type: 'PlainText', voice, format: 'mp3', sample_rate: 22050, volume: 50, rate: 1.0, pitch: 1.0 },
+          input: {},
+        },
+      }));
+    });
+
+    ws.on('message', (data: any) => {
+      if (data instanceof Buffer || data instanceof ArrayBuffer) {
+        audioChunks.push(Buffer.from(data));
+        return;
+      }
+      try {
+        const msg = JSON.parse(data.toString());
+        const action = msg?.header?.action;
+        if (action === 'task-started') {
+          ws.send(JSON.stringify({
+            header: { action: 'continue-task', task_id: taskId, streaming: 'duplex' },
+            payload: { input: { text } },
+          }));
+          ws.send(JSON.stringify({
+            header: { action: 'finish-task', task_id: taskId, streaming: 'duplex' },
+            payload: { input: {} },
+          }));
+        } else if (action === 'task-finished') {
+          clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            ws.close();
+            const full = Buffer.concat(audioChunks);
+            if (full.length === 0) reject(new Error(`TTS ${model}: empty audio`));
+            else resolve({ audioBase64: full.toString('base64'), format: 'mp3' });
+          }
+        } else if (action === 'error' || msg?.type === 'error') {
+          clearTimeout(timeout);
+          resolved = true; ws.close();
+          reject(new Error(`TTS ${model}: ${msg?.error?.message || JSON.stringify(msg).slice(0, 200)}`));
+        }
+      } catch {}
+    });
+    ws.on('error', (err) => { clearTimeout(timeout); if (!resolved) { resolved = true; reject(new Error(`TTS ${model}: ${err.message}`)); } });
+    ws.on('close', () => clearTimeout(timeout));
+  });
 }
 
 export async function alibabaTTS(request: TTSRequest): Promise<AudioResult> {
-  const config = getConfig();
-  const baseUrl = config.ALIBABA_BASE_URL.replace('/compatible-mode/v1', '');
-  const model = request.model || TTS_FALLBACK_MODELS[0];
-  return callTTS(model, request, config.ALIBABA_API_KEY, baseUrl);
+  return callTTS(request.model || TTS_FALLBACK_MODELS[0], request, getConfig().ALIBABA_API_KEY, '');
 }
 
 /** Try TTS models in fallback order until one succeeds */
 export async function alibabaTTSWithFallback(request: TTSRequest): Promise<AudioResult & { usedModel: string }> {
   const config = getConfig();
-  const baseUrl = config.ALIBABA_BASE_URL.replace('/compatible-mode/v1', '');
   const tried: string[] = [];
 
   for (const model of TTS_FALLBACK_MODELS) {
     try {
-      const result = await callTTS(model, request, config.ALIBABA_API_KEY, baseUrl);
+      const result = await callTTS(model, request, config.ALIBABA_API_KEY, config.ALIBABA_BASE_URL);
       return { ...result, usedModel: model };
     } catch (err: any) {
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
@@ -331,7 +362,7 @@ export async function alibabaEmbedText(request: EmbeddingRequest): Promise<numbe
   const config = getConfig();
   const model = request.model || 'text-embedding-v4';
 
-  const response = await fetch(`${config.ALIBABA_BASE_URL}/embeddings`, {
+  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/embeddings`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
