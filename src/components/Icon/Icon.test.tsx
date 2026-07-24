@@ -4,7 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Icon, { iconMap } from './Icon';
 
 const defaultProps = {
-  name: 'faSnapchatSquare',
+  name: 'faCommentAlt',
   className: 'abc'
 };
 

@@ -34,7 +34,6 @@ const App = () => (
         <AppShell>
           <Switch>
             <Route path="/" component={Camera} exact />
-            <Route path="/snapchat-clone" component={Camera} exact />
             <Route path="/ai-characters" component={AICharacters} exact />
             <Route path="/ai-create" component={AICreate} exact />
             <Route path="/ai-chat/:characterId" component={AIChat} exact />

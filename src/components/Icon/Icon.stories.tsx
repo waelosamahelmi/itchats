@@ -8,6 +8,6 @@ export default {
 
 export const Default = () => (
   <div className="ico-lg">
-    <Icon name="faSnapchatSquare" />
+    <Icon name="faCommentAlt" />
   </div>
 );

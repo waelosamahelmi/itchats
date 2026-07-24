@@ -58,15 +58,8 @@ const Account: React.FC = () => {
       </Section>
       <footer>
         <p>
-          <a
-            href="https://github.com/TowhidKashem/snapchat-clone"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Github Repo"
-          >
-            <Icon name="faGithub" />
-          </a>
-          Joined Snapchat on {currentDate}
+          <Icon name="faGithub" />
+          Joined ItChats AI on {currentDate}
         </p>
       </footer>
     </main>

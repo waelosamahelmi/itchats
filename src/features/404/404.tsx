@@ -9,7 +9,7 @@ const NotFound = () => (
       <h1>Well, this is awkward!</h1>
       <p>We couldn't find what you were looking for</p>
       <Link to="/">
-        <Icon name="faSnapchatSquare" />
+        <Icon name="faGhost" />
         <span>Go Home</span>
       </Link>
     </div>

@@ -2,7 +2,6 @@ import React from 'react';
 import { FontAwesomeIcon, FontAwesomeIconProps } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import {
-  faSnapchatSquare,
   faGithub,
   IconDefinition
 } from '@fortawesome/free-brands-svg-icons';
@@ -69,7 +68,6 @@ import './Icon.scss';
 
 export const iconMap: Record<string, IconDefinition> = {
   // free-brands-svg-icons
-  faSnapchatSquare,
   faGithub,
   // free-regular-svg-icons
   faCircle,

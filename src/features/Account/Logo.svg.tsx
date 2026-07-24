@@ -2,7 +2,7 @@ import React from 'react';
 
 export const Logo: React.FC = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 502 502">
-    <title>Snapchat logo</title>
+    <title>ItChats AI logo</title>
     <path
       fill="#fffc00"
       stroke="#231f20"

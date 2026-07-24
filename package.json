@@ -1,12 +1,12 @@
 {
-  "name": "snapchat-clone",
+  "name": "itchats-ai",
   "version": "1.0.0",
   "license": "MIT",
-  "homepage": "https://towhidkashem.github.io/snapchat-clone",
+  "homepage": "",
   "author": {
-    "name": "Towhid Kashem",
-    "email": "tkashem@gmail.com",
-    "url": "https://github.com/TowhidKashem"
+    "name": "",
+    "email": "",
+    "url": ""
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^1.2.28",
