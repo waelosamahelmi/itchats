@@ -85,7 +85,12 @@ export default function CreateCharacterPage() {
     try {
       const res = await fetch(`${API}/characters`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, description: desc, personality, backstory, appearance, visibility: vis, autonomy, voiceStyle: voice, city }),
+        body: JSON.stringify({
+          name, description: desc, personality, backstory,
+          visibility: vis, city,
+          autonomyLevel: autonomy as 'off' | 'low' | 'normal' | 'high',
+          storyCadence: autonomy === 'off' ? 'manual' : autonomy === 'low' ? 'every_3_days' : autonomy === 'normal' ? 'every_2_days' : 'daily',
+        }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Creation failed'); }
       const char = await res.json();

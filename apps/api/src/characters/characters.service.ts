@@ -25,6 +25,7 @@ export class CharactersService {
       defaultLanguage: input.defaultLanguage ?? 'en',
       identityOrigin: input.visibility === 'public' ? 'text_generated' : 'private_text_generated',
       status: 'draft',
+      autonomyConfig: input.autonomyLevel ? { autonomyLevel: input.autonomyLevel, storyCadence: input.storyCadence ?? 'manual' } : {},
     }).returning();
 
     if (input.city) {

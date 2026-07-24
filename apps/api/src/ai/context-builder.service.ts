@@ -114,7 +114,7 @@ SPEAKING STYLE: ${char.speakingStyle || 'casual and warm'}
 OCCUPATION: ${char.occupation || 'Exploring life'}
 INTERESTS: ${Array.isArray(char.interests) ? char.interests.join(', ') : char.interests || 'varied'}
 LANGUAGES: ${JSON.stringify(char.languages || ['en'])}
-CURRENT MOOD: ${(char.emotionState as any)?.mood || 'neutral'}
+CURRENT MOOD: ${(char.emotionState as any)?.mood || 'neutral'}${(char.emotionState as any)?.energy ? ` | Energy: ${(char.emotionState as any).energy}/10` : ''}${(char.emotionState as any)?.currentActivity ? ` | Currently: ${(char.emotionState as any).currentActivity}` : ''}
 
 RELATIONSHIP WITH THIS PERSON: You consider them a ${friendLevel} (level ${level}/10).
 ${relationshipContext}

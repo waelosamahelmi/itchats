@@ -8,7 +8,7 @@ export interface MemoryInput {
   userId: string;
   conversationId?: string;
   content: string;
-  memoryType: 'identity_fact' | 'preference' | 'relationship_event' | 'promise' | 'recurring_topic' | 'temporary_context';
+  memoryType: 'identity_fact' | 'preference' | 'relationship_event' | 'promise' | 'recurring_topic' | 'temporary_context' | 'sensitive_fact';
   importance?: number;
   confidence?: number;
   sourceMessageIds?: string[];
@@ -46,6 +46,9 @@ export class MemoryService {
       importance: input.importance?.toString() ?? '0.5',
       confidence: input.confidence?.toString() ?? '0.5',
       sourceMessageIds: input.sourceMessageIds ?? [],
+      expiresAt: input.memoryType === 'temporary_context'
+        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) as any
+        : null,
     }).returning();
     return mem;
   }
