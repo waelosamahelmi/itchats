@@ -18,11 +18,11 @@ const AICharacters: React.FC = () => {
 
   const handleChatClick = (characterId: string) => {
     dispatch(setCurrentCharacter(characterId));
-    history.push(`/ai-chat/${characterId}`);
+    history.push(`/ai/chat/${characterId}`);
   };
 
   const handleCreateClick = () => {
-    history.push('/ai-create');
+    history.push('/ai/create');
   };
 
   const handleDeleteClick = (e: React.MouseEvent, characterId: string) => {

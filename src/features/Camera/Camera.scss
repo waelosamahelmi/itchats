@@ -11,14 +11,20 @@
   top: 0;
   left: 0;
   width: 100%;
-  height: 100vh;
+  height: calc(100vh - $tabbar-height - $safe-area-bottom);
   overflow: hidden;
+  z-index: 1;
 
   .video-stream {
     @extend %video-cover;
+    pointer-events: none;
 
     &.hide {
       display: none;
+    }
+
+    &--front {
+      transform: scaleX(-1);
     }
   }
 
@@ -70,9 +76,10 @@
   .controls {
     @extend %app-width;
     position: fixed;
-    bottom: 0;
-    height: 240px;
+    bottom: calc($tabbar-height + $safe-area-bottom);
+    height: 200px;
     overflow: hidden;
+    z-index: 5;
 
     .btn-capture,
     .btn-filters {

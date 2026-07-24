@@ -62,7 +62,12 @@ import {
   faCloud,
   faCloudSun,
   faSun,
-  faExclamationCircle
+  faExclamationCircle,
+  faRobot,
+  faMapMarkerAlt,
+  faGhost,
+  faPlus,
+  faPaperPlane
 } from '@fortawesome/free-solid-svg-icons';
 import './Icon.scss';
 
@@ -127,7 +132,12 @@ export const iconMap: Record<string, IconDefinition> = {
   faCloud,
   faCloudSun,
   faSun,
-  faExclamationCircle
+  faExclamationCircle,
+  faRobot,
+  faMapMarkerAlt,
+  faGhost,
+  faPlus,
+  faPaperPlane
 };
 
 const Icon: React.FC<Readonly<{ name: string } & Partial<FontAwesomeIconProps>>> = ({

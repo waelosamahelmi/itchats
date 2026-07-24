@@ -3,7 +3,7 @@
 %app-width {
   width: 100%;
   min-width: 320px;
-  max-width: 414px;
+  max-width: $max-app-width;
 }
 
 %video-cover {
@@ -19,3 +19,40 @@
   align-items: center;
   justify-content: center;
 }
+
+%glass-surface {
+  background: $glass-bg;
+  backdrop-filter: $glass-blur;
+  -webkit-backdrop-filter: $glass-blur;
+  border: 1px solid $glass-border;
+}
+
+%glass-card {
+  @extend %glass-surface;
+  border-radius: $radius-lg;
+  transition: all $transition-base;
+
+  &:hover {
+    border-color: $glass-border-hover;
+    box-shadow: $glow-primary;
+    transform: translateY(-1px);
+  }
+}
+
+%gradient-text {
+  background: $color-primary-gradient;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+%button-reset {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+

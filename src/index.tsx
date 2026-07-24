@@ -17,6 +17,9 @@ import Camera from 'features/Camera/Camera';
 import AICharacters from 'features/AICharacters/AICharacters';
 import AIChat from 'features/AICharacters/AIChat';
 import AICreate from 'features/AICharacters/AICreate';
+import ChatTab from 'features/Chat/ChatTab';
+import SnapMap from 'features/SnapMap/SnapMap';
+import Account from 'features/Account/Account';
 import NotFound from 'features/404/404';
 
 import 'normalize.css';
@@ -33,10 +36,24 @@ const App = () => (
       <BrowserRouter>
         <AppShell>
           <Switch>
+            {/* Camera Tab */}
             <Route path="/" component={Camera} exact />
-            <Route path="/ai-characters" component={AICharacters} exact />
-            <Route path="/ai-create" component={AICreate} exact />
-            <Route path="/ai-chat/:characterId" component={AIChat} exact />
+
+            {/* AI Tab */}
+            <Route path="/ai" component={AICharacters} exact />
+            <Route path="/ai/chat/:characterId" component={AIChat} exact />
+            <Route path="/ai/create" component={AICreate} exact />
+
+            {/* Chats Tab */}
+            <Route path="/chats" component={ChatTab} exact />
+
+            {/* Map Tab */}
+            <Route path="/map" component={SnapMap} exact />
+
+            {/* Profile Tab */}
+            <Route path="/account" component={Account} exact />
+
+            {/* 404 */}
             <Route component={NotFound} />
           </Switch>
         </AppShell>

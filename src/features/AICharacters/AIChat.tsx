@@ -27,7 +27,7 @@ const AIChat: React.FC = () => {
 
   useEffect(() => {
     if (!character) {
-      history.push('/ai-characters');
+      history.push('/ai');
     }
   }, [character, history]);
 
@@ -75,7 +75,7 @@ const AIChat: React.FC = () => {
   };
 
   const handleBack = () => {
-    history.push('/ai-characters');
+    history.push('/ai');
   };
 
   const getInitial = (name: string) => name.charAt(0).toUpperCase();
@@ -155,7 +155,7 @@ const AIChat: React.FC = () => {
             <button onClick={handleClearChat}>
               <i className="fas fa-trash" /> Clear Chat
             </button>
-            <button onClick={() => history.push(`/ai-edit/${characterId}`)}>
+            <button onClick={() => history.push(`/ai/create`)}>
               <i className="fas fa-edit" /> Edit Character
             </button>
           </div>

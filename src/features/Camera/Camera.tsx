@@ -1,8 +1,7 @@
 import React, { useReducer, useRef, useEffect } from 'react';
-import { useSelector, useDispatch, RootStateOrAny } from 'react-redux';
+import { useSelector, RootStateOrAny } from 'react-redux';
 import classNames from 'classnames';
 import { Animated } from 'react-animated-css';
-import { setFooterType } from 'AppShell/AppShellStore';
 import Button from 'components/Button/Button';
 import Loader from 'components/Loader/Loader';
 import PhotoCapture from './PhotoCapture/PhotoCapture';
@@ -12,7 +11,6 @@ import { Filter, FilterState, CameraState, filterButtonIcons } from './data';
 import './Camera.scss';
 
 const Camera: React.FC = () => {
-  const dispatch = useDispatch();
   const { cameraMode } = useSelector(({ camera }: RootStateOrAny) => camera);
 
   const [filter, dispatchFilter] = useReducer(
@@ -107,7 +105,6 @@ const Camera: React.FC = () => {
       active: null
     });
     startCamera();
-    dispatch(setFooterType('full'));
     window.JEEFACEFILTERAPI.destroy();
   };
 
@@ -148,7 +145,8 @@ const Camera: React.FC = () => {
       <video
         ref={videoElem}
         className={classNames('video-stream', {
-          hide: initialized || capture
+          hide: initialized || capture,
+          'video-stream--front': cameraMode === 'user'
         })}
         playsInline
         autoPlay
@@ -184,7 +182,6 @@ const Camera: React.FC = () => {
             onClick={() => {
               if (isBrowserCompatible) {
                 dispatchFilter({ showButtons: true });
-                dispatch(setFooterType('none'));
                 // Load the center filter in the button list by default
                 onAnimationComplete(() => setFilter(filters[2]), 100);
               }

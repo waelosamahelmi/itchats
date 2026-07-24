@@ -5,7 +5,7 @@ import { getPhotos } from 'features/Camera/CameraStore';
 import Header from 'components/Header/Header';
 import Toolbar from './Toolbar/Toolbar';
 import Drawer from './Drawer/Drawer';
-import Footer from './Footer/Footer';
+import TabBar from './TabBar/TabBar';
 
 const AppShell: React.FC = ({ children }) => {
   const dispatch = useDispatch();
@@ -23,7 +23,7 @@ const AppShell: React.FC = ({ children }) => {
       <Header />
       <section className="view">{children}</section>
       <Drawer />
-      <Footer />
+      <TabBar />
     </>
   );
 };

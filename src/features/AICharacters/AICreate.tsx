@@ -101,11 +101,11 @@ const AICreate: React.FC = () => {
     };
 
     dispatch(addCharacter(newCharacter));
-    history.push('/ai-characters');
+    history.push('/ai');
   };
 
   const handleBack = () => {
-    history.push('/ai-characters');
+    history.push('/ai');
   };
 
   return (

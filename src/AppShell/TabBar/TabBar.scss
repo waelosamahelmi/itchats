@@ -1,0 +1,104 @@
+@import '~styles/vars';
+@import '~styles/extendables';
+
+.tabbar {
+  @extend %app-width;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  height: calc($tabbar-height + $safe-area-bottom);
+  padding-bottom: $safe-area-bottom;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 100;
+  pointer-events: auto;
+  background: $glass-bg;
+  backdrop-filter: $glass-blur;
+  -webkit-backdrop-filter: $glass-blur;
+  border-top: 1px solid $glass-border;
+
+  &__item {
+    @extend %button-reset;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 100%;
+    padding: $space-xs $space-sm;
+    position: relative;
+    transition: all $transition-base;
+    min-width: 56px;
+
+    .icon {
+      font-size: 22px;
+      transition: all $transition-base;
+      color: $color-text-tertiary;
+    }
+
+    .tabbar__label {
+      font-size: $text-xs;
+      font-weight: $font-medium;
+      color: $color-text-tertiary;
+      transition: all $transition-base;
+    }
+
+    &--active {
+      .icon {
+        color: $color-primary-light;
+        filter: drop-shadow(0 0 6px rgba($color-primary, 0.5));
+      }
+
+      .tabbar__label {
+        color: $color-primary-light;
+      }
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 24px;
+        height: 3px;
+        border-radius: 0 0 3px 3px;
+        background: $color-primary-gradient-horizontal;
+      }
+    }
+
+    &--ai {
+      .icon {
+        font-size: 26px;
+        background: $color-primary-gradient;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        filter: drop-shadow(0 0 8px rgba($color-primary, 0.6));
+      }
+
+      .tabbar__label {
+        font-weight: $font-bold;
+      }
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: -6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: rgba($color-primary, 0.15);
+        z-index: -1;
+      }
+    }
+
+    // Ripple effect
+    &:active {
+      transform: scale(0.9);
+    }
+  }
+}

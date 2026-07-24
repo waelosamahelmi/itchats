@@ -9,6 +9,7 @@
   bottom: 0;
   padding-bottom: 25px;
   z-index: 50;
+  pointer-events: auto;
   background-image: linear-gradient(
     to bottom,
     rgba($color-black, 0),

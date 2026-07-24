@@ -1,267 +1,242 @@
+@import '~styles/vars';
+@import '~styles/extendables';
+
 .ai-characters {
-  height: 100%;
+  height: calc(100vh - $toolbar-height - $tabbar-height - $safe-area-bottom);
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-  color: #fff;
+  background: $color-bg-primary;
+  overflow: hidden;
 
+  // === Header ===
   &__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.5rem;
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: $space-lg $space-lg $space-md;
+    background: $color-bg-primary;
 
     h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #ffd700 0%, #ffa500 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .btn-create {
-      background: linear-gradient(135deg, #ffd700 0%, #ffa500 100%);
-      color: #000;
-      border: none;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-
-      &:hover {
-        transform: scale(1.1);
-        box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
-      }
+      font-size: $text-2xl;
+      font-weight: $font-bold;
+      color: $color-text-primary;
+      margin: 0;
     }
   }
 
+  // === Search ===
   &__search {
-    padding: 1rem 1.5rem;
+    padding: 0 $space-lg $space-md;
 
     .search-input {
       width: 100%;
-      padding: 0.75rem 1rem;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 25px;
-      color: #fff;
-      font-size: 0.9rem;
-      transition: all 0.2s;
+      padding: $space-sm $space-md;
+      background: $color-bg-input;
+      border: 1px solid $glass-border;
+      border-radius: $radius-full;
+      color: $color-text-primary;
+      font-size: $text-sm;
+      font-family: $font-family;
+      transition: all $transition-fast;
 
       &::placeholder {
-        color: rgba(255, 255, 255, 0.5);
+        color: $color-text-tertiary;
       }
 
       &:focus {
-        outline: none;
-        background: rgba(255, 255, 255, 0.15);
-        border-color: #ffd700;
-        box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.1);
+        border-color: $color-primary;
+        box-shadow: $glow-primary;
+        background: $color-bg-tertiary;
       }
     }
   }
 
+  // === Character List ===
   &__list {
     flex: 1;
     overflow-y: auto;
-    padding: 0 1.5rem 1.5rem;
+    padding: 0 $space-lg $space-lg;
 
     .empty-state {
-      display: flex;
+      @extend %center-x-y;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
+      height: 60%;
       text-align: center;
-      color: rgba(255, 255, 255, 0.6);
+      gap: $space-md;
 
       p {
-        margin-bottom: 1rem;
-        font-size: 1.1rem;
-      }
-
-      .btn-primary {
-        background: linear-gradient(135deg, #ffd700 0%, #ffa500 100%);
-        color: #000;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        border-radius: 25px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: transform 0.2s;
-
-        &:hover {
-          transform: scale(1.05);
-        }
+        color: $color-text-secondary;
+        font-size: $text-base;
       }
     }
   }
 }
 
+// === Character Card ===
 .character-card {
+  @extend %glass-card;
   display: flex;
   align-items: center;
-  padding: 1rem;
-  margin-bottom: 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  padding: $space-md;
+  margin-bottom: $space-sm;
   cursor: pointer;
-  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 215, 0, 0.3);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 80px;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba($color-primary, 0.03));
+    pointer-events: none;
   }
 
   &:active {
-    transform: scale(0.98);
+    transform: scale(0.985);
   }
 
   &__avatar {
     position: relative;
     flex-shrink: 0;
-    margin-right: 1rem;
+    margin-right: $space-md;
 
     img {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
+      width: 52px;
+      height: 52px;
+      border-radius: $radius-full;
       object-fit: cover;
-      border: 3px solid #ffd700;
+      border: 2px solid rgba($color-primary-light, 0.3);
     }
   }
 
   &__initial {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
+    width: 52px;
+    height: 52px;
+    border-radius: $radius-full;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #fff;
-    border: 3px solid rgba(255, 255, 255, 0.2);
+    font-size: $text-xl;
+    font-weight: $font-bold;
+    color: $color-white;
+    text-transform: uppercase;
   }
 
   &__badge {
     position: absolute;
-    top: -4px;
-    right: -4px;
-    background: #ef4444;
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: 700;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
+    top: -3px;
+    right: -3px;
+    background: $color-error;
+    color: $color-white;
+    font-size: 0.65rem;
+    font-weight: $font-bold;
+    min-width: 18px;
+    height: 18px;
+    border-radius: $radius-full;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 2px solid #1a1a2e;
+    border: 2px solid $color-bg-secondary;
+    padding: 0 4px;
   }
 
   &__info {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
 
   &__header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 0.25rem;
 
     h3 {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #fff;
+      font-size: $text-base;
+      font-weight: $font-semi-bold;
+      color: $color-text-primary;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      margin: 0;
     }
   }
 
   &__time {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    font-size: $text-xs;
+    color: $color-text-tertiary;
     flex-shrink: 0;
-    margin-left: 0.5rem;
+    margin-left: $space-sm;
   }
 
   &__message {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: $text-sm;
+    color: $color-text-secondary;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-bottom: 0.5rem;
   }
 
   &__meta {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: $space-sm;
   }
 
   &__relationship {
     display: flex;
-    gap: 3px;
+    gap: 2px;
 
     .dot {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba($color-text-primary, 0.1);
 
       &--active {
-        background: #ffd700;
-        box-shadow: 0 0 6px rgba(255, 215, 0, 0.5);
+        background: $color-primary-light;
+        box-shadow: 0 0 4px rgba($color-primary, 0.5);
       }
     }
   }
 
   &__emotions {
     display: flex;
-    gap: 0.25rem;
+    gap: 3px;
 
     .emotion-tag {
-      font-size: 0.65rem;
-      padding: 2px 6px;
-      background: rgba(168, 85, 247, 0.2);
-      color: #a855f7;
-      border-radius: 10px;
-      border: 1px solid rgba(168, 85, 247, 0.3);
+      font-size: 0.6rem;
+      padding: 1px 6px;
+      background: rgba($color-primary, 0.15);
+      color: $color-primary-light;
+      border-radius: $radius-full;
+      font-weight: $font-medium;
     }
   }
 
   &__actions {
     flex-shrink: 0;
-    margin-left: 0.5rem;
+    margin-left: $space-sm;
 
     .btn-delete {
-      background: transparent;
-      border: none;
-      color: rgba(255, 255, 255, 0.4);
-      cursor: pointer;
-      padding: 0.5rem;
-      border-radius: 50%;
-      transition: all 0.2s;
+      @extend %button-reset;
+      width: 28px;
+      height: 28px;
+      border-radius: $radius-full;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: $color-text-tertiary;
+      transition: all $transition-fast;
 
       &:hover {
-        color: #ef4444;
-        background: rgba(239, 68, 68, 0.1);
+        color: $color-error;
+        background: rgba($color-error, 0.1);
       }
     }
   }

@@ -1,40 +1,147 @@
-// https://fonts.google.com/specimen/Work+Sans?sidebar.open&selection.family=Work+Sans:ital,wght@0,400;0,500;0,600;0,700;1,900#standard-styles
+// ============================================
+// ItChats AI — Design System Tokens
+// ============================================
+
+// === Typography ===
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+$font-family: 'Plus Jakarta Sans', 'Work Sans', -apple-system, sans-serif;
 $font-regular: 400;
 $font-medium: 500;
 $font-semi-bold: 600;
 $font-bold: 700;
-// 900 = extra bold italic
+$font-extra-bold: 800;
 
-// Colors
-$color-white: #ffffff;
-$color-black: #000000;
-$color-red: #f00000;
+$text-xs: 0.75rem;      // 12px
+$text-sm: 0.8125rem;    // 13px
+$text-base: 0.9375rem;  // 15px
+$text-lg: 1.125rem;     // 18px
+$text-xl: 1.25rem;      // 20px
+$text-2xl: 1.5rem;      // 24px
+$text-3xl: 1.75rem;     // 28px
+$text-4xl: 2.25rem;     // 36px
 
-$color-grey-shade-8: #bbbbbb;
-$color-grey-shade-7: #aaaaaa;
-$color-grey-shade-6: #eeeeee;
-$color-grey-shade-5: #dddddd;
-$color-grey-shade-4: #cccccc;
-$color-grey-shade-3: #999999;
-$color-grey-shade-2: #646e76;
-$color-grey-shade-1: #333333;
-$color-grey-shade-0: #222222;
+// === Primary Brand (Deep Violet — AI / Intelligence) ===
+$color-primary: #7C3AED;
+$color-primary-light: #A78BFA;
+$color-primary-lighter: #C4B5FD;
+$color-primary-dark: #5B21B6;
+$color-primary-darker: #4C1D95;
+$color-primary-gradient: linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%);
+$color-primary-gradient-horizontal: linear-gradient(90deg, #7C3AED 0%, #6366F1 50%, #A78BFA 100%);
 
-$color-yellow: #fffc00;
-$color-blue: #16acff;
-$color-salmon: #f13c58;
-$color-purple: #a05dcc;
+// === Accent ===
+$color-accent: #00E5FF;           // Electric Cyan — tech glow
+$color-accent-light: #66F0FF;
+$color-accent-dark: #00B8D4;
+$color-accent-warm: #FF6B6B;      // Coral — human warmth
+$color-accent-warm-light: #FF8E8E;
 
-$color-pastel-salmon: #ff9192;
-$color-pastel-yellow: #f2ee97;
-$color-pastel-green: #aee5ad;
-$color-pastel-blue: #84b8f4;
-$color-pastel-pink: #ecb3d2;
+// === Background (Dark Theme) ===
+$color-bg-deep: #06060F;          // Deepest bg
+$color-bg-primary: #0A0A1A;       // Main background
+$color-bg-secondary: #12122A;     // Cards, surfaces
+$color-bg-tertiary: #1A1A3E;      // Elevated cards
+$color-bg-elevated: #222250;      // Highest elevation
+$color-bg-input: #1A1A38;         // Input fields
+$color-bg-hover: rgba(124, 58, 237, 0.08);
 
-// Same as 100vh but takes into account the bottom toolbar on mobile browsers like ios safari
+// === Text ===
+$color-text-primary: #F0F0FF;     // White with subtle violet tint
+$color-text-secondary: #A0A0C0;   // Muted lavender-gray
+$color-text-tertiary: #6B6B8A;    // Subtle text
+$color-text-inverse: #0A0A1A;     // Text on light bg
+
+// === Semantic ===
+$color-success: #10B981;
+$color-success-light: #34D399;
+$color-warning: #F59E0B;
+$color-error: #EF4444;
+$color-error-light: #F87171;
+$color-info: #3B82F6;
+
+// === Relationship Scale ===
+$color-relation-1: #6B6B8A;       // Stranger
+$color-relation-2: #8B8BCC;       // Acquaintance
+$color-relation-3: #A78BFA;       // Friend
+$color-relation-4: #FF6B6B;       // Close
+$color-relation-5: #FF3B8B;       // Intimate
+
+// === Glass Morphism ===
+$glass-bg: rgba(18, 18, 42, 0.65);
+$glass-bg-light: rgba(26, 26, 62, 0.5);
+$glass-border: rgba(255, 255, 255, 0.06);
+$glass-border-hover: rgba(255, 255, 255, 0.12);
+$glass-blur: blur(20px);
+$glass-blur-light: blur(12px);
+
+// === Shadows & Glows ===
+$shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+$shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+$shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+$shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+$glow-primary: 0 0 20px rgba(124, 58, 237, 0.25);
+$glow-primary-strong: 0 0 40px rgba(124, 58, 237, 0.4);
+$glow-accent: 0 0 15px rgba(0, 229, 255, 0.2);
+$glow-accent-strong: 0 0 30px rgba(0, 229, 255, 0.35);
+$glow-warm: 0 0 15px rgba(255, 107, 107, 0.2);
+$glow-text: 0 0 10px rgba(167, 139, 250, 0.3);
+
+// === Spacing ===
+$space-xs: 4px;
+$space-sm: 8px;
+$space-md: 16px;
+$space-lg: 24px;
+$space-xl: 32px;
+$space-2xl: 48px;
+$space-3xl: 64px;
+
+// === Border Radius ===
+$radius-sm: 8px;
+$radius-md: 12px;
+$radius-lg: 16px;
+$radius-xl: 20px;
+$radius-2xl: 24px;
+$radius-full: 9999px;
+
+// === Layout ===
 $mobile-vh: calc(var(--vh, 1vh) * 100);
+$toolbar-height: 32px;
+$tabbar-height: 64px;
+$safe-area-bottom: env(safe-area-inset-bottom, 0px);
+$max-app-width: 430px;
 
-$toolbar-height: 29px;
+// === Animation ===
+$transition-fast: 150ms ease;
+$transition-base: 250ms ease;
+$transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+$transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
-// $base-image-path: 'https://towhidkashem.github.io/snapchat-clone/images/';
-$base-image-path: '/images/'; // Uncomment this when developing
+// === Pastel Colors (Camera filter buttons) ===
+$color-pastel-salmon: #FF6B6B;
+$color-pastel-yellow: #FBBF24;
+$color-pastel-green: #34D399;
+$color-pastel-blue: #60A5FA;
+$color-pastel-pink: #F472B6;
+
+// === Legacy Color Aliases (for backward compatibility) ===
+$color-white: #F0F0FF;
+$color-black: #06060F;
+$color-red: #EF4444;
+$color-yellow: #F59E0B;
+$color-blue: #3B82F6;
+$color-purple: #7C3AED;
+$color-salmon: #FF6B6B;
+$color-grey-shade-0: #F0F0FF;
+$color-grey-shade-1: #0A0A1A;
+$color-grey-shade-2: #A0A0C0;
+$color-grey-shade-3: #6B6B8A;
+$color-grey-shade-4: #1A1A3E;
+$color-grey-shade-5: #12122A;
+$color-grey-shade-6: #0A0A1A;
+$color-grey-shade-7: #222250;
+$color-grey-shade-8: #1A1A3E;
+
+$base-image-path: '/images/';
+

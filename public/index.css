@@ -1,15 +1,6 @@
 body {
-  background: #222222;
+  background: #0A0A1A;
+  margin: 0;
+  padding: 0;
 }
 
-.fork-github {
-  position: fixed;
-  top: 0;
-  right: 0;
-}
-
-@media screen and (max-width: 700px) {
-  .fork-github {
-    display: none;
-  }
-}
