@@ -3,10 +3,58 @@ import { useDispatch } from 'react-redux';
 
 const API = 'http://localhost:3092/v1';
 const token = () => localStorage.getItem('accessToken');
+const refresh = () => localStorage.getItem('refreshToken');
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshToken(): Promise<string | null> {
+  const r = refresh();
+  if (!r) return null;
+  try {
+    const res = await fetch(`${API}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: r }),
+    });
+    if (!res.ok) throw new Error('Refresh failed');
+    const data = await res.json();
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    return data.accessToken;
+  } catch {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    return null;
+  }
+}
+
 async function api(path: string, opts?: RequestInit) {
   const t = token();
   const res = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}), ...opts?.headers } });
-  if (res.status === 401) { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); window.location.href = '/auth'; throw new Error('Session expired'); }
+
+  // Auto-refresh on 401 — try once, then redirect if still failing
+  if (res.status === 401 && refresh()) {
+    if (!refreshPromise) refreshPromise = refreshToken();
+    const newToken = await refreshPromise;
+    refreshPromise = null;
+    if (newToken) {
+      const retry = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}), ...opts?.headers } });
+      if (!retry.ok) { const e = await retry.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
+      return retry.json();
+    }
+    // Refresh failed — force logout
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    window.location.href = '/auth';
+    throw new Error('Session expired');
+  }
+
+  if (res.status === 401) {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    window.location.href = '/auth';
+    throw new Error('Session expired');
+  }
+
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
   return res.json();
 }
