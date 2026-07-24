@@ -6,8 +6,9 @@ import {
   jsonb,
   integer,
   pgEnum,
-  citext,
   index,
+  boolean,
+  numeric,
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
@@ -25,7 +26,7 @@ export const characters = pgTable('characters', {
   id: uuid('id').primaryKey().defaultRandom(),
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
-  handle: citext('handle').unique(),
+  handle: text('handle').unique(),
   visibility: characterVisibilityEnum('visibility').notNull().default('private'),
   status: characterStatusEnum('status').notNull().default('draft'),
   identityOrigin: identityOriginEnum('identity_origin').notNull(),
@@ -116,4 +117,17 @@ export const characterRelationships = pgTable('character_relationships', {
   metadata: jsonb('metadata').notNull().default('{}'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const characterReferenceAssets = pgTable('character_reference_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  characterId: uuid('character_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
+  characterVersionId: uuid('character_version_id').notNull(),
+  mediaAssetId: uuid('media_asset_id').notNull(),
+  referenceType: text('reference_type').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  generationJobId: uuid('generation_job_id'),
+  approved: boolean('approved').notNull().default(false),
+  qualityScore: numeric('quality_score', { precision: 6, scale: 4 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

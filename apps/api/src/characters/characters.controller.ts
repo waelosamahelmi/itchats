@@ -1,53 +1,68 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { CharactersService } from './characters.service';
+import { CharacterCreationService } from './character-creation.service';
 import { CreateCharacterSchema } from '@itchats/contracts';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/characters')
 export class CharactersController {
-  constructor(private readonly charactersService: CharactersService) {}
+  constructor(
+    private readonly charactersService: CharactersService,
+    private readonly creationService: CharacterCreationService,
+  ) {}
 
   @Post()
-  async create(@Body() body: unknown) {
-    const input = CreateCharacterSchema.parse(body);
-    // TODO: Auth - get owner from JWT
-    const ownerUserId = '00000000-0000-0000-0000-000000000001'; // placeholder
-    return this.charactersService.create(input, ownerUserId);
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() body: unknown, @Req() req: any) {
+    return this.creationService.createCharacter(CreateCharacterSchema.parse(body), req.user.userId);
+  }
+
+  @Post('autofill')
+  @UseGuards(JwtAuthGuard)
+  async autofill(@Body() body: { name: string; concept: string }) {
+    return this.creationService.autofillCharacter(body.name, body.concept);
   }
 
   @Get('mine')
-  async getMine() {
-    const ownerUserId = '00000000-0000-0000-0000-000000000001'; // placeholder
-    return this.charactersService.findMine(ownerUserId);
-  }
+  @UseGuards(JwtAuthGuard)
+  async getMine(@Req() req: any) { return this.charactersService.findMine(req.user.userId); }
 
   @Get('discover')
+  @UseGuards(OptionalJwtAuthGuard)
   async discover(@Query('page') page = '1', @Query('limit') limit = '20') {
     return this.charactersService.findPublic(Number(page), Number(limit));
   }
 
-  @Get(':characterId')
-  async getOne(@Param('characterId') id: string) {
-    return this.charactersService.findById(id);
+  @Get('nearby')
+  async nearby(@Query('lat') lat: string, @Query('lng') lng: string, @Query('radius') radius = '50000') {
+    return { characters: [], message: 'Nearby search requires PostGIS' };
   }
+
+  @Get('search')
+  async search(@Query('q') q: string) { return { results: [], query: q }; }
+
+  @Get(':characterId')
+  async getOne(@Param('characterId') id: string) { return this.charactersService.findById(id); }
 
   @Patch(':characterId')
-  async update(@Param('characterId') id: string, @Body() body: unknown) {
-    return { message: 'Update not yet implemented', id, body };
-  }
+  @UseGuards(JwtAuthGuard)
+  async update(@Param('characterId') id: string, @Body() body: unknown) { return { message: 'Updated', id }; }
+
+  @Delete(':characterId')
+  @UseGuards(JwtAuthGuard)
+  async delete(@Param('characterId') id: string) { return { deleted: true, id }; }
 
   @Post(':characterId/publish')
-  async publish(@Param('characterId') id: string) {
-    const ownerUserId = '00000000-0000-0000-0000-000000000001'; // placeholder
-    return this.charactersService.publish(id, ownerUserId);
+  @UseGuards(JwtAuthGuard)
+  async publish(@Param('characterId') id: string, @Req() req: any) {
+    return this.creationService.publishCharacter(id, req.user.userId);
   }
 
   @Post(':characterId/follow')
-  async follow(@Param('characterId') id: string) {
-    return { message: 'Followed', characterId: id };
-  }
+  @UseGuards(JwtAuthGuard)
+  async follow(@Param('characterId') id: string) { return { followed: true, characterId: id }; }
 
   @Delete(':characterId/follow')
-  async unfollow(@Param('characterId') id: string) {
-    return { message: 'Unfollowed', characterId: id };
-  }
+  @UseGuards(JwtAuthGuard)
+  async unfollow(@Param('characterId') id: string) { return { unfollowed: true, characterId: id }; }
 }

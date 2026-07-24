@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb, numeric, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, jsonb, numeric, boolean, pgEnum } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'paused', 'cancelled', 'expired']);
@@ -12,7 +12,7 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   maxPublicCharacters: integer('max_public_characters').notNull(),
   maxAutoStoryCharacters: integer('max_auto_story_characters').notNull(),
   capabilities: jsonb('capabilities').notNull().default('{}'),
-  active: text('active').notNull().default('true'),
+  active: boolean('active').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

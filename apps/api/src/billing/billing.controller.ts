@@ -1,30 +1,36 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
-import { getDb } from '@itchats/database';
-import { subscriptionPlans, userSubscriptions, creditWallets } from '@itchats/database/schema';
+import { Controller, Get, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { BillingService } from './billing.service';
+import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/billing')
 export class BillingController {
+  constructor(private readonly billingService: BillingService) {}
+
   @Get('plans')
   async getPlans() {
-    const db = getDb();
-    return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.active, 'true'));
+    return this.billingService.getPlans();
   }
 
   @Get('wallet')
-  async getWallet() {
-    const db = getDb();
-    const [wallet] = await db.select().from(creditWallets)
-      .where(eq(creditWallets.userId, '00000000-0000-0000-0000-000000000001'))
-      .limit(1);
-    return wallet ?? { balance: 0 };
+  @UseGuards(JwtAuthGuard)
+  async getWallet(@Req() req: any) {
+    return this.billingService.getWallet(req.user.userId);
   }
 
   @Get('subscription')
-  async getSubscription() {
-    const db = getDb();
-    const [sub] = await db.select().from(userSubscriptions)
-      .where(eq(userSubscriptions.userId, '00000000-0000-0000-0000-000000000001'))
-      .limit(1);
-    return sub ?? { status: 'none' };
+  @UseGuards(JwtAuthGuard)
+  async getSubscription(@Req() req: any) {
+    return this.billingService.getUserSubscription(req.user.userId);
+  }
+
+  @Post('checkout')
+  @UseGuards(JwtAuthGuard)
+  async createCheckout(@Body() body: { planId: string }, @Req() req: any) {
+    return this.billingService.createCheckoutSession(req.user.userId, body.planId);
+  }
+
+  @Post('webhook')
+  async webhook(@Body() body: any, @Req() req: any) {
+    return this.billingService.handleStripeWebhook(body, req.headers?.['stripe-signature']);
   }
 }

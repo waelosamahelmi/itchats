@@ -34,21 +34,4 @@ export class SocialController {
     await db.delete(userBlocks).where(eq(userBlocks.blockedUserId, userId));
     return { unblocked: true };
   }
-
-  @Post('characters/:characterId/follow')
-  async follow(@Param('characterId') characterId: string) {
-    const db = getDb();
-    await db.insert(characterFollows).values({
-      userId: '00000000-0000-0000-0000-000000000001',
-      characterId,
-    });
-    return { followed: true };
-  }
-
-  @Delete('characters/:characterId/follow')
-  async unfollow(@Param('characterId') characterId: string) {
-    const db = getDb();
-    await db.delete(characterFollows).where(eq(characterFollows.characterId, characterId));
-    return { unfollowed: true };
-  }
 }

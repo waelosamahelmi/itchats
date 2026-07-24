@@ -4,7 +4,6 @@ import {
   text,
   timestamp,
   date,
-  citext,
   pgEnum,
 } from 'drizzle-orm/pg-core';
 
@@ -12,8 +11,8 @@ export const userStatusEnum = pgEnum('user_status', ['pending', 'active', 'suspe
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  email: citext('email').unique(),
-  username: citext('username').unique(),
+  email: text('email').unique(),
+  username: text('username').unique(),
   passwordHash: text('password_hash'),
   status: userStatusEnum('status').notNull().default('pending'),
   role: text('role').notNull().default('user'),

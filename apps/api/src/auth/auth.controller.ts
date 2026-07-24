@@ -1,10 +1,7 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterSchema, LoginSchema } from '@itchats/contracts';
-import { getDb } from '@itchats/database';
-import { users } from '@itchats/database/schema';
-import { eq } from 'drizzle-orm';
-import * as crypto from 'node:crypto';
+import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -12,34 +9,37 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() body: unknown) {
-    const input = RegisterSchema.parse(body);
-    const db = getDb();
-
-    const [existing] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
-    if (existing) {
-      return { error: 'Email already registered' };
-    }
-
-    const [user] = await db.insert(users).values({
-      email: input.email,
-      username: input.username,
-      passwordHash: crypto.createHash('sha256').update(input.password).digest('hex'),
-      status: 'pending',
-    }).returning();
-
-    const tokens = await this.authService.generateTokens(user!.id);
-    return { user: { id: user!.id, email: user!.email, username: user!.username }, ...tokens };
+    const { email, username, password } = RegisterSchema.parse(body);
+    return this.authService.register(email, username, password);
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() body: unknown) {
-    const input = LoginSchema.parse(body);
-    const user = await this.authService.validateUser(input.email, input.password);
-    if (!user) {
-      return { error: 'Invalid credentials' };
-    }
-    const tokens = await this.authService.generateTokens(user.id);
-    return { user, ...tokens };
+  async login(@Body() body: unknown, @Req() req: any) {
+    const { email, password } = LoginSchema.parse(body);
+    return this.authService.login(email, password, {
+      userAgent: req.headers?.['user-agent'],
+      ip: req.ip,
+    });
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(@Body() body: { refreshToken: string }) {
+    return this.authService.refresh(body.refreshToken);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logout(@Req() req: any) {
+    return this.authService.logout(req.user.userId);
+  }
+
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(@Req() req: any) {
+    return this.authService.logout(req.user.userId);
   }
 }
