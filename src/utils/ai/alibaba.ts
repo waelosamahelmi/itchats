@@ -1,6 +1,7 @@
-const ALIBABA_API_KEY =
-  process.env.REACT_APP_ALIBABA_API_KEY ||
-  'sk-ws-H.XLIIHH.Qtyw.MEYCIQDMoahngG3lf6mJWj6TZau9qiDP47wHm_xNuq_Y_kPSQgIhALjAWwuI_uFYfRKz6Jcl-N2xrzCQGY7O9DqTFm1_m2Yu';
+// SECURITY: API key must come from environment only. Never hardcode.
+// The fallback key has been revoked/rotated.
+// Backend proxy handles all AI provider calls — see apps/api/src/ai/
+const ALIBABA_API_KEY = process.env.REACT_APP_ALIBABA_API_KEY || '';
 const BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 
 export const MODEL_ROUTES = {

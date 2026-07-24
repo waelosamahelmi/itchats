@@ -1,0 +1,11 @@
+{
+  "name": "@itchats/tsconfig",
+  "version": "1.0.0",
+  "private": true,
+  "main": "base.json",
+  "exports": {
+    "./base.json": "./base.json",
+    "./react.json": "./react.json",
+    "./nest.json": "./nest.json"
+  }
+}
