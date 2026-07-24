@@ -108,12 +108,16 @@ const chars = createSlice({
 interface Msg { id: string; conversationId: string; senderType: string; content: string; createdAt: string; }
 export const fetchConvs = createAsyncThunk('chat/convs', async () => (await api('/conversations')) as any[]);
 export const fetchMsgs = createAsyncThunk('chat/msgs', async (cid: string) => (await api(`/conversations/${cid}/messages`)) as Msg[]);
+export const deleteConv = createAsyncThunk('chat/deleteConv', async (cid: string) => { await api(`/conversations/${cid}`, { method: 'DELETE' }); return cid; });
+export const deleteMsg = createAsyncThunk('chat/deleteMsg', async ({ convId, msgId }: { convId: string; msgId: string }) => { await api(`/conversations/${convId}/messages/${msgId}`, { method: 'DELETE' }); return msgId; });
 const chat = createSlice({
   name: 'chat', initialState: { convs: [] as any[], msgs: [] as Msg[], active: null as string | null },
   reducers: { setActive(s, a) { s.active = a.payload; } },
   extraReducers: (b) => {
     b.addCase(fetchConvs.fulfilled, (s, a) => { s.convs = a.payload; });
     b.addCase(fetchMsgs.fulfilled, (s, a) => { s.msgs = a.payload; });
+    b.addCase(deleteConv.fulfilled, (s, a) => { s.convs = s.convs.filter(c => c.id !== a.payload); s.msgs = []; });
+    b.addCase(deleteMsg.fulfilled, (s, a) => { s.msgs = s.msgs.filter(m => m.id !== a.payload); });
   },
 });
 export const { setActive } = chat.actions;

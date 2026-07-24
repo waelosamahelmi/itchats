@@ -38,10 +38,11 @@ export class AiService {
       }).returning({ id: conversations.id });
       cid = conv.id;
     }
+    const convId: string = cid!;
 
     // Persist user message
     await db.insert(messages).values({
-      conversationId: cid, senderType: 'user', senderUserId: userId,
+      conversationId: convId, senderType: 'user', senderUserId: userId,
       type: 'text', content: message, clientIdempotencyKey: clientKey,
     });
 
@@ -60,7 +61,7 @@ export class AiService {
 
     // Create job
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, conversationId: cid, generationType: 'llm_chat',
+      userId, characterId, conversationId: convId, generationType: 'llm_chat',
       routeKey: 'chat.standard', idempotencyKey: randomUUID(),
       requestJson: { message, systemPrompt }, status: 'processing', startedAt: new Date(),
     }).returning();
@@ -84,7 +85,7 @@ export class AiService {
 
     // Persist AI response
     const [aiMsg] = await db.insert(messages).values({
-      conversationId: cid, senderType: 'character', senderCharacterId: characterId,
+      conversationId: convId, senderType: 'character', senderCharacterId: characterId,
       type: 'text', content: fullResponse, modelGenerationId: job!.id,
     }).returning();
 
@@ -114,7 +115,7 @@ export class AiService {
     if (characterId) {
       await this.contextBuilder.updateRelationship(characterId, userId, 'positive');
       // Fire-and-forget memory extraction
-      this.extractMemory(characterId, userId, conversationId, message, fullResponse).catch(() => {});
+      this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
     }
 
     yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost };

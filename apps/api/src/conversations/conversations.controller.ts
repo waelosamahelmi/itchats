@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters } from '@itchats/database/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -22,6 +22,7 @@ export class ConversationsController {
       characterName: characters.name,
     }).from(conversations)
       .leftJoin(characters, eq(conversations.characterId, characters.id))
+      .where(eq(conversations.createdByUserId, req.user.userId))
       .orderBy(desc(conversations.lastMessageAt))
       .limit(50);
   }
@@ -62,5 +63,25 @@ export class ConversationsController {
       clientIdempotencyKey: input.clientIdempotencyKey,
     }).returning();
     return msg;
+  }
+
+  @Delete(':conversationId')
+  @UseGuards(JwtAuthGuard)
+  async deleteConversation(@Param('conversationId') id: string, @Req() req: any) {
+    const db = getDb();
+    const [conv] = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.createdByUserId, req.user.userId))).limit(1);
+    if (!conv) throw new NotFoundException('Conversation not found');
+    await db.delete(conversations).where(eq(conversations.id, id));
+    return { deleted: true };
+  }
+
+  @Delete(':conversationId/messages/:messageId')
+  @UseGuards(JwtAuthGuard)
+  async deleteMessage(@Param('conversationId') convId: string, @Param('messageId') msgId: string, @Req() req: any) {
+    const db = getDb();
+    const [msg] = await db.select().from(messages).where(and(eq(messages.id, msgId), eq(messages.conversationId, convId), eq(messages.senderUserId, req.user.userId))).limit(1);
+    if (!msg) throw new NotFoundException('Message not found');
+    await db.delete(messages).where(eq(messages.id, msgId));
+    return { deleted: true };
   }
 }
