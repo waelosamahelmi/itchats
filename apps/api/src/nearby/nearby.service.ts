@@ -45,7 +45,7 @@ export class NearbyService {
     const all = await db.select({
       id: characters.id, name: characters.name, handle: characters.handle,
       description: characters.description, personality: characters.personality,
-      city: characterLocations.city, locationLabel: characterLocations.location_label,
+      city: characterLocations.city, locationLabel: characterLocations.locationLabel,
     }).from(characters)
       .leftJoin(characterLocations, eq(characterLocations.characterId, characters.id))
       .where(and(eq(characters.visibility, 'public' as any), eq(characters.status, 'published' as any)))

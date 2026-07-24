@@ -1,8 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { alibabaChatStream } from '@itchats/ai-core';
+import { alibabaChatStream, alibabaTTS, alibabaTextToImageWithFallback } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
-import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations } from '@itchats/database/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships } from '@itchats/database/schema';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
 import { MemoryService } from './memory.service';
@@ -15,19 +15,22 @@ export class AiService {
     @Inject(MemoryService) private readonly memoryService: MemoryService,
   ) {}
 
-  async *streamChat(userId: string, characterId: string | null, message: string, conversationId?: string) {
+  async *streamChat(
+    userId: string,
+    characterId: string | null,
+    message: string,
+    conversationId?: string,
+  ) {
     const db = getDb();
     const clientKey = randomUUID();
 
-    // Find or create a single conversation per character
     let cid = conversationId;
     if (!cid && characterId) {
       const [existing] = await db.select({ id: conversations.id }).from(conversations)
         .where(and(
           eq(conversations.characterId, characterId),
           eq(conversations.createdByUserId, userId),
-        ))
-        .limit(1);
+        )).limit(1);
       cid = existing?.id;
     }
     if (!cid) {
@@ -36,98 +39,264 @@ export class AiService {
         createdByUserId: userId,
         characterId: characterId,
       }).returning({ id: conversations.id });
+      if (!conv) throw new Error('Failed to create conversation');
       cid = conv.id;
     }
-    const convId: string = cid!;
+    const convId: string = cid!;  // Guaranteed by creation logic above
 
-    // Persist user message
     await db.insert(messages).values({
       conversationId: convId, senderType: 'user', senderUserId: userId,
       type: 'text', content: message, clientIdempotencyKey: clientKey,
-    });
+    }).onConflictDoNothing();
 
-    // Build context
     let systemPrompt = 'You are a helpful AI assistant on ItChats. Keep responses friendly and concise.';
     if (characterId) {
-      const ctx = await this.contextBuilder.buildContext(characterId, userId, message);
+      const ctx = await this.contextBuilder.buildContext(characterId, userId, message, convId);
       systemPrompt = ctx.systemPrompt;
+
+      yield { type: 'context', characterName: ctx.characterName, relationship: this.contextBuilder.getRelationshipSummary(ctx.relationship) };
     }
 
-    // Reserve credits
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
-    const estimated = getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: 500 });
     const balance = wallet[0]?.balance ?? 0;
-    if (balance < Math.max(estimated, 2)) throw new Error(`Insufficient credits: need ${Math.max(estimated, 2)}, have ${balance}`);
+    const estimated = getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: 500 });
+    const minCharge = Math.max(estimated, 2);
+    if (balance < minCharge) {
+      yield { type: 'error', message: `Insufficient credits: need ${minCharge}, have ${balance}` };
+      return;
+    }
 
-    // Create job
     const [job] = await db.insert(generationJobs).values({
       userId, characterId, conversationId: convId, generationType: 'llm_chat',
       routeKey: 'chat.standard', idempotencyKey: randomUUID(),
       requestJson: { message, systemPrompt }, status: 'processing', startedAt: new Date(),
     }).returning();
 
-    // Stream
+    const chatMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: message },
+    ];
+
     let fullResponse = '';
     try {
       for await (const chunk of alibabaChatStream({
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: message }],
-        temperature: 0.8,
+        messages: chatMessages,
+        temperature: 0.85,
+        maxTokens: 800,
       })) {
         fullResponse += chunk;
         yield { type: 'chunk', content: chunk };
       }
     } catch (err: any) {
-      await db.update(generationJobs).set({ status: 'failed', errorCode: 'PROVIDER', errorMessageSafe: err.message?.slice(0, 200), completedAt: new Date() })
-        .where(eq(generationJobs.id, job!.id));
-      yield { type: 'error', message: 'AI generation failed' };
+      await db.update(generationJobs).set({
+        status: 'failed', errorCode: 'PROVIDER_ERROR',
+        errorMessageSafe: String(err.message).slice(0, 200), completedAt: new Date(),
+      }).where(eq(generationJobs.id, job!.id));
+      yield { type: 'error', message: 'AI generation failed. Please try again.' };
       return;
     }
 
-    // Persist AI response
     const [aiMsg] = await db.insert(messages).values({
       conversationId: convId, senderType: 'character', senderCharacterId: characterId,
       type: 'text', content: fullResponse, modelGenerationId: job!.id,
     }).returning();
 
-    // Complete job
-    await db.update(generationJobs).set({ status: 'succeeded', responseJson: { content: fullResponse }, completedAt: new Date() })
-      .where(eq(generationJobs.id, job!.id));
+    await db.update(generationJobs).set({
+      status: 'succeeded', responseJson: { content: fullResponse }, completedAt: new Date(),
+    }).where(eq(generationJobs.id, job!.id));
 
-    // Usage & billing
-    const actualCost = Math.max(getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: Math.ceil(fullResponse.length / 4) }), 2);
+    const outputTokens = Math.ceil(fullResponse.length / 4);
+    const actualCost = Math.max(getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: outputTokens }), 2);
+
     await db.insert(usageEvents).values({
       userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'llm_chat',
-      inputTokens: 3000, outputTokens: Math.ceil(fullResponse.length / 4),
-      providerCostUsd: '0.0005', creditsDebited: actualCost,
+      inputTokens: 3000, outputTokens, providerCostUsd: '0.0005', creditsDebited: actualCost,
       pricingSnapshot: { model: 'qwen3.5-flash', credits: actualCost },
     });
+
     await db.update(creditWallets).set({
       balance: sql`GREATEST(0, ${creditWallets.balance} - ${actualCost})`,
       lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${actualCost}`,
       updatedAt: new Date(),
     }).where(eq(creditWallets.userId, userId));
+
     await db.insert(creditLedger).values({
       userId, delta: -actualCost, balanceAfter: Math.max(0, balance - actualCost),
       reason: 'AI chat', referenceType: 'generation_job', referenceId: job!.id,
     });
 
-    // Update relationship
     if (characterId) {
       await this.contextBuilder.updateRelationship(characterId, userId, 'positive');
-      // Fire-and-forget memory extraction
       this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
     }
 
     yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost };
   }
 
-  private async extractMemory(cid: string | null, uid: string, convId: string | undefined, uMsg: string, aiRsp: string) {
-    if (!cid) return;
-    const combined = `${uMsg} ${aiRsp}`.toLowerCase();
-    const kw = ['like', 'love', 'enjoy', 'favorite', 'prefer', 'hate', 'dislike'];
-    if (kw.some(w => combined.includes(w))) {
-      await this.memoryService.store({ characterId: cid, userId: uid, conversationId: convId, content: combined.slice(0, 300), memoryType: 'preference', importance: 0.3, confidence: 0.5 });
+  async getChatHistory(characterId: string, userId: string) {
+    const db = getDb();
+    const [conv] = await db.select({ id: conversations.id }).from(conversations)
+      .where(and(
+        eq(conversations.characterId, characterId),
+        eq(conversations.createdByUserId, userId),
+      )).limit(1);
+
+    if (!conv) return { messages: [], conversationId: null };
+
+    const msgs = await db.select({
+      id: messages.id,
+      senderType: messages.senderType,
+      content: messages.content,
+      type: messages.type,
+      createdAt: messages.createdAt,
+      metadata: messages.metadata,
+    }).from(messages)
+      .where(eq(messages.conversationId, conv.id))
+      .orderBy(sql`${messages.createdAt} ASC`)
+      .limit(100);
+
+    return { messages: msgs, conversationId: conv.id };
+  }
+
+  async generateImage(userId: string, prompt: string, model?: string) {
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image');
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const result = await alibabaTextToImageWithFallback({ prompt, model, size: '1024x1024' });
+    if (!result?.url) throw new Error('Image generation failed — no URL returned');
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'text_to_image', routeKey: model === 'premium' ? 'image.premium' : 'image.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt, model }, status: 'succeeded',
+      responseJson: { url: result.url, model: result.model }, completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
+      imageCount: 1, providerCostUsd: '0.035', creditsDebited: cost,
+      pricingSnapshot: { model: result.model || 'qwen-image-2.0', credits: cost },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
+    return { url: result.url, model: result.model, creditsUsed: cost };
+  }
+
+  async generateVoice(userId: string, text: string, voice?: string) {
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = Math.max(getCreditCost('qwen3-tts-flash', 'tts', { characters: text.length }), 2);
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const audio = await alibabaTTS({ text, voice });
+    if (!audio?.audioBase64 || audio.audioBase64.length === 0) throw new Error('TTS generation failed');
+
+    const dataUrl = `data:audio/mp3;base64,${audio.audioBase64}`;
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'tts', routeKey: 'tts.standard',
+      idempotencyKey: randomUUID(), requestJson: { text, voice }, status: 'succeeded',
+      responseJson: { audioLength: audio.audioBase64.length }, completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'tts',
+      inputCharacters: text.length, providerCostUsd: '0.002', creditsDebited: cost,
+      pricingSnapshot: { model: voice || 'qwen3-tts-flash', credits: cost },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
+    return { audioUrl: dataUrl, format: 'mp3', creditsUsed: cost };
+  }
+
+  async transcribeVoice(userId: string, audioBase64: string) {
+    return { text: '[Voice transcription requires configured ASR endpoint]' };
+  }
+
+  private async extractMemory(
+    characterId: string,
+    userId: string,
+    conversationId: string,
+    userMessage: string,
+    aiResponse: string,
+  ) {
+    try {
+      const combined = `${userMessage} ${aiResponse}`.toLowerCase();
+      const signalWords = [
+        'i am', "i'm", 'my name is', 'i live in', 'i work', 'i like', 'i love', 'i enjoy',
+        'i hate', 'i dislike', 'my favorite', 'i prefer', 'i remember', 'i feel', 'i think',
+        'my birthday', 'my family', 'my job', 'i study', 'i went', 'i used to',
+        'always', 'never', 'sometimes', 'often', 'usually', 'maybe', 'probably',
+      ];
+      const hasSignal = signalWords.some(w => combined.includes(w));
+      if (!hasSignal && combined.length < 50) return;
+
+      const importance = combined.length > 100 ? 0.4 : 0.25;
+      const memoryType = combined.includes('promise') || combined.includes('swear')
+        ? 'promise' as const
+        : signalWords.some(w => combined.includes(w))
+          ? 'preference' as const
+          : 'temporary_context' as const;
+
+      const content = userMessage.length > 300 ? userMessage.slice(0, 297) + '...' : userMessage;
+      await this.memoryService.store({
+        characterId, userId, conversationId,
+        content,
+        memoryType,
+        importance,
+        confidence: 0.6,
+        sourceMessageIds: [],
+      });
+    } catch {
+      // Memory extraction is best-effort, never block the main flow
     }
-    await this.memoryService.store({ characterId: cid, userId: uid, conversationId: convId, content: uMsg.slice(0, 200), memoryType: 'temporary_context', importance: 0.1, confidence: 0.7 });
+  }
+
+  async getMemories(characterId: string, userId: string) {
+    return this.memoryService.getUserMemories(characterId, userId);
+  }
+
+  async clearMemories(characterId: string, userId: string) {
+    return this.memoryService.clearMemories(characterId, userId);
+  }
+
+  async getRelationship(characterId: string, userId: string) {
+    const db = getDb();
+    const [rel] = await db.select().from(characterRelationships)
+      .where(and(
+        eq(characterRelationships.characterId, characterId),
+        eq(characterRelationships.userId, userId),
+      )).limit(1);
+
+    if (!rel) return { level: 1, label: 'Stranger', familiarity: 0, trust: 0, warmth: 0, affinity: 0, tension: 0 };
+    return {
+      level: Math.round(Number(rel.visibleLevel) || 1),
+      label: this.contextBuilder.getRelationshipSummary({
+        level: Number(rel.visibleLevel) || 1,
+        warmth: Number(rel.warmth) || 0,
+        trust: Number(rel.trust) || 0,
+        affinity: Number(rel.affinity) || 0,
+        tension: Number(rel.tension) || 0,
+        familiarity: Number(rel.familiarity) || 0,
+      }),
+      familiarity: Number(rel.familiarity) || 0,
+      trust: Number(rel.trust) || 0,
+      warmth: Number(rel.warmth) || 0,
+      affinity: Number(rel.affinity) || 0,
+      tension: Number(rel.tension) || 0,
+    };
   }
 }

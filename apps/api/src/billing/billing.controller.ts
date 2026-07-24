@@ -26,7 +26,7 @@ export class BillingController {
   @Post('checkout')
   @UseGuards(JwtAuthGuard)
   async createCheckout(@Body() body: { planId: string }, @Req() req: any) {
-    return this.billingService.createCheckoutSession(req.user.userId, body.planId);
+    return this.billingService.createCheckoutSession(req.user.userId, body.planId, req.user.email ?? '');
   }
 
   @Post('webhook')

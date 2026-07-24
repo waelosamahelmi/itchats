@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { generationJobs, usageEvents } from '@itchats/database/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 @Injectable()
@@ -15,6 +15,20 @@ export class GenerationsService {
       routeKey: model === 'premium' ? 'image.premium' : 'image.standard',
       idempotencyKey,
       requestJson: { prompt, model },
+      status: 'queued',
+    }).returning();
+    return { jobId: job!.id, status: 'queued', idempotencyKey };
+  }
+
+  async requestImageEdit(userId: string, prompt: string, imageUrl: string) {
+    const db = getDb();
+    const idempotencyKey = randomUUID();
+    const [job] = await db.insert(generationJobs).values({
+      userId,
+      generationType: 'image_to_image',
+      routeKey: 'image.edit.private',
+      idempotencyKey,
+      requestJson: { prompt, imageUrl },
       status: 'queued',
     }).returning();
     return { jobId: job!.id, status: 'queued', idempotencyKey };
@@ -78,8 +92,10 @@ export class GenerationsService {
 
   async cancelJob(userId: string, jobId: string) {
     const db = getDb();
+    const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).limit(1);
+    if (!job || job.userId !== userId) throw new Error('Job not found or not owned by you');
     await db.update(generationJobs).set({ status: 'cancelled' })
-      .where(eq(generationJobs.id, jobId));
+      .where(and(eq(generationJobs.id, jobId), eq(generationJobs.userId, userId)));
     return { cancelled: true };
   }
 }

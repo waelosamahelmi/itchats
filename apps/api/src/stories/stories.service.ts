@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { stories, storyViews, contentLikes } from '@itchats/database/schema';
-import { eq, and, desc, count } from 'drizzle-orm';
+import { stories, storyViews, contentLikes, characterFollows } from '@itchats/database/schema';
+import { eq, and, desc, count, inArray } from 'drizzle-orm';
 
 @Injectable()
 export class StoriesService {
@@ -14,7 +14,15 @@ export class StoriesService {
   }
 
   async getFollowing(userId: string) {
-    return { stories: [] };
+    const db = getDb();
+    const follows = await db.select({ characterId: characterFollows.characterId })
+      .from(characterFollows).where(eq(characterFollows.userId, userId));
+    if (follows.length === 0) return { stories: [] };
+    const characterIds = follows.map(f => f.characterId);
+    const results = await db.select().from(stories)
+      .where(and(eq(stories.status, 'published'), inArray(stories.authorCharacterId!, characterIds)))
+      .orderBy(desc(stories.publishedAt)).limit(50);
+    return { stories: results };
   }
 
   async getCharacterStories(characterId: string) {

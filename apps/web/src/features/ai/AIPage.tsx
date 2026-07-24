@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Plus, Sparkles, Wand2, Compass } from 'lucide-react';
+import { Bot, Sparkles, Wand2, MessageCircle } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { fetchMine, fetchDiscover, useAppDispatch } from '@/app/store';
-import { Avatar, Card, Badge, Tabs } from '@itchats/ui';
+import { Avatar, Badge, Tabs } from '@itchats/ui';
 
 export default function AIPage() {
   const dispatch = useAppDispatch();
@@ -47,25 +47,31 @@ export default function AIPage() {
           </div>
         ) : (
           characters.map((c: any, i: number) => (
-            <button
+            <div
               key={c.id}
-              onClick={() => nav(`/ai/chat/${c.id}`)}
               className="flex w-full items-center gap-4 text-left glass rounded-2xl p-3.5 hover:bg-white/8 transition-all group animate-slide-up"
               style={{ animationDelay: `${i * 60}ms` }}
             >
-              <div className="relative shrink-0">
-                <Avatar size="lg" fallback={c.name?.[0]} />
-                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-success border-2 border-bg-canvas" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-text-primary text-sm truncate group-hover:text-brand-primary transition-colors">{c.name}</span>
-                  <Badge variant="ai" className="text-[10px] shrink-0">AI</Badge>
+              <button onClick={() => nav(`/ai/profile/${c.id}`)} className="flex items-center gap-4 flex-1 min-w-0 text-left">
+                <div className="relative shrink-0">
+                  <Avatar size="lg" fallback={c.name?.[0]} />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-success border-2 border-bg-canvas" />
                 </div>
-                <p className="text-xs text-text-muted truncate mt-0.5">{c.personality || c.description || 'A unique AI personality waiting to meet you'}</p>
-              </div>
-              <Compass size={16} className="text-text-muted group-hover:text-brand-primary transition-colors shrink-0" />
-            </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-text-primary text-sm truncate group-hover:text-brand-primary transition-colors">{c.name}</span>
+                    <Badge variant="ai" className="text-[10px] shrink-0">AI</Badge>
+                  </div>
+                  <p className="text-xs text-text-muted truncate mt-0.5">{c.personality || c.description || 'A unique AI personality waiting to meet you'}</p>
+                </div>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); nav(`/ai/chat/${c.id}`); }}
+                className="p-2 rounded-full hover:bg-brand-primary/10 transition-colors shrink-0"
+              >
+                <MessageCircle size={18} className="text-brand-secondary group-hover:text-brand-primary transition-colors" />
+              </button>
+            </div>
           ))
         )}
       </div>

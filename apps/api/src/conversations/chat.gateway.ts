@@ -12,13 +12,15 @@ import { getDb } from '@itchats/database';
 import { messages, conversations, conversationParticipants } from '@itchats/database/schema';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { verify } from 'jsonwebtoken';
+import { getConfig } from '@itchats/config';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
 }
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN ?? 'https://itchats.ai' : 'http://localhost:3090' },
   namespace: '/ws',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -27,15 +29,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private userSockets = new Map<string, Set<string>>();
 
   handleConnection(client: AuthenticatedSocket) {
-    // Auth via token in handshake query
     const token = client.handshake.query.token as string;
     if (!token) { client.disconnect(); return; }
-    // TODO: Verify JWT token and extract userId
-    const userId = client.handshake.query.userId as string || 'anon';
-    client.userId = userId;
-    if (!this.userSockets.has(userId)) this.userSockets.set(userId, new Set());
-    this.userSockets.get(userId)!.add(client.id);
-    console.log(`WS connected: user=${userId} socket=${client.id}`);
+
+    try {
+      const config = getConfig();
+      const decoded = verify(token, config.JWT_SECRET) as { sub: string; email: string; role: string };
+      client.userId = decoded.sub;
+      if (!this.userSockets.has(decoded.sub)) this.userSockets.set(decoded.sub, new Set());
+      this.userSockets.get(decoded.sub)!.add(client.id);
+    } catch {
+      client.disconnect();
+      return;
+    }
   }
 
   handleDisconnect(client: AuthenticatedSocket) {

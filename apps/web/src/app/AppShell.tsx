@@ -11,7 +11,7 @@ const tabs = [
 
 export default function AppShell() {
   const loc = useLocation();
-  const hideNav = loc.pathname.startsWith('/ai/chat/') || loc.pathname.includes('/auth');
+  const hideNav = loc.pathname.startsWith('/ai/chat/') || loc.pathname.startsWith('/ai/create') || loc.pathname.includes('/auth');
 
   return (
     <div className="flex flex-col h-screen bg-bg-canvas overflow-hidden">

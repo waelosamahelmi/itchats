@@ -1,7 +1,7 @@
 import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { useDispatch } from 'react-redux';
 
-const API = 'http://localhost:3092/v1';
+const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3092/v1';
 const token = () => localStorage.getItem('accessToken');
 const refresh = () => localStorage.getItem('refreshToken');
 let refreshPromise: Promise<string | null> | null = null;
