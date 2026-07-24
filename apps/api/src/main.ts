@@ -42,8 +42,20 @@ async function bootstrap() {
 
   // Manual CORS — handles all requests including SSE raw writes
   const fastify = app.getHttpAdapter().getInstance();
+
+  function isAllowedOrigin(origin: string | undefined): string {
+    if (!origin) return config.CORS_ORIGIN;
+    // Allow localhost origins
+    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return origin;
+    if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return origin;
+    // Allow 172.20.10.x subnet (phone hotspot / local network)
+    if (/^https?:\/\/172\.20\.10\.\d{1,3}(:\d+)?$/.test(origin)) return origin;
+    return config.CORS_ORIGIN;
+  }
+
   fastify.addHook('onRequest', async (request, reply) => {
-    reply.header('Access-Control-Allow-Origin', config.CORS_ORIGIN);
+    const origin = request.headers.origin;
+    reply.header('Access-Control-Allow-Origin', isAllowedOrigin(origin));
     reply.header('Access-Control-Allow-Credentials', 'true');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
