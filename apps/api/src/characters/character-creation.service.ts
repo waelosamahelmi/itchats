@@ -69,7 +69,7 @@ export class CharacterCreationService {
   async autofillCharacter(name: string, concept: string) {
     const prompt = `Create a detailed character profile for "${name}" based on: "${concept}". Return a JSON object with these fields: personality (1-2 sentences), description (2-3 sentence physical and style description), backstory (2-3 sentences), ageDisplay (like "mid-20s"), gender, pronouns, occupation, interests (array of 3-5 strings), speakingStyle (like "casual and warm"). Only return the JSON, no other text.`;
 
-    const result = await alibabaChat({
+    const result = await alibabaChatWithFallback({
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.9,
       maxTokens: 500,

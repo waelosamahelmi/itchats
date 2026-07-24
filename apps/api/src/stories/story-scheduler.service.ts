@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { stories, characters, characterLocations, creditWallets } from '@itchats/database/schema';
 import { eq, and, lt, sql } from 'drizzle-orm';
@@ -10,7 +10,7 @@ export class StorySchedulerService {
   private readonly logger = new Logger(StorySchedulerService.name);
   private interval: NodeJS.Timeout | null = null;
 
-  constructor(private readonly billingService: BillingService) {}
+  constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
 
   start() {
     this.logger.log('Story scheduler started (every 15 minutes)');

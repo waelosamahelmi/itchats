@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject } from '@nestjs/common';
 import { CharactersService } from './characters.service';
 import { CharacterCreationService } from './character-creation.service';
 import { CreateCharacterSchema } from '@itchats/contracts';
@@ -7,8 +7,8 @@ import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
 @Controller('v1/characters')
 export class CharactersController {
   constructor(
-    private readonly charactersService: CharactersService,
-    private readonly creationService: CharacterCreationService,
+    @Inject(CharactersService) private readonly charactersService: CharactersService,
+    @Inject(CharacterCreationService) private readonly creationService: CharacterCreationService,
   ) {}
 
   @Post()

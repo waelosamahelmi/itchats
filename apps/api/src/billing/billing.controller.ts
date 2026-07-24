@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards, Inject } from '@nestjs/common';
 import { BillingService } from './billing.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1/billing')
 export class BillingController {
-  constructor(private readonly billingService: BillingService) {}
+  constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
 
   @Get('plans')
   async getPlans() {

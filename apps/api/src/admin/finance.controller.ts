@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, UseGuards, Inject } from '@nestjs/common';
 import { TreasuryService } from '../treasury/treasury.service';
 import { UsageService } from '../usage/usage.service';
 import { MarginGuard } from '../usage/margin-guard.service';
@@ -9,10 +9,10 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 @UseGuards(JwtAuthGuard)
 export class FinanceController {
   constructor(
-    private readonly treasury: TreasuryService,
-    private readonly usage: UsageService,
-    private readonly marginGuard: MarginGuard,
-    private readonly pricing: PricingService,
+    @Inject(TreasuryService) private readonly treasury: TreasuryService,
+    @Inject(UsageService) private readonly usage: UsageService,
+    @Inject(MarginGuard) private readonly marginGuard: MarginGuard,
+    @Inject(PricingService) private readonly pricing: PricingService,
   ) {}
 
   @Get('overview')

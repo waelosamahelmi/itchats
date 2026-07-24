@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { ArrowLeft, ArrowRight, Sparkles, Globe, Lock, Wand2, Bot, Mic, MapPin, Clock, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Sparkles, Globe, Lock, Wand2, Bot, Mic, MapPin, Clock, Check, Volume2 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
 const STEPS = ['Type', 'Identity', 'Personality', 'Voice', 'Location', 'Autonomy', 'Review'];
@@ -21,8 +21,61 @@ export default function CreateCharacterPage() {
   const [autonomy, setAutonomy] = useState('off');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [autofilling, setAutofilling] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const API = 'http://localhost:3092/v1';
+
+  const handleAutofill = async () => {
+    if (!token || !name) return;
+    setAutofilling(true);
+    try {
+      const res = await fetch(`${API}/characters/autofill`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, description: desc }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Autofill failed'); }
+      const data = await res.json();
+      if (data.personality) setPersonality(data.personality);
+      if (data.backstory) setBackstory(data.backstory);
+    } catch (e: any) { setError(e.message); }
+    setAutofilling(false);
+  };
+
+  const handlePreviewVoice = async (voiceId: string, emotion?: string) => {
+    if (!token) return;
+    setPreviewing(voiceId);
+    try {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      const body: any = { text: 'Hello! I am an AI character. This is how I sound.', voice: voiceId };
+      if (emotion) body.emotion = emotion;
+      const res = await fetch(`${API}/ai/tts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.audioBase64) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
+        audioRef.current = audio;
+        audio.play();
+      }
+    } catch {}
+    setPreviewing(null);
+  };
+
+  const voices = [
+    { id: 'text-only', label: 'Text only', desc: 'No voice, chat only' },
+    { id: 'Cherry', label: 'Cherry', desc: 'Warm, friendly female — best with [happy] tone' },
+    { id: 'Rosa', label: 'Rosa', desc: 'Soft, gentle female — best with [calm] tone' },
+    { id: 'Stella', label: 'Stella', desc: 'Bright, energetic female — best with [happy] tone' },
+    { id: 'Rita', label: 'Rita', desc: 'Calm, mature female — best with [neutral] tone' },
+    { id: 'Bella', label: 'Bella', desc: 'Young, cheerful female — best with [surprised] tone' },
+    { id: 'Luca', label: 'Luca', desc: 'Deep, smooth male — best with [neutral] tone' },
+    { id: 'Ryan', label: 'Ryan', desc: 'Warm, friendly male — best with [happy] tone' },
+    { id: 'Jack', label: 'Jack', desc: 'Professional, clear male — best with [neutral] tone' },
+  ];
+  const emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised'];
 
   const handleCreate = async () => {
     if (!token) { nav('/auth'); return; }
@@ -112,8 +165,9 @@ export default function CreateCharacterPage() {
             <div className="space-y-3">
               <textarea value={personality} onChange={e => setPersonality(e.target.value)} placeholder="Personality traits...&#10;e.g. Warm, curious, witty, slightly sarcastic, loves deep conversations" rows={3} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
               <textarea value={backstory} onChange={e => setBackstory(e.target.value)} placeholder="Backstory...&#10;e.g. A former architect who left corporate life to travel the world" rows={3} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
-              <button className="w-full glass rounded-2xl p-3 text-sm text-brand-primary flex items-center justify-center gap-2 hover:bg-brand-glow/20 transition-all">
-                <Sparkles size={16} /> AI Auto-Fill Personality
+              <button onClick={handleAutofill} disabled={autofilling}
+                className="w-full glass rounded-2xl p-3 text-sm text-brand-primary flex items-center justify-center gap-2 hover:bg-brand-glow/20 transition-all disabled:opacity-50">
+                <Sparkles size={16} /> {autofilling ? 'Generating...' : 'AI Auto-Fill Personality'}
               </button>
             </div>
           </div>
@@ -122,14 +176,35 @@ export default function CreateCharacterPage() {
         {step === 3 && (
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Choose how they sound</p>
-            {['text-only', 'soft-female', 'warm-male', 'energetic', 'calm-neutral'].map(v => (
-              <button key={v} onClick={() => setVoice(v)}
-                className={`w-full glass rounded-2xl p-4 text-left flex items-center gap-3 transition-all ${voice === v ? 'ring-2 ring-brand-primary bg-brand-glow/20' : 'hover:bg-white/5'}`}>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${voice === v ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
-                  <Mic size={18} className={voice === v ? 'text-white' : 'text-text-secondary'} />
+            {voices.map(v => (
+              <button key={v.id} onClick={() => setVoice(v.id)}
+                className={`w-full glass rounded-2xl p-4 text-left flex items-start gap-3 transition-all ${voice === v.id ? 'ring-2 ring-brand-primary bg-brand-glow/20' : 'hover:bg-white/5'}`}>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${voice === v.id ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
+                  <Mic size={18} className={voice === v.id ? 'text-white' : 'text-text-secondary'} />
                 </div>
-                <div className="flex-1"><p className="text-sm font-medium text-text-primary capitalize">{v.replace(/-/g, ' ')}</p></div>
-                {voice === v && <Check size={18} className="text-brand-primary" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-text-primary">{v.label}</p>
+                  <p className="text-xs text-text-muted">{v.desc}</p>
+                  {v.id !== 'text-only' && voice === v.id && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {emotions.map(em => (
+                        <button key={em} onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id, em); }}
+                          className="px-2 py-0.5 rounded-md text-[10px] bg-surface-elevated text-text-muted hover:bg-brand-glow/20 hover:text-brand-primary transition-all capitalize"
+                          disabled={previewing === v.id}>
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {v.id !== 'text-only' && (
+                  <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
+                    className="p-2 rounded-lg glass hover:bg-brand-glow/20 text-text-secondary hover:text-brand-primary transition-all shrink-0 mt-0.5"
+                    disabled={previewing === v.id}>
+                    <Volume2 size={16} className={previewing === v.id ? 'animate-pulse' : ''} />
+                  </button>
+                )}
+                {voice === v.id && <Check size={18} className="text-brand-primary shrink-0 mt-1" />}
               </button>
             ))}
           </div>

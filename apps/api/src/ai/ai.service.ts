@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { alibabaChatStream } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
 import { messages, generationJobs, usageEvents, creditWallets, creditLedger } from '@itchats/database/schema';
@@ -11,8 +11,8 @@ import { getCreditCost } from '@itchats/ai-core/costing';
 @Injectable()
 export class AiService {
   constructor(
-    private readonly contextBuilder: ContextBuilderService,
-    private readonly memoryService: MemoryService,
+    @Inject(ContextBuilderService) private readonly contextBuilder: ContextBuilderService,
+    @Inject(MemoryService) private readonly memoryService: MemoryService,
   ) {}
 
   async *streamChat(userId: string, characterId: string | null, message: string, conversationId?: string) {

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { getDb, getPool } from '@itchats/database';
 import { refreshTokens, authAccounts } from '@itchats/database/schema';
@@ -13,7 +13,7 @@ export interface JwtPayload { sub: string; email: string; role: string; }
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(@Inject(JwtService) private readonly jwtService: JwtService) {}
 
   async hashPassword(password: string) {
     return argon2.hash(password, { type: argon2.argon2id, memoryCost: 65536, timeCost: 3, parallelism: 4 });

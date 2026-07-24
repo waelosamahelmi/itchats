@@ -11,6 +11,6 @@ import { BillingModule } from '../billing/billing.module';
   exports: [StoriesService],
 })
 export class StoriesModule implements OnModuleInit {
-  constructor(@Optional() private readonly scheduler?: StorySchedulerService) {}
+  constructor(@Optional() @Inject(StorySchedulerService) private readonly scheduler?: StorySchedulerService) {}
   onModuleInit() { this.scheduler?.start(); }
 }

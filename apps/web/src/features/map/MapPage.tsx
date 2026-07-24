@@ -17,8 +17,17 @@ export default function MapPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3092/v1/characters/nearby?lat=30&lng=31&radius=50000')
-      .then(r => r.json()).then(setChars).catch(console.error).finally(() => setLoading(false));
+    fetch('http://localhost:3092/v1/characters/nearby?lat=30&lng=31&radius=50000', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => {
+        if (r.status === 401) { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); nav('/auth'); return []; }
+        if (!r.ok) throw new Error('Failed');
+        return r.json();
+      })
+      .then(d => setChars(Array.isArray(d) ? d : []))
+      .catch(() => setChars([]))
+      .finally(() => setLoading(false));
   }, [token]);
 
   return (

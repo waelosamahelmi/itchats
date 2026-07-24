@@ -1,14 +1,15 @@
-import { Controller, Post, Body, Req, Res, UseGuards, Get, Delete, Param } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, UseGuards, Get, Delete, Param, Inject } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { alibabaTTSWithFallback, alibabaTextToImageWithFallback } from '@itchats/ai-core';
 import type { FastifyReply } from 'fastify';
 
 @Controller('v1/ai')
 export class AiController {
   constructor(
-    private readonly aiService: AiService,
-    private readonly memoryService: MemoryService,
+    @Inject(AiService) private readonly aiService: AiService,
+    @Inject(MemoryService) private readonly memoryService: MemoryService,
   ) {}
 
   @Post('chat/stream')
@@ -30,14 +31,32 @@ export class AiController {
 
   @Post('image')
   @UseGuards(JwtAuthGuard)
-  async generateImage(@Body() body: { prompt: string; model?: string }) {
-    return { message: 'Image generation (credit-gated)', prompt: body.prompt };
+  async generateImage(@Body() body: { prompt: string; model?: string; size?: string }) {
+    try {
+      const result = await alibabaTextToImageWithFallback({
+        prompt: body.prompt,
+        model: body.model,
+        size: body.size ?? '1024x1024',
+      });
+      return { url: result.url, model: result.usedModel };
+    } catch (err: any) {
+      return { error: err.message };
+    }
   }
 
   @Post('tts')
   @UseGuards(JwtAuthGuard)
-  async tts(@Body() body: { text: string; voice?: string }) {
-    return { message: 'TTS endpoint', text: body.text };
+  async tts(@Body() body: { text: string; voice?: string; emotion?: string }) {
+    try {
+      const audio = await alibabaTTSWithFallback({
+        text: body.text,
+        voice: body.voice ?? 'Cherry',
+        emotion: body.emotion as any,
+      });
+      return { audioBase64: audio.audioBase64, format: audio.format, model: audio.usedModel };
+    } catch (err: any) {
+      return { error: err.message };
+    }
   }
 
   @Get('memories/:characterId')

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { usageReservations, providerUsageEvents } from '@itchats/database/schema/treasury';
 import { eq, and, sql } from 'drizzle-orm';
@@ -7,7 +7,7 @@ import { TreasuryService } from '../treasury/treasury.service';
 
 @Injectable()
 export class UsageService {
-  constructor(private readonly treasury: TreasuryService) {}
+  constructor(@Inject(TreasuryService) private readonly treasury: TreasuryService) {}
 
   /** Create a usage reservation before provider execution */
   async reserve(userId: string, provider: string, model: string, feature: string,

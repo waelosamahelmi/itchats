@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, Req, UseGuards, Inject } from '@nestjs/common';
 import { NearbyService } from './nearby.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('v1')
 export class NearbyController {
-  constructor(private readonly service: NearbyService) {}
+  constructor(@Inject(NearbyService) private readonly service: NearbyService) {}
 
   @Get('characters/nearby')
   @UseGuards(JwtAuthGuard)

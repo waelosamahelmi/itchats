@@ -6,6 +6,7 @@ const token = () => localStorage.getItem('accessToken');
 async function api(path: string, opts?: RequestInit) {
   const t = token();
   const res = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}), ...opts?.headers } });
+  if (res.status === 401) { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); window.location.href = '/auth'; throw new Error('Session expired'); }
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
   return res.json();
 }

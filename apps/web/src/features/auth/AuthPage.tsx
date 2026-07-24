@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, ArrowRight } from 'lucide-react';
@@ -15,7 +15,9 @@ export default function AuthPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  if (token) { nav('/'); return null; }
+  useEffect(() => {
+    if (token) nav('/', { replace: true });
+  }, [token, nav]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
