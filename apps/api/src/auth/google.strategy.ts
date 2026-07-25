@@ -15,10 +15,12 @@ export interface OAuthProfile {
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor() {
     const cfg = getConfig();
-    const apiBase = process.env.API_BASE_URL ?? 'http://localhost:' + cfg.PORT;
+    const apiBase = cfg.API_BASE_URL ?? process.env.API_BASE_URL ?? `http://localhost:${cfg.PORT}`;
+    const clientID = cfg.GOOGLE_CLIENT_ID || '';
+    const clientSecret = cfg.GOOGLE_CLIENT_SECRET || '';
     super({
-      clientID: cfg.GOOGLE_CLIENT_ID!,
-      clientSecret: cfg.GOOGLE_CLIENT_SECRET!,
+      clientID,
+      clientSecret,
       callbackURL: apiBase + '/v1/auth/google/callback',
       scope: ['email', 'profile'],
     });
