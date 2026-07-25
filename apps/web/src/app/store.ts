@@ -2,12 +2,18 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import { useDispatch } from 'react-redux';
 
 const API = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3092/v1';
-const token = () => localStorage.getItem('accessToken');
-const refresh = () => localStorage.getItem('refreshToken');
+const getToken = () => localStorage.getItem('accessToken');
+const getRefresh = () => localStorage.getItem('refreshToken');
+const clearTokens = () => {
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  window.dispatchEvent(new CustomEvent('itchats:session-expired'));
+};
+const setTokens = (at: string, rt: string) => { localStorage.setItem('accessToken', at); localStorage.setItem('refreshToken', rt); };
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshToken(): Promise<string | null> {
-  const r = refresh();
+  const r = getRefresh();
   if (!r) return null;
   try {
     const res = await fetch(`${API}/auth/refresh`, {
@@ -17,45 +23,51 @@ async function refreshToken(): Promise<string | null> {
     });
     if (!res.ok) throw new Error('Refresh failed');
     const data = await res.json();
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
+    setTokens(data.accessToken, data.refreshToken);
     return data.accessToken;
   } catch {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    clearTokens();
     return null;
   }
 }
 
 async function api(path: string, opts?: RequestInit) {
-  const t = token();
-  const res = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}), ...opts?.headers } });
+  const t = getToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (t) headers['Authorization'] = `Bearer ${t}`;
+  if (opts?.headers) Object.assign(headers, opts.headers);
 
-  // Auto-refresh on 401 — try once, then redirect if still failing
-  if (res.status === 401 && refresh()) {
+  const res = await fetch(`${API}${path}`, { ...opts, headers });
+
+  // Auto-refresh on 401 — try once
+  if (res.status === 401 && getRefresh()) {
     if (!refreshPromise) refreshPromise = refreshToken();
     const newToken = await refreshPromise;
     refreshPromise = null;
     if (newToken) {
-      const retry = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}), ...opts?.headers } });
-      if (!retry.ok) { const e = await retry.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
-      return retry.json();
+      const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` };
+      if (opts?.headers) Object.assign(retryHeaders, opts.headers);
+      const retry = await fetch(`${API}${path}`, { ...opts, headers: retryHeaders });
+      if (retry.ok) return retry.json();
+      const e = await retry.json().catch(() => ({}));
+      throw new Error(e.message || 'Request failed');
     }
-    // Refresh failed — force logout
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    window.location.href = '/auth';
+    // Refresh failed — clear tokens, throw so caller handles redirect
+    clearTokens();
     throw new Error('Session expired');
   }
 
   if (res.status === 401) {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    window.location.href = '/auth';
+    clearTokens();
+    store.dispatch(logout());
     throw new Error('Session expired');
   }
 
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const msg = e.message || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -71,7 +83,7 @@ export const loginUser = createAsyncThunk('auth/login', async (d: { email: strin
   return data;
 });
 const auth = createSlice({
-  name: 'auth', initialState: { user: null as any, token: token(), loading: false, error: null as string | null },
+  name: 'auth', initialState: { user: null as any, token: getToken(), loading: false, error: null as string | null },
   reducers: { logout(s) { s.user = null; s.token = null; localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); } },
   extraReducers: (b) => {
     b.addCase(registerUser.fulfilled, (s, a) => { s.user = a.payload.user; s.token = a.payload.accessToken; s.error = null; });
@@ -79,6 +91,7 @@ const auth = createSlice({
     b.addCase(registerUser.rejected, (s, a) => { s.error = a.error.message || 'Register failed'; });
     b.addCase(loginUser.rejected, (s, a) => { s.error = a.error.message || 'Login failed'; });
     b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; });
+    b.addCase(fetchMe.rejected, (s) => { s.user = null; s.token = null; });
   },
 });
 
