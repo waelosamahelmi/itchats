@@ -192,8 +192,6 @@ export class CharacterCreationService {
       throw new BadRequestException(`Image generation failed: ${err.message}`);
     }
   }
-
-  async publishCharacter(characterId: string, ownerUserId: string) {
     const db = getDb();
     const [char] = await db.select().from(characters)
       .where(and(eq(characters.id, characterId), eq(characters.ownerUserId, ownerUserId)))

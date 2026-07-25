@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject, NotFoundException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { characters, characterFollows, characterLocations, characterReferenceAssets } from '@itchats/database/schema';
+import { characters, characterFollows, characterLocations } from '@itchats/database/schema';
 import { eq, and, or, ilike, sql } from 'drizzle-orm';
 import { CharactersService } from './characters.service';
 import { CharacterCreationService } from './character-creation.service';
@@ -63,12 +63,7 @@ export class CharactersController {
       .where(eq(characterLocations.characterId, id)).limit(1);
     const [follows] = await db.select({ count: sql<number>`count(*)` })
       .from(characterFollows).where(eq(characterFollows.characterId, id));
-    // Get avatar URL from reference assets
-    const [avatar] = await db.select({ mediaUrl: characterReferenceAssets.mediaUrl })
-      .from(characterReferenceAssets)
-      .where(and(eq(characterReferenceAssets.characterId, id), eq(characterReferenceAssets.approved, true as any)))
-      .orderBy(sql`${characterReferenceAssets.createdAt} DESC`).limit(1);
-    return { ...char, location: location || null, followersCount: follows?.count ?? 0, avatarUrl: avatar?.mediaUrl || null };
+    return { ...char, location: location || null, followersCount: follows?.count ?? 0 };
   }
 
   @Patch(':characterId')
