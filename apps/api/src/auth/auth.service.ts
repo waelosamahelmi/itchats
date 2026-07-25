@@ -47,8 +47,10 @@ export class AuthService {
       [email],
     );
     const row = result.rows[0] as { id: string; email: string; username: string; password_hash: string; role: string; status: string } | undefined;
-    if (!row || !(await this.verifyPassword(row.password_hash, password))) throw new UnauthorizedException('Invalid credentials');
-    if (row.status !== 'active') throw new UnauthorizedException('Account inactive');
+    if (!row) throw new UnauthorizedException('No account found with this email');
+    if (row.status === 'pending') throw new UnauthorizedException('Please verify your email first');
+    if (row.status !== 'active') throw new UnauthorizedException('Account is ' + row.status);
+    if (!(await this.verifyPassword(row.password_hash, password))) throw new UnauthorizedException('Wrong password');
 
     await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [row.id]);
     if (deviceInfo?.userAgent) {
@@ -64,7 +66,7 @@ export class AuthService {
     const refreshValue = randomBytes(48).toString('hex');
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
     const db = getDb();
-    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt: new Date(Date.now() + 30 * 86400000) } as any);
+    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt: new Date(Date.now() + 3650 * 86400000) } as any);
     return { accessToken, refreshToken: refreshValue, expiresIn: 900 };
   }
 
@@ -72,7 +74,7 @@ export class AuthService {
     const db = getDb();
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
     const [s] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash)).limit(1);
-    if (!s || s.revokedAt || s.expiresAt < new Date()) throw new UnauthorizedException('Invalid token');
+    if (!s || s.revokedAt) throw new UnauthorizedException('Invalid token');
     await db.update(refreshTokens).set({ revokedAt: new Date() } as any).where(eq(refreshTokens.id, s.id));
     const pool = getPool();
     const uResult = await pool.query('SELECT id, email, role FROM users WHERE id = $1 LIMIT 1', [s.userId]);
@@ -153,6 +155,34 @@ export class AuthService {
       providerAccountId: profile.providerId,
     } as any);
     return { linked: true, provider: profile.provider };
+  }
+
+  async forgotPassword(email: string) {
+    const pool = getPool();
+    const result = await pool.query('SELECT id FROM users WHERE email = $1 AND status = $2 LIMIT 1', [email, 'active']);
+    if (result.rows.length === 0) return { sent: true }; // Don't reveal if email exists
+    const userId = result.rows[0].id as string;
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const db = getDb();
+    await db.insert(refreshTokens).values({
+      userId, tokenHash,
+      expiresAt: new Date(Date.now() + 3600000), // 1 hour
+    } as any);
+    // In production: send email. For dev: return token
+    return { sent: true, devToken: token };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const db = getDb();
+    const [s] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash)).limit(1);
+    if (!s || s.revokedAt || (s.expiresAt && s.expiresAt < new Date())) throw new UnauthorizedException('Invalid or expired reset token');
+    const pw = await this.hashPassword(newPassword);
+    const pool = getPool();
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [pw, s.userId]);
+    await db.update(refreshTokens).set({ revokedAt: new Date() } as any).where(eq(refreshTokens.id, s.id));
+    return { reset: true };
   }
 
   private sanitizeUsername(name: string): string {

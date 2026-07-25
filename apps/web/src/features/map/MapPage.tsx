@@ -4,6 +4,8 @@ import { Map as MapIcon, Navigation, Compass, Users, Globe, MessageCircle } from
 import type { RootState } from '@/app/store';
 import { useNavigate } from 'react-router-dom';
 
+const API = (import.meta as any).env?.VITE_API_URL || '/v1';
+
 interface NearChar {
   id: string; name: string; description: string; city: string;
   distance_label: string; personality: string;
@@ -17,11 +19,10 @@ export default function MapPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3092/v1/characters/nearby?lat=30&lng=31&radius=50000', {
+    fetch(`${API}/characters/nearby?lat=30&lng=31&radius=50000`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => {
-        if (r.status === 401) { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); nav('/auth'); return []; }
         if (!r.ok) throw new Error('Failed');
         return r.json();
       })

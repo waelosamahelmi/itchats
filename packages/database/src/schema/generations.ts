@@ -23,7 +23,6 @@ export const generationJobs = pgTable('generation_jobs', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   characterId: uuid('character_id').references(() => characters.id, { onDelete: 'set null' }),
-  conversationId: uuid('conversation_id'),
   generationType: generationTypeEnum('generation_type').notNull(),
   status: generationStatusEnum('status').notNull().default('queued'),
   routeKey: text('route_key').notNull(),

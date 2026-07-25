@@ -128,32 +128,94 @@ export async function alibabaTextToImage(request: TextToImageRequest): Promise<I
   return callImageGen(model, request, config);
 }
 
-async function callImageGen(model: string, request: TextToImageRequest, config: ReturnType<typeof getConfig>): Promise<ImageResult> {
-  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/images/generations`, {
+function getNativeBase() {
+  const config = getConfig();
+  // Dedicated workspaces: native API available for TTS/ASR/Video (not images)
+  const base = config.ALIBABA_BASE_URL;
+  if (base.includes('maas.aliyuncs.com')) {
+    return base.replace('/compatible-mode/v1', '/api/v1/services');
+  }
+  return 'https://dashscope-intl.aliyuncs.com/api/v1/services';
+}
+
+/** Check if we're using a dedicated workspace key */
+function isWorkspaceKey() {
+  return getConfig().ALIBABA_API_KEY?.startsWith('sk-ws-');
+}
+
+/** Try image generation via compatible-mode chat endpoint (multimodal content format) */
+async function callImageGenCompat(model: string, request: TextToImageRequest, config: ReturnType<typeof getConfig>): Promise<ImageResult> {
+  const size = request.size ?? '1024*1024';
+  const [w, h] = size.replace(/\*/g, 'x').split('x').map(Number);
+  const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, prompt: request.prompt, n: request.n ?? 1, size: request.size ?? '1024x1024' }),
-  });
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: [{ type: 'text', text: request.prompt }] }],
+      max_tokens: 2000,
+    }),
+  }, 2, 60000);
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Image ${model} compat (${response.status}): ${errText.slice(0, 200)}`);
+  }
+  const data: any = await response.json();
+  // Alibaba multimodal chat response format: output.choices[0].message.content[0].image
+  const content = data.output?.choices?.[0]?.message?.content;
+  if (Array.isArray(content)) {
+    const imagePart = content.find((c: any) => c.image);
+    if (imagePart?.image) return { url: imagePart.image, model };
+  }
+  // Fallback: standard OpenAI format data[0].url
+  const url = data.data?.[0]?.url;
+  if (url) return { url, model };
+  throw new Error(`Image ${model} compat: no image in response — ${JSON.stringify(data).slice(0, 200)}`);
+}
+
+async function callImageGen(model: string, request: TextToImageRequest, config: ReturnType<typeof getConfig>): Promise<ImageResult> {
+  const response = await fetchWithRetry(`${getNativeBase()}/aigc/text2image/image-synthesis`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      input: { prompt: request.prompt },
+      parameters: { size: request.size ?? '1024*1024', n: request.n ?? 1 },
+    }),
+  }, 2, 30000);
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
     throw new Error(`Image ${model} (${response.status}): ${errText.slice(0, 200)}`);
   }
   const data = await response.json();
-  const url = data.data?.[0]?.url;
-  if (!url) throw new Error(`Image ${model}: no URL in response`);
+  const url = data.output?.results?.[0]?.url || data.data?.[0]?.url;
+  if (!url) throw new Error(`Image ${model}: no URL in response — ${JSON.stringify(data).slice(0, 200)}`);
   return { url, model };
 }
 
-/** Try image models in fallback order until one succeeds */
+/** Try image models in fallback order — compat-mode first, then native (if not workspace key) */
 export async function alibabaTextToImageWithFallback(request: TextToImageRequest): Promise<ImageResult & { usedModel: string }> {
   const config = getConfig();
   const tried: string[] = [];
-  for (const model of IMAGE_FALLBACK_MODELS) {
+
+  // Phase 1: Try compatible-mode (OpenAI format) — works with dedicated workspaces
+  for (const model of IMAGE_FALLBACK_MODELS_COMPAT) {
     try {
-      const result = await callImageGen(model, request, config);
+      const result = await callImageGenCompat(model, request, config);
       return { ...result, usedModel: model };
     } catch (err: any) {
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
+    }
+  }
+  // Phase 2: Try native DashScope endpoints as fallback (only for non-workspace keys)
+  if (!isWorkspaceKey()) {
+    for (const model of IMAGE_FALLBACK_MODELS) {
+      try {
+        const result = await callImageGen(model, request, config);
+        return { ...result, usedModel: model };
+      } catch (err: any) {
+        tried.push(`${model}: ${err.message.slice(0, 80)}`);
+      }
     }
   }
   throw new Error(`All image models exhausted. Tried: ${tried.join(' | ')}`);
@@ -205,29 +267,33 @@ const CHAT_FALLBACK_MODELS = [
   'deepseek-v4-flash',
 ];
 
-/** Text-to-Image models in fallback order — best quality first */
-const IMAGE_FALLBACK_MODELS = [
+/** Text-to-Image models — compatible-mode (OpenAI format) first, tried in priority order */
+const IMAGE_FALLBACK_MODELS_COMPAT = [
   'qwen-image-2.0-pro',
-  'qwen-image-2.0-pro-2026-03-03',
-  'qwen-image-2.0-pro-2026-04-22',
   'qwen-image-2.0-pro-2026-06-22',
+  'qwen-image-2.0-pro-2026-04-22',
+  'qwen-image-2.0-pro-2026-03-03',
   'qwen-image-max',
   'qwen-image-max-2025-12-30',
   'qwen-image-plus',
   'qwen-image-plus-2026-01-09',
   'qwen-image-2.0',
   'qwen-image-2.0-2026-03-03',
-  'qwen-image',
-  'z-image-turbo',
   'wan2.7-image-pro',
   'wan2.7-image',
-  'wan2.6-image',
-  'wan2.2-t2i-plus',
-  'wan2.2-t2i-flash',
-  'wan2.6-t2i',
-  'wan2.5-t2i-preview',
-  'wan2.1-t2i-plus',
-  'wan2.1-t2i-turbo',
+  'z-image-turbo',
+];
+
+/** Text-to-Image models — native DashScope format (fallback) */
+const IMAGE_FALLBACK_MODELS = [
+  'qwen-image-2.0-pro',
+  'qwen-image-max',
+  'qwen-image-plus',
+  'qwen-image-2.0',
+  'qwen-image',
+  'wan2.7-image-pro',
+  'wan2.7-image',
+  'z-image-turbo',
 ];
 
 /** Fetch with timeout and retry for unreliable connections */
@@ -248,10 +314,41 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2, timeo
   throw new Error('Unreachable');
 }
 
-const TTS_FALLBACK_MODELS = ['qwen-audio-3.0-tts-flash', 'qwen-audio-3.0-tts-plus'];
+const TTS_FALLBACK_MODELS = ['qwen3-tts-flash', 'qwen-audio-3.0-tts-flash', 'cosyvoice-v3-flash'];
+const TTS_COMPAT_VOICES = ['cherry', 'stella'];
+
+/** TTS via native DashScope API (works with workspace keys) */
+async function callTTSCompat(model: string, request: TTSRequest, config: ReturnType<typeof getConfig>): Promise<AudioResult> {
+  const voice = request.voice && TTS_COMPAT_VOICES.includes(request.voice) ? request.voice : TTS_COMPAT_VOICES[0];
+  const nativeBase = getNativeBase();
+  const response = await fetchWithRetry(`${nativeBase}/aigc/multimodal-generation/generation`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      input: { text: request.text },
+      parameters: { voice, format: 'mp3' },
+    }),
+  }, 1, 30000);
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`TTS ${model} (${response.status}): ${errText.slice(0, 200)}`);
+  }
+  const data: any = await response.json();
+  // Native API returns output.audio.url — download and convert to base64
+  const audioUrl = data.output?.audio?.url;
+  if (!audioUrl) throw new Error(`TTS ${model}: no audio URL — ${JSON.stringify(data).slice(0, 200)}`);
+  // Fetch the audio file and convert to base64
+  const audioRes = await fetchWithRetry(audioUrl, {}, 1, 15000);
+  if (!audioRes.ok) throw new Error(`TTS ${model}: failed to download audio (${audioRes.status})`);
+  const arrayBuffer = await audioRes.arrayBuffer();
+  if (arrayBuffer.byteLength === 0) throw new Error(`TTS ${model}: empty audio`);
+  const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+  return { audioBase64, format: 'mp3' };
+}
 
 /**
- * Non-streaming TTS via WebSocket (DashScope native protocol).
+ * Non-streaming TTS via WebSocket (DashScope native protocol) — fallback only.
  * Establishes WS connection, sends run-task + continue-task + finish-task, collects binary audio.
  */
 async function callTTS(model: string, request: TTSRequest, apiKey: string, _baseUrlCompat: string): Promise<AudioResult> {
@@ -320,17 +417,18 @@ async function callTTS(model: string, request: TTSRequest, apiKey: string, _base
 }
 
 export async function alibabaTTS(request: TTSRequest): Promise<AudioResult> {
-  return callTTS(request.model || TTS_FALLBACK_MODELS[0], request, getConfig().ALIBABA_API_KEY, '');
+  const config = getConfig();
+  const model = request.model || TTS_FALLBACK_MODELS[0];
+  return callTTSCompat(model, request, config);
 }
 
-/** Try TTS models in fallback order until one succeeds */
+/** Try TTS models in fallback order */
 export async function alibabaTTSWithFallback(request: TTSRequest): Promise<AudioResult & { usedModel: string }> {
   const config = getConfig();
   const tried: string[] = [];
-
   for (const model of TTS_FALLBACK_MODELS) {
     try {
-      const result = await callTTS(model, request, config.ALIBABA_API_KEY, config.ALIBABA_BASE_URL);
+      const result = await callTTSCompat(model, request, config);
       return { ...result, usedModel: model };
     } catch (err: any) {
       tried.push(`${model}: ${err.message.slice(0, 80)}`);
@@ -377,4 +475,250 @@ export async function alibabaEmbedText(request: EmbeddingRequest): Promise<numbe
 
   const data = await response.json();
   return data.data?.map((d: { embedding: number[] }) => d.embedding) ?? [];
+}
+
+// ── Speech-to-Text (ASR) ──
+
+interface ASRRequest { audioBase64: string; model?: string; }
+
+const ASR_FALLBACK_MODELS = ['qwen3-asr-flash', 'qwen3-asr-flash-2026-02-10', 'paraformer-realtime-v2'];
+
+export async function alibabaASR(request: ASRRequest): Promise<{ text: string; language?: string }> {
+  const config = getConfig();
+  const tried: string[] = [];
+
+  // Phase 1: Compatible-mode HTTP (OpenAI audio/transcriptions format)
+  for (const model of ASR_FALLBACK_MODELS) {
+    try {
+      const audioBuffer = Buffer.from(request.audioBase64, 'base64');
+      // Build multipart/form-data manually for Node.js compatibility
+      const boundary = '----AlibabaASRBoundary' + Math.random().toString(36).slice(2);
+      const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\nContent-Type: audio/wav\r\n\r\n`;
+      const footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${model}\r\n--${boundary}--\r\n`;
+      const headerBytes = Buffer.from(header, 'utf-8');
+      const footerBytes = Buffer.from(footer, 'utf-8');
+      const body = Buffer.concat([headerBytes, audioBuffer, footerBytes]);
+
+      const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+      }, 1, 15000);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`ASR ${model} compat (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data = await response.json();
+      const text = data.text || '';
+      if (!text) throw new Error(`ASR ${model} compat: empty transcript`);
+      return { text, language: data.language };
+    } catch (err: any) {
+      tried.push(`${model}: ${err.message.slice(0, 80)}`);
+    }
+  }
+
+  // Phase 2: Native DashScope multimodal generation (fallback, only for non-workspace keys)
+  if (!isWorkspaceKey()) {
+    for (const model of ASR_FALLBACK_MODELS) {
+      try {
+        const nativeBase = getNativeBase();
+        if (!nativeBase) continue;
+        const response = await fetchWithRetry(`${nativeBase}/aigc/multimodal-generation/generation`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          input: { audio: request.audioBase64 },
+        }),
+      }, 2, 15000);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`ASR ${model} native (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data = await response.json();
+      const text = data.output?.text || data.output?.transcript || data.text || '';
+      if (text) return { text, language: data.output?.language };
+      tried.push(`${model}: empty transcript`);
+    } catch (err: any) {
+      tried.push(`${model}: ${err.message.slice(0, 80)}`);
+    }
+  }
+  }
+
+  throw new Error(`All ASR models exhausted. Tried: ${tried.join(' | ')}`);
+}
+
+// ── Image-to-Image (ITI) ──
+
+interface ImageToImageRequest { prompt: string; imageBase64: string; model?: string; strength?: number; }
+
+const ITI_FALLBACK_MODELS = ['wan2.7-image-pro', 'wan2.7-image', 'qwen-image-edit-max', 'qwen-image-edit-plus'];
+
+export async function alibabaImageToImage(request: ImageToImageRequest): Promise<ImageResult> {
+  const config = getConfig();
+  const tried: string[] = [];
+
+  // Use chat completions endpoint with multimodal content (image + text)
+  for (const model of ITI_FALLBACK_MODELS) {
+    try {
+      const imageUrl = request.imageBase64.startsWith('data:')
+        ? request.imageBase64
+        : `data:image/png;base64,${request.imageBase64}`;
+
+      const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: imageUrl } },
+              { type: 'text', text: request.prompt },
+            ],
+          }],
+          max_tokens: 2000,
+        }),
+      }, 2, 60000);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`ITI ${model} compat (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data: any = await response.json();
+      // Alibaba multimodal response: output.choices[0].message.content[0].image
+      const content = data.output?.choices?.[0]?.message?.content;
+      if (Array.isArray(content)) {
+        const imagePart = content.find((c: any) => c.image);
+        if (imagePart?.image) return { url: imagePart.image, model };
+      }
+      tried.push(`${model}: no image in response`);
+    } catch (err: any) { tried.push(`${model}: ${err.message.slice(0, 80)}`); }
+  }
+
+  // Phase 2: Native DashScope (fallback, only for non-workspace keys)
+  if (!isWorkspaceKey()) {
+    const nativeBase = getNativeBase();
+    if (nativeBase) {
+      for (const model of ['qwen-image-2.0', 'qwen-image']) {
+        try {
+          const response = await fetchWithRetry(`${nativeBase}/aigc/text2image/image-synthesis`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              input: { prompt: request.prompt, ref_image: request.imageBase64 || undefined },
+              parameters: { size: '1024*1024', n: 1 },
+            }),
+          }, 2, 30000);
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`ITI ${model} native (${response.status}): ${errText.slice(0, 200)}`);
+          }
+          const data: any = await response.json();
+          const url = data.output?.results?.[0]?.url;
+          if (url) return { url, model };
+          tried.push(`${model}: no URL in response`);
+        } catch (err: any) { tried.push(`${model}: ${err.message.slice(0, 80)}`); }
+      }
+    }
+  }
+  throw new Error(`All ITI models exhausted. Tried: ${tried.join(' | ')}`);
+}
+
+// ── Text-to-Video (TTV) ──
+
+interface TextToVideoRequest { prompt: string; model?: string; duration?: number; }
+
+const TTV_FALLBACK_MODELS = ['wan2.1-t2v-turbo', 'wan2.7-t2v', 'wan2.1-t2v-plus', 'wan2.6-t2v'];
+
+export async function alibabaTextToVideo(request: TextToVideoRequest): Promise<{ taskId: string; status: string }> {
+  const config = getConfig();
+  const model = request.model || TTV_FALLBACK_MODELS[0];
+  const tried: string[] = [];
+
+  // Native DashScope with async header (required for workspace keys)
+  for (const m of [model, ...TTV_FALLBACK_MODELS.filter(x => x !== model)]) {
+    try {
+      const response = await fetchWithRetry(`${getNativeBase()}/aigc/video-generation/video-synthesis`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
+          'Content-Type': 'application/json',
+          'X-DashScope-Async': 'enable',
+        },
+        body: JSON.stringify({
+          model: m,
+          input: { prompt: request.prompt },
+          parameters: { duration: request.duration || 5 },
+        }),
+      }, 2, 30000);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`TTV ${m} (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data: any = await response.json();
+      const taskId = data.output?.task_id || data.task_id || '';
+      if (taskId) return { taskId, status: data.output?.task_status || 'PENDING' };
+      tried.push(`${m}: no task_id`);
+    } catch (err: any) { tried.push(`${m}: ${err.message.slice(0, 80)}`); }
+  }
+  throw new Error(`All TTV models exhausted. Tried: ${tried.join(' | ')}`);
+}
+
+export async function alibabaGetVideoResult(taskId: string): Promise<{ url?: string; status: string }> {
+  const config = getConfig();
+
+  // Native DashScope with async support
+  const response = await fetchWithRetry(`${getNativeBase()}/aigc/video-generation/video-synthesis/${taskId}`, {
+    headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}` },
+  }, 1, 10000);
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Video result (${response.status}): ${errText.slice(0, 200)}`);
+  }
+  const data: any = await response.json();
+  const url = data.output?.video_url || data.output?.results?.[0]?.url || data.output?.results?.[0]?.video_url;
+  return { url, status: data.output?.task_status || 'UNKNOWN' };
+}
+
+// ── Image-to-Video (ITV) ──
+
+interface ImageToVideoRequest { prompt: string; imageBase64: string; model?: string; }
+
+const ITV_FALLBACK_MODELS = ['wan2.1-i2v-turbo', 'wan2.7-i2v', 'wan2.1-i2v-plus', 'wan2.6-i2v'];
+
+export async function alibabaImageToVideo(request: ImageToVideoRequest): Promise<{ taskId: string; status: string }> {
+  const config = getConfig();
+  const model = request.model || ITV_FALLBACK_MODELS[0];
+  const tried: string[] = [];
+
+  // Native DashScope with async header
+  for (const m of [model, ...ITV_FALLBACK_MODELS.filter(x => x !== model)]) {
+    try {
+      const response = await fetchWithRetry(`${getNativeBase()}/aigc/video-generation/video-synthesis`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
+          'Content-Type': 'application/json',
+          'X-DashScope-Async': 'enable',
+        },
+        body: JSON.stringify({
+          model: m,
+          input: { prompt: request.prompt, image: request.imageBase64 || undefined },
+        }),
+      }, 2, 30000);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`ITV ${m} (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data: any = await response.json();
+      const taskId = data.output?.task_id || data.task_id || '';
+      if (taskId) return { taskId, status: data.output?.task_status || 'PENDING' };
+      tried.push(`${m}: no task_id`);
+    } catch (err: any) { tried.push(`${m}: ${err.message.slice(0, 80)}`); }
+  }
+  throw new Error(`All ITV models exhausted. Tried: ${tried.join(' | ')}`);
 }

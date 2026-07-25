@@ -123,4 +123,46 @@ export class AiController {
   async clearMemories(@Param('characterId') characterId: string, @Req() req: any) {
     return this.aiService.clearMemories(characterId, req.user.userId);
   }
-}
+  @Post('image-to-image')
+  @UseGuards(JwtAuthGuard)
+  async imageToImage(@Body() body: { prompt: string; imageBase64: string }, @Req() req: any) {
+    try {
+      const result = await this.aiService.generateImageToImage(req.user.userId, body.prompt, body.imageBase64);
+      return result;
+    } catch (err: any) { return { error: err.message || 'ITI failed' }; }
+  }
+
+  @Post('text-to-video')
+  @UseGuards(JwtAuthGuard)
+  async textToVideo(@Body() body: { prompt: string }, @Req() req: any) {
+    try {
+      const result = await this.aiService.generateTextToVideo(req.user.userId, body.prompt);
+      return result;
+    } catch (err: any) { return { error: err.message || 'TTV failed' }; }
+  }
+
+  @Post('image-to-video')
+  @UseGuards(JwtAuthGuard)
+  async imageToVideo(@Body() body: { prompt: string; imageBase64: string }, @Req() req: any) {
+    try {
+      const result = await this.aiService.generateImageToVideo(req.user.userId, body.prompt, body.imageBase64);
+      return result;
+    } catch (err: any) { return { error: err.message || 'ITV failed' }; }
+  }
+
+  @Get('video/result/:taskId')
+  @UseGuards(JwtAuthGuard)
+  async getVideoResult(@Param('taskId') taskId: string) {
+    try {
+      return await this.aiService.getVideoResult(taskId);
+    } catch (err: any) { return { error: err.message || 'Video result fetch failed' }; }
+  }
+
+  @Post('asr')
+  @UseGuards(JwtAuthGuard)
+  async asr(@Body() body: { audioBase64: string }, @Req() req: any) {
+    try {
+      const result = await this.aiService.transcribeVoice(req.user.userId, body.audioBase64);
+      return result;
+    } catch (err: any) { return { error: err.message || 'ASR failed' }; }
+  }}

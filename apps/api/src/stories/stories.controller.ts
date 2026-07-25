@@ -1,46 +1,55 @@
-import { Controller, Get, Post, Delete, Param, Body, Req, UseGuards } from '@nestjs/common';
-import { getDb } from '@itchats/database';
-import { stories } from '@itchats/database/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { Controller, Get, Post, Delete, Param, Body, Req, UseGuards, Inject } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { OptionalJwtAuthGuard } from '../auth/jwt.guard';
+import { StoriesService } from './stories.service';
 
 @Controller('v1/stories')
 export class StoriesController {
+  constructor(@Inject(StoriesService) private readonly storiesService: StoriesService) {}
+
   @Get('feed')
-  @UseGuards(JwtAuthGuard)
   async getFeed() {
-    const db = getDb();
-    return db.select().from(stories)
-      .where(eq(stories.status, 'published'))
-      .orderBy(desc(stories.publishedAt))
-      .limit(50);
+    return this.storiesService.getFeed();
   }
 
   @Get('following')
   @UseGuards(JwtAuthGuard)
   async getFollowing(@Req() req: any) {
-    return { stories: [] };
+    return this.storiesService.getFollowing(req.user.userId);
+  }
+
+  @Get('character/:characterId')
+  async getCharacterStories(@Param('characterId') characterId: string) {
+    return this.storiesService.getCharacterStories(characterId);
   }
 
   @Post()
   @UseGuards(JwtAuthGuard)
   async create(@Body() body: { storyType: string; caption?: string; mediaAssetId?: string }, @Req() req: any) {
-    const db = getDb();
-    const [story] = await db.insert(stories).values({
-      authorUserId: req.user.id,
-      status: 'draft',
-      storyType: body.storyType,
-      caption: body.caption,
-      mediaAssetId: body.mediaAssetId,
-    }).returning();
-    return story;
+    return this.storiesService.createStory(req.user.userId, body);
   }
 
   @Delete(':storyId')
   @UseGuards(JwtAuthGuard)
   async delete(@Param('storyId') id: string, @Req() req: any) {
-    const db = getDb();
-    await db.update(stories).set({ status: 'removed' }).where(and(eq(stories.id, id), eq(stories.authorUserId, req.user.id)));
-    return { deleted: true };
+    return this.storiesService.deleteStory(req.user.userId, id);
+  }
+
+  @Post(':storyId/view')
+  @UseGuards(JwtAuthGuard)
+  async view(@Param('storyId') id: string, @Req() req: any) {
+    return this.storiesService.viewStory(req.user.userId, id);
+  }
+
+  @Post(':storyId/like')
+  @UseGuards(JwtAuthGuard)
+  async like(@Param('storyId') id: string, @Req() req: any) {
+    return this.storiesService.likeStory(req.user.userId, id);
+  }
+
+  @Delete(':storyId/like')
+  @UseGuards(JwtAuthGuard)
+  async unlike(@Param('storyId') id: string, @Req() req: any) {
+    return this.storiesService.unlikeStory(req.user.userId, id);
   }
 }

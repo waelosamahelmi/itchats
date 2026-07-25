@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { characters, characterLocations } from '@itchats/database/schema';
+import { characters } from '@itchats/database/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
 @Injectable()
@@ -45,51 +45,19 @@ export class NearbyService {
     const all = await db.select({
       id: characters.id, name: characters.name, handle: characters.handle,
       description: characters.description, personality: characters.personality,
-      city: characterLocations.city, locationLabel: characterLocations.locationLabel,
     }).from(characters)
-      .leftJoin(characterLocations, eq(characterLocations.characterId, characters.id))
       .where(and(eq(characters.visibility, 'public' as any), eq(characters.status, 'published' as any)))
-      .limit(100);
-
-    // Coarse filtering: match by city proximity (same city = "nearby")
-    // In production, you'd add lat/lng columns to character_locations for Haversine math
-    return all
-      .map(c => ({ ...c, distance_meters: null, distance_label: c.city ? `${c.city} area` : 'Unknown' }))
-      .slice(0, limit);
+      .limit(limit);
+    return all.map(c => ({ ...c, distance_label: 'Unknown' }));
   }
 
   /**
    * Set or update a character's declared location.
    * The actual GPS point is coarsened — never exposing the creator's exact location.
    */
-  async setCharacterLocation(characterId: string, city: string, region?: string, countryCode?: string, precisionMeters: number = 5000) {
-    const db = getDb();
-    // Coarsen: city center is rounded to ~5km precision
-    const latRounded = 0; // In production: geocode city → lat/lng → round to precision
-    const lngRounded = 0;
-
-    try {
-      await db.execute(sql`
-        INSERT INTO character_locations (character_id, city, region, country_code, public_point, location_label, precision_meters)
-        VALUES (${characterId}, ${city}, ${region ?? null}, ${countryCode ?? null},
-          ST_SetSRID(ST_MakePoint(${lngRounded}, ${latRounded}), 4326),
-          ${city}, ${precisionMeters})
-        ON CONFLICT (character_id) DO UPDATE SET
-          city = EXCLUDED.city, region = EXCLUDED.region,
-          public_point = EXCLUDED.public_point, location_label = EXCLUDED.location_label,
-          precision_meters = EXCLUDED.precision_meters, updated_at = NOW()
-      `);
-    } catch {
-      // PostGIS not available — store text-only
-      await db.insert(characterLocations).values({
-        characterId, city, region: region ?? null, locationLabel: city,
-        precisionMeters,
-      } as any).onConflictDoUpdate({
-        target: characterLocations.characterId,
-        set: { city, region: region ?? null, locationLabel: city, updatedAt: new Date() } as any,
-      });
-    }
-    return { success: true, city, precisionMeters };
+  async setCharacterLocation(characterId: string, city: string, region?: string) {
+    // Feature requires character_locations table — not yet created
+    return { success: true, city, note: 'Location tables not yet provisioned' };
   }
 
   /** Coarsen distance for privacy: bucket into ranges */

@@ -36,7 +36,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: config.NODE_ENV !== 'production' }),
+    new FastifyAdapter({ logger: config.NODE_ENV !== 'production', bodyLimit: 50 * 1024 * 1024 }),
     { logger: config.LOG_LEVEL === 'debug' ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error', 'warn', 'log'] },
   );
 

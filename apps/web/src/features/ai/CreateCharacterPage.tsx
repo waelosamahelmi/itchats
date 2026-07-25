@@ -25,7 +25,7 @@ export default function CreateCharacterPage() {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const API = 'http://localhost:3092/v1';
+  const API = (import.meta as any).env?.VITE_API_URL || '/v1';
 
   const handleAutofill = async () => {
     if (!token || !name) return;

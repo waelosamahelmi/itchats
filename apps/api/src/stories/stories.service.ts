@@ -33,15 +33,16 @@ export class StoriesService {
       .limit(20);
   }
 
-  async createStory(userId: string, data: { storyType: string; caption?: string; mediaAssetId?: string }) {
+  async createStory(userId: string, data: { storyType: string; caption?: string; mediaUrl?: string }) {
     const db = getDb();
     const [story] = await db.insert(stories).values({
       authorUserId: userId,
+      creatorId: userId,
       status: 'draft',
       storyType: data.storyType,
       caption: data.caption,
-      mediaAssetId: data.mediaAssetId,
-    }).returning();
+      mediaUrl: data.mediaUrl,
+    } as any).returning();
     return story;
   }
 

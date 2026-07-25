@@ -1,6 +1,6 @@
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Settings, CreditCard, User, Compass, Search, Bot } from 'lucide-react';
+import { LogOut, Settings, CreditCard, User, Compass, Search, Bot, Shield } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch } from '@/app/store';
 import { Avatar, Card } from '@itchats/ui';
@@ -41,6 +41,11 @@ export default function ProfilePage() {
             <Icon size={20} className="text-text-secondary" /><span className="text-sm text-text-primary">{label}</span>
           </button>
         ))}
+        {user.role === 'admin' && (
+          <button onClick={() => nav('/admin')} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl glass hover:bg-brand-glow/20 transition-colors text-left border border-brand-primary/20">
+            <Shield size={20} className="text-brand-primary" /><span className="text-sm text-brand-primary font-medium">Admin Panel</span>
+          </button>
+        )}
         <button onClick={() => dispatch(logout())} className="flex w-full items-center gap-3 px-4 py-3 rounded-xl glass hover:bg-danger/10 transition-colors text-left text-danger mt-4">
           <LogOut size={20} /><span className="text-sm">Sign Out</span>
         </button>

@@ -18,13 +18,12 @@ export const conversations = pgTable('conversations', {
   characterId: uuid('character_id').references(() => characters.id, { onDelete: 'set null' }),
   title: text('title'),
   summary: text('summary'),
-  summaryUpdatedAt: timestamp('summary_updated_at', { withTimezone: true }),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
-  characterIdx: index('idx_conversations_character').on(table.characterId, table.lastMessageAt?.desc()),
+  characterIdx: index('idx_conversations_character').on(table.characterId, table.lastMessageAt),
 }));
 
 export const conversationParticipants = pgTable('conversation_participants', {

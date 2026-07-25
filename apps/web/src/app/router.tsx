@@ -20,6 +20,7 @@ const ProfilePage = lazy(() => import('@/features/profile/ProfilePage'));
 const BillingPage = lazy(() => import('@/features/billing/BillingPage'));
 const AuthPage = lazy(() => import('@/features/auth/AuthPage'));
 const AuthCallbackPage = lazy(() => import('@/features/auth/AuthCallbackPage'));
+const AdminPanelPage = lazy(() => import('@/features/admin/AdminPanelPage'));
 
 function Loading() {
   return (
@@ -56,6 +57,7 @@ export function Router() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/admin" element={<AdminPanelPage />} />
           </Route>
         </Route>
       </Routes>

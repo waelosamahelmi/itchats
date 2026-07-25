@@ -1,0 +1,40 @@
+module.exports = {
+  apps: [
+    {
+      name: "itchats-api",
+      cwd: "/opt/itchats/apps/api",
+      script: "dist/main.js",
+      interpreter: "node",
+      interpreter_args: "--import tsx/esm",
+      env: { NODE_ENV: "production" },
+      autorestart: true,
+      max_memory_restart: "1G",
+    },
+    {
+      name: "itchats-web",
+      cwd: "/opt/itchats/apps/web",
+      script: "npx",
+      args: "vite preview --port 3090 --host 0.0.0.0",
+      env: { NODE_ENV: "production" },
+      autorestart: true,
+    },
+    {
+      name: "itchats-admin",
+      cwd: "/opt/itchats/apps/admin",
+      script: "npx",
+      args: "vite preview --port 3091 --host 0.0.0.0",
+      env: { NODE_ENV: "production" },
+      autorestart: true,
+    },
+    {
+      name: "itchats-worker",
+      cwd: "/opt/itchats/apps/worker",
+      script: "dist/main.js",
+      interpreter: "node",
+      interpreter_args: "--import tsx/esm",
+      env: { NODE_ENV: "production" },
+      autorestart: true,
+      max_memory_restart: "512M",
+    },
+  ],
+};

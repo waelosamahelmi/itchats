@@ -5,6 +5,7 @@ import { Compass, Sparkles, Flame } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
 const TABS = ['For You', 'Trending', 'New', 'Nearby'];
+const API = (import.meta as any).env?.VITE_API_URL || '/v1';
 
 export default function DiscoverPage() {
   const nav = useNavigate();
@@ -15,7 +16,7 @@ export default function DiscoverPage() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3092/v1/characters/discover?limit=20', {
+    fetch(`${API}/characters/discover?limit=20`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.json()).then(d => setChars(Array.isArray(d) ? d : [])).catch(() => {}).finally(() => setLoading(false));
   }, [token]);

@@ -1,8 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Clock, Eye, Heart, Play, Sparkles } from 'lucide-react';
 import type { RootState } from '@/app/store';
+
+const API = (import.meta as any).env?.VITE_API_URL || '/v1';
+
+async function fetchJson(url: string, token: string, opts?: RequestInit) {
+  const res = await fetch(`${API}${url}`, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...opts?.headers },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
 
 export default function StoriesPage() {
   const nav = useNavigate();
@@ -10,13 +21,48 @@ export default function StoriesPage() {
   const [stories, setStories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeStory, setActiveStory] = useState<number | null>(null);
+  const [likedStories, setLikedStories] = useState<Set<string>>(new Set());
+  const [viewedStories, setViewedStories] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
+  const loadFeed = useCallback(async () => {
     if (!token) { setLoading(false); return; }
-    fetch('http://localhost:3092/v1/stories/feed', {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(r => r.json()).then(d => setStories(Array.isArray(d) ? d : [])).catch(() => {}).finally(() => setLoading(false));
+    try {
+      const data = await fetchJson('/stories/feed', token);
+      setStories(Array.isArray(data) ? data : []);
+    } catch {} finally { setLoading(false); }
   }, [token]);
+
+  useEffect(() => { loadFeed(); }, [loadFeed]);
+
+  const viewStory = async (storyId: string) => {
+    if (!token || viewedStories.has(storyId)) return;
+    try {
+      await fetchJson(`/stories/${storyId}/view`, token, { method: 'POST' });
+      setViewedStories(prev => new Set(prev).add(storyId));
+    } catch {}
+  };
+
+  const toggleLike = async (storyId: string) => {
+    if (!token) return;
+    const liked = likedStories.has(storyId);
+    try {
+      if (liked) {
+        await fetchJson(`/stories/${storyId}/like`, token, { method: 'DELETE' });
+      } else {
+        await fetchJson(`/stories/${storyId}/like`, token, { method: 'POST' });
+      }
+      setLikedStories(prev => {
+        const next = new Set(prev);
+        liked ? next.delete(storyId) : next.add(storyId);
+        return next;
+      });
+    } catch {}
+  };
+
+  const onSelectStory = (i: number) => {
+    setActiveStory(i === activeStory ? null : i);
+    if (stories[i]) viewStory(stories[i].id);
+  };
 
   if (!token) return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
@@ -43,7 +89,7 @@ export default function StoriesPage() {
         {stories.length > 0 && (
           <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
             {stories.map((s: any, i: number) => (
-              <button key={s.id || i} onClick={() => setActiveStory(i === activeStory ? null : i)} className={`flex flex-col items-center gap-1.5 shrink-0 transition-all ${activeStory === i ? 'scale-105' : ''}`}>
+              <button key={s.id || i} onClick={() => onSelectStory(i)} className={`flex flex-col items-center gap-1.5 shrink-0 transition-all ${activeStory === i ? 'scale-105' : ''}`}>
                 <div className={`w-[68px] h-[68px] rounded-full p-[2px] ${activeStory === i ? 'bg-gradient-to-br from-brand-primary via-accent-gradient-2 to-social-warm' : 'bg-border-subtle'}`}>
                   <div className="w-full h-full rounded-full bg-bg-canvas flex items-center justify-center">
                     <span className="text-brand-secondary font-bold text-lg">{s.author_character_id?.[0] || 'A'}</span>
@@ -76,7 +122,10 @@ export default function StoriesPage() {
                   <span className="text-xs text-text-muted">0 views</span>
                 </div>
                 <div className="flex gap-3">
-                  <button className="glass rounded-full p-2 text-text-secondary hover:text-brand-primary transition-colors"><Heart size={16} /></button>
+                  <button onClick={() => toggleLike(stories[activeStory].id)}
+                    className={`glass rounded-full p-2 transition-colors ${likedStories.has(stories[activeStory].id) ? 'text-rose-400' : 'text-text-secondary hover:text-rose-400'}`}>
+                    <Heart size={16} fill={likedStories.has(stories[activeStory].id) ? 'currentColor' : 'none'} />
+                  </button>
                   <button className="glass rounded-full p-2 text-text-secondary hover:text-brand-primary transition-colors"><Sparkles size={16} /></button>
                 </div>
               </div>

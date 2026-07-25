@@ -8,6 +8,7 @@ export default function SearchPage() {
   const nav = useNavigate();
   const { token } = useSelector((s: RootState) => s.auth);
   const [query, setQuery] = useState('');
+  const API = (import.meta as any).env?.VITE_API_URL || '/v1';
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -17,7 +18,7 @@ export default function SearchPage() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await fetch(`http://localhost:3092/v1/characters/search?q=${encodeURIComponent(query)}`, {
+      const res = await fetch(`${API}/characters/search?q=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setResults(res.ok ? await res.json() : []);

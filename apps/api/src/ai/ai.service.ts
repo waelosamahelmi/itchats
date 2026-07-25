@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { alibabaChatStream, alibabaTTS, alibabaTextToImageWithFallback } from '@itchats/ai-core';
+import { alibabaChatStream, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
 import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships } from '@itchats/database/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
@@ -37,7 +37,7 @@ export class AiService {
       const [conv] = await db.insert(conversations).values({
         type: characterId ? 'human_character' : 'human_human',
         createdByUserId: userId,
-        characterId: characterId,
+        ...(characterId ? { characterId } : {}),
       }).returning({ id: conversations.id });
       if (!conv) throw new Error('Failed to create conversation');
       cid = conv.id;
@@ -47,7 +47,7 @@ export class AiService {
     await db.insert(messages).values({
       conversationId: convId, senderType: 'user', senderUserId: userId,
       type: 'text', content: message, clientIdempotencyKey: clientKey,
-    }).onConflictDoNothing();
+    } as any).onConflictDoNothing();
 
     let systemPrompt = 'You are a helpful AI assistant on ItChats. Keep responses friendly and concise.';
     if (characterId) {
@@ -67,7 +67,7 @@ export class AiService {
     }
 
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, conversationId: convId, generationType: 'llm_chat',
+      userId, characterId, generationType: 'llm_chat',
       routeKey: 'chat.standard', idempotencyKey: randomUUID(),
       requestJson: { message, systemPrompt }, status: 'processing', startedAt: new Date(),
     }).returning();
@@ -98,7 +98,7 @@ export class AiService {
 
     const [aiMsg] = await db.insert(messages).values({
       conversationId: convId, senderType: 'character', senderCharacterId: characterId,
-      type: 'text', content: fullResponse, modelGenerationId: job!.id,
+      type: 'text', content: fullResponse,
     }).returning();
 
     await db.update(generationJobs).set({
@@ -222,8 +222,66 @@ export class AiService {
     return { audioUrl: dataUrl, format: 'mp3', creditsUsed: cost };
   }
 
+  async generateImageToImage(userId: string, prompt: string, imageBase64: string) {
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image') * 1.5;
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const result = await alibabaImageToImage({ prompt, imageBase64 });
+    if (!result?.url) throw new Error('Image-to-image failed — no URL returned');
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'image_to_image', routeKey: 'image.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt }, status: 'succeeded',
+      responseJson: { url: result.url, model: result.model }, completedAt: new Date(),
+    }).returning();
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
+    return { url: result.url, model: result.model, creditsUsed: cost };
+  }
+
+  async generateTextToVideo(userId: string, prompt: string) {
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = 50;
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const result = await alibabaTextToVideo({ prompt });
+    return { ...result, creditsUsed: cost };
+  }
+
+  async generateImageToVideo(userId: string, prompt: string, imageBase64: string) {
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = 50;
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const result = await alibabaImageToVideo({ prompt, imageBase64 });
+    return { ...result, creditsUsed: cost };
+  }
+
+  async getVideoResult(taskId: string) {
+    return alibabaGetVideoResult(taskId);
+  }
+
   async transcribeVoice(userId: string, audioBase64: string) {
-    return { text: '[Voice transcription requires configured ASR endpoint]' };
+    const db = getDb();
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = 2;
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const result = await alibabaASR({ audioBase64 });
+    return { text: result.text, language: result.language, creditsUsed: cost };
   }
 
   private async extractMemory(

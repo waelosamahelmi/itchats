@@ -80,12 +80,15 @@ html.light ::-webkit-scrollbar-thumb {
 @layer base {
   * {
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
   html {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: #06060b;
+    height: 100dvh;
+    overflow: hidden;
   }
   html.light {
     background: #f8f7fc;
@@ -93,6 +96,9 @@ html.light ::-webkit-scrollbar-thumb {
   body {
     @apply bg-bg-canvas text-text-primary;
     overscroll-behavior: none;
+    height: 100dvh;
+    overflow: hidden;
+    width: 100%;
     background-image:
       radial-gradient(ellipse 80% 60% at 50% -20%, rgba(255,72,210,0.10), transparent),
       radial-gradient(ellipse 60% 40% at 20% 80%, rgba(255,72,210,0.05), transparent);

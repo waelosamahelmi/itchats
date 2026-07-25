@@ -12,7 +12,7 @@ import { getDb } from '@itchats/database';
 import { messages, conversations, conversationParticipants } from '@itchats/database/schema';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { verify } from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 import { getConfig } from '@itchats/config';
 
 interface AuthenticatedSocket extends Socket {
@@ -34,7 +34,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const config = getConfig();
-      const decoded = verify(token, config.JWT_SECRET) as { sub: string; email: string; role: string };
+      const decoded = jwt.verify(token, config.JWT_SECRET) as { sub: string; email: string; role: string };
       client.userId = decoded.sub;
       if (!this.userSockets.has(decoded.sub)) this.userSockets.set(decoded.sub, new Set());
       this.userSockets.get(decoded.sub)!.add(client.id);

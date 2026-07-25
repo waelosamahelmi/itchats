@@ -70,4 +70,16 @@ export class AuthController {
   async linkGoogle(@Req() req: any, @Body() body: { oauthProfile: OAuthProfile }) {
     return this.authService.linkOAuthAccount(req.user.userId, body.oauthProfile);
   }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body() body: { email: string }) {
+    return this.authService.forgotPassword(body.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() body: { token: string; password: string }) {
+    return this.authService.resetPassword(body.token, body.password);
+  }
 }

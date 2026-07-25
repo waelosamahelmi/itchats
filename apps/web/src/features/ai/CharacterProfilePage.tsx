@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import {
-  ArrowLeft, MessageCircle, Heart, Share2, Flag, MapPin, Sparkles,
-  Globe, Lock,
-} from 'lucide-react';
+import { ArrowLeft, MessageCircle, Heart, Share2, Flag, Users, MapPin, Sparkles } from 'lucide-react';
 import type { RootState } from '@/app/store';
-import { Badge } from '@itchats/ui';
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
 
 export default function CharacterProfilePage() {
   const { characterId } = useParams<{ characterId: string }>();
@@ -16,256 +10,85 @@ export default function CharacterProfilePage() {
   const { token } = useSelector((s: RootState) => s.auth);
   const [char, setChar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [following, setFollowing] = useState(false);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
 
   useEffect(() => {
     if (!token || !characterId) return;
-    setLoading(true);
-    async function load() {
-      try {
-        const res = await fetch(`${API}/characters/${characterId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error('Character not found');
-        const data = await res.json();
-        setChar(data);
-        setFollowersCount(data.followersCount || 0);
-
-        const relRes = await fetch(`${API}/ai/relationship/${characterId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => null);
-        if (relRes?.ok) {
-          const rel = await relRes.json();
-          setRelationship(rel);
-        }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load character');
-      }
-      setLoading(false);
-    }
-    load();
+    fetch(`/v1/characters/${characterId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json()).then(setChar).catch(console.error).finally(() => setLoading(false));
   }, [characterId, token]);
 
-  const handleFollow = async () => {
-    if (!token) return;
-    try {
-      if (following) {
-        await fetch(`${API}/characters/${characterId}/follow`, {
-          method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-        });
-        setFollowing(false);
-        setFollowersCount((c: number) => Math.max(0, c - 1));
-      } else {
-        await fetch(`${API}/characters/${characterId}/follow`, {
-          method: 'POST', headers: { Authorization: `Bearer ${token}` },
-        });
-        setFollowing(true);
-        setFollowersCount((c: number) => c + 1);
-      }
-    } catch { /* ignore */ }
-  };
-
-  const handleShare = async () => {
-    const url = `${window.location.origin}/ai/profile/${characterId}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      alert('Profile link copied to clipboard!');
-    } catch {
-      prompt('Copy this link:', url);
-    }
-  };
-
-  const handleReport = () => {
-    const reason = prompt('Why are you reporting this character?');
-    if (reason && token) {
-      fetch(`${API}/reports`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entityType: 'character', entityId: characterId, reason }),
-      }).then(() => alert('Report submitted. Thank you.')).catch(() => {});
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-bg-canvas">
-        <div className="flex gap-1">
-          <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !char) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-bg-canvas gap-4 text-text-muted">
-        <p className="text-lg font-semibold">{error || 'Character not found'}</p>
-        <button onClick={() => nav(-1)} className="text-brand-primary text-sm">Go back</button>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex h-full items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" /></div>;
+  if (!char) return <div className="flex h-full items-center justify-center text-text-muted text-sm">Character not found</div>;
 
   return (
     <div className="flex flex-col h-full bg-bg-canvas">
-      <header className="flex items-center gap-3 px-4 py-3 safe-top glass border-b border-border-subtle shrink-0">
-        <button onClick={() => nav(-1)} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <ArrowLeft size={20} className="text-text-secondary" />
-        </button>
-        <h1 className="text-lg font-semibold text-text-primary">{char.name}</h1>
-        <div className="flex-1" />
-        <button onClick={handleShare} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <Share2 size={18} className="text-text-secondary" />
-        </button>
-        <button onClick={handleReport} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <Flag size={18} className="text-text-secondary" />
-        </button>
+      <header className="safe-top px-5 pt-4 pb-2">
+        <div className="flex items-center justify-between">
+          <button onClick={() => nav(-1)} className="p-1.5 rounded-full glass hover:bg-white/10"><ArrowLeft size={20} className="text-text-secondary" /></button>
+          <div className="flex gap-2">
+            <button className="p-2 rounded-full glass hover:bg-white/10"><Share2 size={17} className="text-text-secondary" /></button>
+            <button className="p-2 rounded-full glass hover:bg-white/10"><Flag size={17} className="text-text-secondary" /></button>
+          </div>
+        </div>
       </header>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col items-center px-6 py-8">
-          <div className="w-24 h-24 rounded-full bg-brand-glow flex items-center justify-center mb-4 shadow-lg shadow-brand-glow/30">
-            <span className="text-brand-secondary text-3xl font-bold">{char.name?.[0]}</span>
+      <div className="flex-1 overflow-y-auto px-5">
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-24 h-24 rounded-full bg-brand-glow flex items-center justify-center mb-4 accent-glow">
+            <span className="text-3xl font-bold text-brand-primary">{char.name?.[0]}</span>
           </div>
           <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-xl font-bold text-text-primary">{char.name}</h2>
-            <Badge variant="ai" className="text-[10px]">AI</Badge>
+            <h1 className="text-xl font-bold text-text-primary">{char.name}</h1>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/15 text-brand-primary font-medium">AI</span>
           </div>
-          <p className="text-text-muted text-xs mb-4">
-            {char.visibility === 'public' ? (
-              <span className="flex items-center gap-1"><Globe size={12} /> Public character</span>
-            ) : (
-              <span className="flex items-center gap-1"><Lock size={12} /> Private character</span>
-            )}
-          </p>
-
-          <div className="flex items-center gap-6 mb-6">
-            <div className="text-center">
-              <p className="text-lg font-bold text-text-primary">{followersCount}</p>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Followers</p>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-bold text-text-primary">{relationship?.level || '--'}</p>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Relationship</p>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-bold text-text-primary">--</p>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Stories</p>
-            </div>
-          </div>
-
-          <div className="flex gap-3 w-full max-w-xs">
-            <button
-              onClick={() => nav(`/ai/chat/${characterId}`)}
-              className="flex-1 flex items-center justify-center gap-2 rounded-full bg-brand-primary text-white py-3 text-sm font-medium transition-all hover:brightness-110 hover:shadow-lg hover:shadow-brand-glow"
-            >
-              <MessageCircle size={16} /> Chat
-            </button>
-            <button
-              onClick={handleFollow}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-full py-3 text-sm font-medium transition-all ${
-                following ? 'bg-accent-warm/15 text-accent-warm border border-accent-warm/30' : 'glass text-text-primary hover:bg-white/5'
-              }`}
-            >
-              <Heart size={16} className={following ? 'fill-current' : ''} /> {following ? 'Following' : 'Follow'}
-            </button>
+          {char.handle && <p className="text-text-muted text-sm">@{char.handle}</p>}
+          {char.city && <p className="text-text-muted text-xs flex items-center gap-1 mt-1"><MapPin size={12} />{char.city}</p>}
+          <div className="flex items-center gap-6 mt-4">
+            <div className="text-center"><p className="text-lg font-bold text-text-primary">--</p><p className="text-[10px] text-text-muted">Followers</p></div>
+            <div className="text-center"><p className="text-lg font-bold text-text-primary">--</p><p className="text-[10px] text-text-muted">Stories</p></div>
+            <div className="text-center"><p className="text-lg font-bold text-text-primary">--</p><p className="text-[10px] text-text-muted">Chats</p></div>
           </div>
         </div>
-
-        <div className="px-5 pb-8 space-y-5">
-          {char.description && (
-            <section>
-              <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">About</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">{char.description}</p>
-            </section>
-          )}
-
+        <div className="glass rounded-2xl p-5 mb-4">
+          <h2 className="text-sm font-semibold text-text-primary mb-2">About</h2>
+          <p className="text-sm text-text-secondary leading-relaxed">{char.description || 'No description yet.'}</p>
           {char.personality && (
-            <section>
-              <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">Personality</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">{char.personality}</p>
-            </section>
-          )}
-
-          {char.backstory && (
-            <section>
-              <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">Backstory</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">{char.backstory}</p>
-            </section>
-          )}
-
-          <section>
-            <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">Details</h3>
-            <div className="glass rounded-2xl p-4 space-y-3 text-sm">
-              {char.ageDisplay && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Age</span>
-                  <span className="text-text-primary">{char.ageDisplay}</span>
-                </div>
-              )}
-              {char.gender && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Gender</span>
-                  <span className="text-text-primary">{char.gender}</span>
-                </div>
-              )}
-              {char.pronouns && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Pronouns</span>
-                  <span className="text-text-primary">{char.pronouns}</span>
-                </div>
-              )}
-              {char.occupation && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Occupation</span>
-                  <span className="text-text-primary">{char.occupation}</span>
-                </div>
-              )}
-              {char.interests?.length > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Interests</span>
-                  <span className="text-text-primary">{Array.isArray(char.interests) ? char.interests.join(', ') : char.interests}</span>
-                </div>
-              )}
-              {char.languages?.length > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Languages</span>
-                  <span className="text-text-primary">{Array.isArray(char.languages) ? char.languages.join(', ') : char.languages}</span>
-                </div>
-              )}
-              {char.location && (
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Location</span>
-                  <span className="text-text-primary flex items-center gap-1">
-                    <MapPin size={12} /> {char.location.city || char.location.location_label || char.location.city}
-                  </span>
-                </div>
-              )}
+            <div className="mt-3 pt-3 border-t border-border-subtle">
+              <h3 className="text-xs font-medium text-text-muted mb-1.5">Personality</h3>
+              <p className="text-sm text-text-secondary">{char.personality}</p>
             </div>
-          </section>
-
-          {relationship && (
-            <section>
-              <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">Your Relationship</h3>
-              <div className="glass rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-text-primary font-medium">{relationship.label}</span>
-                  <span className="text-xs text-brand-secondary">Level {relationship.level}/10</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-bg-elevated overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-brand-primary to-accent-warm transition-all duration-500"
-                    style={{ width: `${(relationship.level / 10) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </section>
           )}
         </div>
+        {char.backstory && (
+          <div className="glass rounded-2xl p-5 mb-4">
+            <h2 className="text-sm font-semibold text-text-primary mb-2">Backstory</h2>
+            <p className="text-sm text-text-secondary leading-relaxed">{char.backstory}</p>
+          </div>
+        )}
+        <div className="glass rounded-2xl p-5 mb-4">
+          <h2 className="text-sm font-semibold text-text-primary mb-3">Details</h2>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            {[
+              ['Visibility', char.visibility],
+              ['Gender', char.gender || '—'],
+              ['Languages', Array.isArray(char.languages) ? char.languages.join(', ') : 'en'],
+              ['Created', new Date(char.createdAt).toLocaleDateString()],
+            ].map(([k, v]) => (
+              <div key={k}><span className="text-text-muted">{k}</span><p className="text-text-primary mt-0.5">{v}</p></div>
+            ))}
+          </div>
+        </div>
+        <p className="text-[10px] text-text-muted text-center pb-4 flex items-center justify-center gap-1">
+          <Sparkles size={10} /> This is an AI character. All content is generated.
+        </p>
+      </div>
+      <div className="safe-bottom p-4 pt-2 flex gap-3">
+        <button className="flex-1 rounded-2xl glass py-3.5 text-sm font-semibold text-brand-primary flex items-center justify-center gap-2 hover:bg-brand-glow/20 transition-all">
+          <Heart size={17} /> Follow
+        </button>
+        <button onClick={() => nav(`/ai/chat/${char.id}`)} className="flex-1 rounded-2xl bg-brand-primary py-3.5 text-sm font-semibold text-white flex items-center justify-center gap-2 accent-glow hover:brightness-110 transition-all">
+          <MessageCircle size={17} /> Chat
+        </button>
       </div>
     </div>
   );

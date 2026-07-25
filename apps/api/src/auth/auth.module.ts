@@ -9,6 +9,12 @@ import { GoogleStrategy } from './google.strategy';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from './jwt.guard';
 
 const config = getConfig();
+const hasGoogle = !!(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET);
+
+const providers: any[] = [AuthService, JwtStrategy, JwtAuthGuard, OptionalJwtAuthGuard];
+if (hasGoogle) {
+  providers.push(GoogleStrategy);
+}
 
 @Module({
   imports: [
@@ -16,7 +22,7 @@ const config = getConfig();
     JwtModule.register({ secret: config.JWT_SECRET, signOptions: { expiresIn: config.JWT_EXPIRES_IN } }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, JwtAuthGuard, OptionalJwtAuthGuard],
+  providers,
   exports: [AuthService, JwtModule, PassportModule, JwtAuthGuard, OptionalJwtAuthGuard],
 })
 export class AuthModule {}

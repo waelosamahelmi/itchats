@@ -3,9 +3,10 @@ import { StoriesController } from './stories.controller';
 import { StoriesService } from './stories.service';
 import { StorySchedulerService } from './story-scheduler.service';
 import { BillingModule } from '../billing/billing.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [forwardRef(() => BillingModule)],
+  imports: [forwardRef(() => BillingModule), AuthModule],
   controllers: [StoriesController],
   providers: [StoriesService, StorySchedulerService],
   exports: [StoriesService],

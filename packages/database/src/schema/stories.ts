@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, timestamp, jsonb, integer, index, pgEnum } from 'drizzle-orm/pg-core';
+import { desc } from 'drizzle-orm';
 import { users } from './users';
 import { characters } from './characters';
 
@@ -8,21 +9,24 @@ export const stories = pgTable('stories', {
   id: uuid('id').primaryKey().defaultRandom(),
   authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'cascade' }),
   authorCharacterId: uuid('author_character_id').references(() => characters.id, { onDelete: 'cascade' }),
+  characterId: uuid('character_id').references(() => characters.id, { onDelete: 'set null' }),
+  creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
   status: storyStatusEnum('status').notNull().default('draft'),
-  mediaAssetId: uuid('media_asset_id'),
   caption: text('caption'),
   storyType: text('story_type').notNull(),
+  mediaUrl: text('media_url'),
+  mediaType: text('media_type'),
+  thumbnailUrl: text('thumbnail_url'),
   generated: text('generated').notNull().default('false'),
-  generationJobId: uuid('generation_job_id'),
-  moderationStatus: text('moderation_status').notNull().default('pending'),
-  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  duration: integer('duration'),
+  viewCount: integer('view_count').default(0),
+  likeCount: integer('like_count').default(0),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
-  metadata: jsonb('metadata').notNull().default('{}'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
-  feedIdx: index('idx_stories_public_feed').on(table.status, table.publishedAt?.desc(), table.expiresAt),
-  charIdx: index('idx_stories_character').on(table.authorCharacterId, table.publishedAt?.desc()),
+  feedIdx: index('idx_stories_public_feed').on(table.status, desc(table.publishedAt), table.expiresAt),
+  charIdx: index('idx_stories_character').on(table.authorCharacterId, desc(table.publishedAt)),
 }));
 
 export const storyViews = pgTable('story_views', {

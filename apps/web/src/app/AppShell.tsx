@@ -14,12 +14,12 @@ export default function AppShell() {
   const hideNav = loc.pathname.startsWith('/ai/chat/') || loc.pathname.startsWith('/ai/create') || loc.pathname.includes('/auth');
 
   return (
-    <div className="flex flex-col h-screen bg-bg-canvas overflow-hidden">
+    <div className="flex flex-col bg-bg-canvas overflow-hidden" style={{ height: '100dvh' }}>
       <main className="flex-1 overflow-y-auto overflow-x-hidden">
         <Outlet />
       </main>
       {!hideNav && (
-        <nav className="safe-bottom shrink-0 px-2 pb-1 pt-1">
+        <nav className="safe-bottom shrink-0 px-2 pb-3 pt-1">
           <div className="glass rounded-[20px] flex items-center justify-around h-16 px-1 mx-auto max-w-lg">
             {tabs.map(({ to, icon: Icon, label }) => (
               <NavLink key={to} to={to} end={to === '/'}
