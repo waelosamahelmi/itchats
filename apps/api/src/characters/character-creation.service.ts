@@ -129,14 +129,21 @@ export class CharacterCreationService {
     const personality = char.personality || '';
     const occupation = char.occupation || '';
 
+    // Build a highly specific image prompt for character portrait
+    const genderLabel = gender || 'person';
+    const ageLabel = ageDisplay || 'young adult';
+    const appearanceDesc = appearance ? appearance.substring(0, 200) : (char.description || '').substring(0, 200);
+    const personalityDesc = (char.personality || '').substring(0, 100);
+
     const imagePrompt = [
-      'professional character portrait, photorealistic, high quality',
-      gender ? `${gender}, ${ageDisplay}` : ageDisplay,
-      appearance ? appearance.substring(0, 200) : '',
-      occupation ? `dressed as ${occupation}` : '',
-      'cinematic lighting, 8k, sharp focus, detailed face',
-      'neutral background, studio quality, professional headshot',
-    ].filter(Boolean).join(', ');
+      `A photorealistic portrait photo of a ${genderLabel} in their ${ageLabel}`,
+      appearanceDesc || `${genderLabel} with natural features, expressive eyes, authentic look`,
+      occupation ? `wearing attire suitable for a ${occupation}` : 'wearing casual, modern clothing',
+      personalityDesc ? `expression reflecting: ${personalityDesc}` : 'natural, engaging expression',
+      'professional headshot photography style',
+      'soft cinematic lighting, shallow depth of field, sharp focus on face',
+      'neutral warm-toned background, 8K quality, ultra-detailed skin texture',
+    ].filter(Boolean).join('. ');
 
     // Update character status to generating
     await db.update(characters).set({ status: 'generating_identity' as any })
@@ -149,23 +156,11 @@ export class CharacterCreationService {
 
       const result = await alibabaTextToImageWithFallback({ prompt: imagePrompt, size: '1024*1024' });
 
-      // Store as reference asset
-      const [ref] = await db.insert(characterReferenceAssets).values({
-        characterId,
-        mediaUrl: result.url,
-        mediaType: 'image/png',
-        approved: true as any,
-        qualityScore: 85,
-        generationJobId: null,
-        prompt: imagePrompt,
-      } as any).returning();
-
-      // Update character with avatar and status
-      await db.update(characters).set({
-        avatarMediaId: ref?.id,
-        status: 'ready' as any,
-        identityVersion: sql`${characters.identityVersion} + 1`,
-      }).where(eq(characters.id, characterId));
+      // Update character directly with the avatar URL (actual DB column is avatar_url)
+      await db.execute(sql`
+        UPDATE characters SET avatar_url = ${result.url}, status = 'ready', identity_version = identity_version + 1, updated_at = NOW()
+        WHERE id = ${characterId}
+      `);
 
       // Record usage
       await db.insert(usageEvents).values({

@@ -151,7 +151,20 @@ export class CharactersController {
     const [char] = await db.select().from(characters)
       .where(and(eq(characters.id, id), eq(characters.ownerUserId, req.user.userId))).limit(1);
     if (!char) throw new NotFoundException('Character not found or not owned by you');
-    await db.update(characters).set({ deletedAt: new Date(), status: 'deleted' }).where(eq(characters.id, id));
+    
+    // Soft-delete: mark as deleted but keep the row for referential integrity
+    try {
+      await db.update(characters).set({ 
+        deletedAt: new Date(), 
+        status: 'deleted' as any,
+      } as any).where(eq(characters.id, id));
+    } catch (err: any) {
+      // If soft-delete fails (e.g., enum constraint), try direct SQL
+      await db.execute(
+        sql`UPDATE characters SET deleted_at = NOW(), status = 'deleted' WHERE id = ${id}`
+      );
+    }
+    
     return { deleted: true, id };
   }
 

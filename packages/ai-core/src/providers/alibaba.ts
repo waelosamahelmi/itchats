@@ -315,17 +315,19 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2, timeo
 const TTS_FALLBACK_MODELS = ['qwen3-tts-instruct-flash', 'qwen3-tts-flash'];
 const TTS_COMPAT_VOICES = ['cherry', 'stella'];
 
-/** Voice profiles for qwen3-tts-instruct-flash — instruction-based natural voices */
-const TTS_VOICE_PROFILES: Record<string, { label: string; gender: string; accent: string; instruction: string }> = {
-  aria:    { label: 'Aria',    gender: 'female', accent: 'American', instruction: 'bright, energetic, young American female voice, cheerful and bubbly, modern Gen-Z style' },
-  stella:  { label: 'Stella',  gender: 'female', accent: 'British',  instruction: 'elegant, refined British female voice, calm and sophisticated, like a BBC presenter' },
-  luna:    { label: 'Luna',    gender: 'female', accent: 'American', instruction: 'soft, gentle, whispery female voice, warm and intimate, ASMR quality, slow pace' },
-  iris:    { label: 'Iris',    gender: 'female', accent: 'American', instruction: 'mature, wise female voice, motherly and reassuring, clear American accent, calm tone' },
-  sage:    { label: 'Sage',    gender: 'female', accent: 'American', instruction: 'casual, laid-back female voice, slightly husky, California style, relaxed and cool' },
-  marcus:  { label: 'Marcus',  gender: 'male',   accent: 'American', instruction: 'warm, friendly male voice, deep and resonant, natural American accent, like a podcast host' },
-  james:   { label: 'James',   gender: 'male',   accent: 'British',  instruction: 'deep, authoritative male voice, British accent, commanding and confident, like a movie narrator' },
-  theo:    { label: 'Theo',    gender: 'male',   accent: 'American', instruction: 'young, energetic male voice, upbeat American accent, friendly and approachable, Gen-Z style' },
-  oliver:  { label: 'Oliver',  gender: 'male',   accent: 'British',  instruction: 'warm, gentle male voice, soft British accent, kind and thoughtful, like a teacher' },
+/** Voice profiles for qwen3-tts-instruct-flash — instruction-based natural voices
+ *  CRITICAL: Instructions MUST explicitly state gender first for the model to obey.
+ *  The instruct model defaults to female if gender isn't the very first descriptor. */
+const TTS_VOICE_PROFILES: Record<string, { label: string; gender: string; accent: string; instruction: string; explicitGender: string }> = {
+  aria:    { label: 'Aria',    gender: 'female', accent: 'American', instruction: 'bright, energetic, young American female voice, cheerful and bubbly, modern Gen-Z style', explicitGender: 'female' },
+  stella:  { label: 'Stella',  gender: 'female', accent: 'British',  instruction: 'elegant, refined British female voice, calm and sophisticated, like a BBC presenter', explicitGender: 'female' },
+  luna:    { label: 'Luna',    gender: 'female', accent: 'American', instruction: 'soft, gentle, whispery female voice, warm and intimate, ASMR quality, slow pace', explicitGender: 'female' },
+  iris:    { label: 'Iris',    gender: 'female', accent: 'American', instruction: 'mature, wise female voice, motherly and reassuring, clear American accent, calm tone', explicitGender: 'female' },
+  sage:    { label: 'Sage',    gender: 'female', accent: 'American', instruction: 'casual, laid-back female voice, slightly husky, California style, relaxed and cool', explicitGender: 'female' },
+  marcus:  { label: 'Marcus',  gender: 'male',   accent: 'American', instruction: 'MALE VOICE: warm, deep, resonant American male voice, like a podcast host, friendly and confident', explicitGender: 'male' },
+  james:   { label: 'James',   gender: 'male',   accent: 'British',  instruction: 'MALE VOICE: deep, authoritative British male voice, commanding and confident, like a movie narrator, very deep pitch', explicitGender: 'male' },
+  theo:    { label: 'Theo',    gender: 'male',   accent: 'American', instruction: 'MALE VOICE: young, energetic American male voice, upbeat and friendly, Gen-Z style, natural male tone', explicitGender: 'male' },
+  oliver:  { label: 'Oliver',  gender: 'male',   accent: 'British',  instruction: 'MALE VOICE: warm, gentle British male voice, kind and thoughtful, like a teacher, soft-spoken man', explicitGender: 'male' },
 };
 
 export function getTTSVoices() {
@@ -341,7 +343,9 @@ async function callTTSCompat(model: string, request: TTSRequest, config: ReturnT
   // Use qwen3-tts-instruct-flash with voice profiles for natural English speech
   if (request.voice && TTS_VOICE_PROFILES[request.voice]) {
     const profile = TTS_VOICE_PROFILES[request.voice];
-    const instructText = `[Voice: ${profile.instruction}] [Style: ${request.emotion || 'neutral'}] Speak naturally: ${request.text}`;
+    // Give the model explicit gender + voice instruction as the FIRST thing it reads
+    const genderTag = profile.explicitGender === 'male' ? 'SPEAK WITH A MALE VOICE.' : 'SPEAK WITH A FEMALE VOICE.';
+    const instructText = `${genderTag} Voice style: ${profile.instruction}. Emotion: ${request.emotion || 'neutral'}. Say this naturally: ${request.text}`;
     const response = await fetchWithRetry(`${nativeBase}/aigc/multimodal-generation/generation`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
