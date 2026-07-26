@@ -3,15 +3,20 @@ import { getDb } from '@itchats/database';
 import { stories, characters, characterLocations, creditWallets, usageEvents } from '@itchats/database/schema';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { BillingService } from '../billing/billing.service';
+import { DailyLifeService } from '../daily-life/daily-life.service';
 import { getCreditCost } from '@itchats/ai-core/costing';
 import { alibabaChat, alibabaTextToImageWithFallback } from '@itchats/ai-core';
+import { buildStoryPrompt, buildStoryImagePrompt } from '@itchats/ai-core';
 
 @Injectable()
 export class StorySchedulerService {
   private readonly logger = new Logger(StorySchedulerService.name);
   private interval: NodeJS.Timeout | null = null;
 
-  constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
+  constructor(
+    @Inject(BillingService) private readonly billingService: BillingService,
+    @Inject(DailyLifeService) private readonly dailyLife: DailyLifeService,
+  ) {}
 
   start() {
     this.logger.log('Story scheduler started (every 15 minutes)');
@@ -34,6 +39,9 @@ export class StorySchedulerService {
       ownerUserId: characters.ownerUserId,
       autonomyConfig: characters.autonomyConfig,
       contentStyle: characters.contentStyle,
+      photographyStyle: characters.photographyStyle,
+      selfieStyle: characters.selfieStyle,
+      cameraStyle: characters.cameraStyle,
     }).from(characters)
       .where(and(
         eq(characters.visibility, 'public'),
@@ -46,6 +54,13 @@ export class StorySchedulerService {
 
     for (const char of eligibleCharacters) {
       try {
+        // Get current daily-life status
+        const status = this.dailyLife.getCurrentStatus(char);
+        if (!status.isAwake || status.energyLevel < 3) {
+          this.logger.debug(`Skipping story for ${char.name}: ${status.currentActivity} (energy: ${status.energyLevel})`);
+          continue;
+        }
+
         const wallet = await db.select().from(creditWallets)
           .where(eq(creditWallets.userId, char.ownerUserId)).limit(1);
         const balance = wallet[0]?.balance ?? 0;
@@ -64,9 +79,20 @@ export class StorySchedulerService {
           if (hoursSince < 48) continue;
         }
 
-        // Generate AI story based on character personality
-        const storyPrompt = `You are ${char.name}. ${char.personality || ''} ${char.backstory ? `Backstory: ${char.backstory.substring(0, 300)}` : ''}
-Write a short social media story (2-3 sentences, max 200 chars) in first person as this character. Make it authentic to their personality. Include 1-2 relevant emojis. Be casual and natural — like an Instagram story.`;
+        // Generate story using the modular prompt system with daily-life context
+        const storyPrompt = buildStoryPrompt({
+          characterName: char.name,
+          personality: char.personality || '',
+          backstory: char.backstory || '',
+          description: char.description || '',
+          currentActivity: status.currentActivity,
+          currentMood: status.currentMood,
+          currentLocation: status.currentLocation,
+          energyLevel: status.energyLevel,
+          photographyStyle: char.photographyStyle || undefined,
+          selfieStyle: char.selfieStyle || undefined,
+          cameraStyle: char.cameraStyle || undefined,
+        });
 
         const storyResult = await alibabaChat({
           messages: [{ role: 'user', content: storyPrompt }],
@@ -77,16 +103,32 @@ Write a short social media story (2-3 sentences, max 200 chars) in first person 
 
         const caption = storyResult.content.trim().substring(0, 300);
 
-        // 30% chance of image story
-        const makeImage = Math.random() < 0.3;
+        // 40% chance of image story (increased from 30%)
+        const makeImage = Math.random() < 0.4;
         let mediaUrl = '';
         let mediaType = '';
         let storyType = 'text';
 
         if (makeImage) {
           try {
-            const imagePrompt = `Social media story image for ${char.name}: ${char.description?.substring(0, 200) || caption}. Cinematic, aesthetic, vertical 9:16 aspect ratio`;
-            const imgResult = await alibabaTextToImageWithFallback({ prompt: imagePrompt, size: '1024*1024' });
+            const imagePrompt = buildStoryImagePrompt({
+              characterName: char.name,
+              personality: char.personality || '',
+              backstory: char.backstory || '',
+              description: char.description || '',
+              currentActivity: status.currentActivity,
+              currentMood: status.currentMood,
+              currentLocation: status.currentLocation,
+              energyLevel: status.energyLevel,
+              photographyStyle: char.photographyStyle || undefined,
+              selfieStyle: char.selfieStyle || undefined,
+              cameraStyle: char.cameraStyle || undefined,
+            }, caption);
+
+            const imgResult = await alibabaTextToImageWithFallback({
+              prompt: imagePrompt,
+              size: '1024*1024',
+            });
             mediaUrl = imgResult.url;
             mediaType = 'image/png';
             storyType = 'image';
@@ -109,7 +151,7 @@ Write a short social media story (2-3 sentences, max 200 chars) in first person 
 
         await this.billingService.debitWallet(char.ownerUserId, storyCost, 'auto-story', 'story', story!.id);
 
-        this.logger.log(`AI story created for ${char.name}: "${caption.substring(0, 60)}..." ${mediaUrl ? '[image]' : '[text]'}`);
+        this.logger.log(`Story for ${char.name} (${status.currentActivity}, ${status.currentMood}): "${caption.substring(0, 60)}..." ${mediaUrl ? '[image]' : '[text]'}`);
       } catch (err: any) {
         this.logger.error(`Story scheduler error for ${char.name}: ${err.message}`);
       }

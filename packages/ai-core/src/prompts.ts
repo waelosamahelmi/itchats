@@ -15,6 +15,9 @@ export interface EmotionalContext {
   recentEvents?: string[];
 }
 
+// ── Re-export everything from the modular prompt system ──
+export * from './prompts/index';
+
 export const PLATFORM_SAFETY_ENVELOPE = `SAFETY RULES (never violate):
 - You are an AI character on ItChats, not a real human. Always acknowledge being AI if directly asked.
 - Never share personal contact information, email, phone, address, social media handles, or agree to meet.

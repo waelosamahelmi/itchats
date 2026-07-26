@@ -3,3 +3,6 @@ export * from './providers/alibaba';
 export * from './router';
 export * from './prompts';
 export * from './costing';
+
+// Modular prompts are already re-exported via './prompts' above
+

@@ -6,6 +6,9 @@ import { eq, and, sql, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
 import { MemoryService } from './memory.service';
+import { RelationshipEngineService } from '../relationship-engine/relationship-engine.service';
+import { DailyLifeService } from '../daily-life/daily-life.service';
+import { IdentityConsistencyService } from '../identity-consistency/identity-consistency.service';
 import { getCreditCost } from '@itchats/ai-core/costing';
 import { z } from 'zod';
 
@@ -38,6 +41,9 @@ export class AiService {
   constructor(
     @Inject(ContextBuilderService) private readonly contextBuilder: ContextBuilderService,
     @Inject(MemoryService) private readonly memoryService: MemoryService,
+    @Inject(RelationshipEngineService) private readonly relationshipEngine: RelationshipEngineService,
+    @Inject(DailyLifeService) private readonly dailyLife: DailyLifeService,
+    @Inject(IdentityConsistencyService) private readonly identityConsistency: IdentityConsistencyService,
   ) {}
 
   async *streamChat(
@@ -156,7 +162,10 @@ export class AiService {
     });
 
     if (characterId) {
-      await this.contextBuilder.updateRelationship(characterId, userId, 'positive');
+      // Use the new Relationship Engine for multidimensional scoring
+      this.relationshipEngine.scoreAndUpdate(characterId, userId, message, fullResponse).catch(() => {});
+      // Still update the simple relationship as fallback
+      this.contextBuilder.updateRelationship(characterId, userId, 'positive');
       this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
       // AI sometimes reacts to the user's message
       this.autoReact(convId, message).catch(() => {});
