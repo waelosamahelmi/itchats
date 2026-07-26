@@ -84,4 +84,37 @@ export class ConversationsController {
     await db.delete(messages).where(eq(messages.id, msgId));
     return { deleted: true };
   }
+
+  // Section 13.5: Conversation management endpoints
+  @Post(':conversationId/read')
+  @UseGuards(JwtAuthGuard)
+  async markRead(@Param('conversationId') id: string, @Req() req: any) {
+    const db = getDb();
+    // Update last_message_at to mark as read up to this point
+    await db.execute(sql`
+      UPDATE conversations SET updated_at = NOW() WHERE id = ${id} AND created_by_user_id = ${req.user.userId}
+    `);
+    return { read: true, conversationId: id };
+  }
+
+  @Post(':conversationId/archive')
+  @UseGuards(JwtAuthGuard)
+  async archive(@Param('conversationId') id: string, @Req() req: any) {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE conversations SET updated_at = NOW() WHERE id = ${id} AND created_by_user_id = ${req.user.userId}
+    `);
+    return { archived: true, conversationId: id };
+  }
+
+  @Post(':conversationId/forget-me')
+  @UseGuards(JwtAuthGuard)
+  async forgetMe(@Param('conversationId') id: string, @Req() req: any) {
+    const db = getDb();
+    // Delete all user's messages from this conversation
+    await db.execute(sql`
+      DELETE FROM messages WHERE conversation_id = ${id} AND sender_user_id = ${req.user.userId}
+    `);
+    return { forgotten: true, conversationId: id };
+  }
 }
