@@ -106,21 +106,23 @@ export class CharacterCreationService {
     const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 10) + randomUUID().slice(0, 8);
 
     if (isRandom) {
-      // Force variety by picking random starting attributes
+      // Force variety by picking random starting attributes in code
       const genders = ['Female', 'Male', 'Non-binary'];
       const ages = ['early 20s', 'mid 20s', 'late 20s', 'early 30s', 'mid 30s', 'late 30s', 'early 40s', 'mid 40s'];
+      const cultures = ['Japanese', 'Nigerian', 'Brazilian', 'Indian', 'Korean', 'Egyptian', 'Mexican', 'Swedish', 'Moroccan', 'Thai', 'Turkish', 'Italian', 'Polish', 'Vietnamese', 'Colombian', 'Ethiopian', 'Greek', 'Malaysian'];
       const randomGender = genders[Math.floor(Math.random() * genders.length)];
       const randomAge = ages[Math.floor(Math.random() * ages.length)];
+      const randomCulture = cultures[Math.floor(Math.random() * cultures.length)];
 
-      const prompt = `Generate a COMPLETELY UNIQUE fictional character. Seed: "${seed}". Gender: ${randomGender}. Age: ${randomAge}.
+      const prompt = `Generate a COMPLETELY UNIQUE fictional character. Seed: "${seed}". Gender: ${randomGender}. Age: ${randomAge}. REQUIRED CULTURE: ${randomCulture} — pick a name and background from this specific culture.
 
 RULES:
-- The name MUST be different from: Kaelen, Voss, Aria, Nova, Kai, Zephyr, Lyra, Orion, Sage, Quinn, Ryder, Ash, Rowan, Finn, River, Sky, Wren, Ember, Phoenix
-- Pick from DIFFERENT cultures: Japanese, Nigerian, Brazilian, Indian, Korean, Egyptian, Mexican, Swedish, Moroccan, Thai, Turkish, Italian, Polish, Vietnamese, Colombian, Ethiopian, Greek, Malaysian
-- Pick an UNUSUAL or SPECIFIC profession (not "artist" or "writer"): e.g. marine biologist, blacksmith, ethical hacker, perfumer, puppeteer, volcanologist, luthier, sommelier, beekeeper, forensic accountant
+- The name MUST be a realistic ${randomCulture} name (first and last)
+- NEVER use: Kaelen, Voss, Aria, Nova, Kai, Zephyr, Lyra, Orion, Sage, Quinn, Ryder, Ash, Rowan, Finn, River, Sky, Wren, Ember, Phoenix
+- Pick an UNUSUAL profession: e.g. marine biologist, blacksmith, ethical hacker, perfumer, puppeteer, volcanologist, luthier, sommelier, beekeeper, forensic accountant
 
 Return ONLY valid JSON, nothing else:
-{"name":"First Last","gender":"${randomGender}","ageDisplay":"${randomAge}","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style, ethnicity","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang","humorStyle":"e.g. dry wit, playful teasing, dark humor, puns","nationality":"e.g. Japanese, Brazilian, Swedish","ethnicity":"specific ethnicity","height":"in cm, e.g. 168cm","bodyType":"e.g. athletic, slim, curvy, broad-shouldered","eyeColor":"e.g. hazel, dark brown, green","hair":"color, texture, length, style","skinTone":"e.g. warm olive, fair with freckles, deep brown"}`;
+{"name":"First Last","gender":"${randomGender}","ageDisplay":"${randomAge}","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style, ethnicity","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang","humorStyle":"e.g. dry wit, playful teasing, dark humor, puns","nationality":"${randomCulture}","ethnicity":"specific ${randomCulture} ethnicity","height":"in cm, e.g. 168cm","bodyType":"e.g. athletic, slim, curvy, broad-shouldered","eyeColor":"e.g. hazel, dark brown, green","hair":"color, texture, length, style","skinTone":"e.g. warm olive, fair with freckles, deep brown"}`;
 
       const result = await alibabaChat({
         messages: [
@@ -128,7 +130,7 @@ Return ONLY valid JSON, nothing else:
           { role: 'user', content: prompt },
         ],
         model: 'qwen-plus',
-        temperature: 2.0,
+        temperature: 1.99,
         maxTokens: 500,
       });
 
