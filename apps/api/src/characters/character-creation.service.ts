@@ -132,7 +132,6 @@ Return ONLY valid JSON, nothing else:
         model: 'qwen-flash',
         temperature: 1.99,
         maxTokens: 400,
-        timeoutMs: 30000,
       });
 
       const json = parseStructuredJson(result.content, CharacterAutofillSchema);
