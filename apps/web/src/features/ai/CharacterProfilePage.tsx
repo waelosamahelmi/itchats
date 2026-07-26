@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
   ArrowLeft, MessageCircle, Heart, Share2, Flag, MapPin, Sparkles,
-  Globe, Lock, Pencil,
+  Globe, Lock, Pencil, Ban, Camera, Clock,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { Badge } from '@itchats/ui';
@@ -145,6 +145,7 @@ export default function CharacterProfilePage() {
             <h2 className="text-xl font-bold text-text-primary">{char.name}</h2>
             <Badge variant="ai" className="text-[10px]">AI</Badge>
           </div>
+          {char.handle && <p className="text-text-muted text-sm mb-1">@{char.handle}</p>}
           <p className="text-text-muted text-xs mb-4">
             {char.visibility === 'public' ? (
               <span className="flex items-center gap-1"><Globe size={12} /> Public character</span>
@@ -153,6 +154,17 @@ export default function CharacterProfilePage() {
             )}
           </p>
 
+          {/* Personality chips per spec Section 6.3 */}
+          {char.personality && (
+            <div className="flex flex-wrap gap-1.5 justify-center mb-4 max-w-xs">
+              {char.personality.split(/[,;.]/).filter(Boolean).slice(0, 5).map((trait: string, i: number) => (
+                <span key={i} className="px-2.5 py-1 rounded-full glass text-[11px] text-text-secondary">
+                  {trait.trim()}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center gap-6 mb-6">
             <div className="text-center">
               <p className="text-lg font-bold text-text-primary">{followersCount}</p>
@@ -160,7 +172,7 @@ export default function CharacterProfilePage() {
             </div>
             <div className="text-center">
               <p className="text-lg font-bold text-text-primary">{relationship?.level || '--'}</p>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Relationship</p>
+              <p className="text-[10px] text-text-muted uppercase tracking-wider">Bond</p>
             </div>
             <div className="text-center">
               <p className="text-lg font-bold text-text-primary">--</p>
@@ -168,7 +180,17 @@ export default function CharacterProfilePage() {
             </div>
           </div>
 
-          <div className="flex gap-3 w-full max-w-xs">
+          {/* Relationship detail bar per spec Section 6.3 */}
+          {relationship && relationship.level > 1 && (
+            <div className="w-full max-w-xs mb-4 glass rounded-xl p-3">
+              <p className="text-xs text-text-muted mb-2">{relationship.label}</p>
+              <div className="h-1.5 bg-border-subtle rounded-full overflow-hidden">
+                <div className="h-full bg-brand-primary rounded-full transition-all" style={{ width: `${(relationship.level / 10) * 100}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 w-full max-w-xs">
             <button
               onClick={() => nav(`/ai/chat/${characterId}`)}
               className="flex-1 flex items-center justify-center gap-2 rounded-full bg-brand-primary text-white py-3 text-sm font-medium transition-all hover:brightness-110 hover:shadow-lg hover:shadow-brand-glow"
@@ -183,6 +205,19 @@ export default function CharacterProfilePage() {
             >
               <Heart size={16} className={following ? 'fill-current' : ''} /> {following ? 'Following' : 'Follow'}
             </button>
+            {!isOwner && (
+              <button
+                onClick={async () => {
+                  if (!confirm('Block this character?')) return;
+                  await fetch(`${API}/blocks/characters/${characterId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+                  nav(-1);
+                }}
+                className="p-3 rounded-full glass text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+                title="Block character"
+              >
+                <Ban size={16} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -207,6 +242,16 @@ export default function CharacterProfilePage() {
               <p className="text-sm text-text-secondary leading-relaxed">{char.backstory}</p>
             </section>
           )}
+
+          {/* Story ring placeholder per spec Section 6.3 */}
+          <section>
+            <h3 className="text-xs uppercase tracking-widest text-text-muted mb-3 font-semibold">Stories</h3>
+            <div className="glass rounded-2xl p-6 text-center">
+              <Camera size={28} className="text-text-muted mx-auto mb-2 opacity-40" />
+              <p className="text-xs text-text-muted">No stories yet</p>
+              <p className="text-[10px] text-text-muted mt-0.5">Stories appear here when published</p>
+            </div>
+          </section>
 
           <section>
             <h3 className="text-xs uppercase tracking-widest text-text-muted mb-2 font-semibold">Details</h3>
