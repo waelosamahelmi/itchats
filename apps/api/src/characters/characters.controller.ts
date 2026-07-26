@@ -44,6 +44,7 @@ export class CharactersController {
       .where(and(
         eq(characters.visibility, 'public'),
         eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
         or(ilike(characters.name, `%${q}%`), ilike(characters.description, `%${q}%`), ilike(characters.personality, `%${q}%`)),
       ))
       .limit(Number(limit)).offset((Number(page) - 1) * Number(limit));

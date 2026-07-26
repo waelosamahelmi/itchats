@@ -43,13 +43,22 @@ export class CharactersService {
 
   async findMine(ownerUserId: string) {
     const db = getDb();
-    return db.select().from(characters).where(eq(characters.ownerUserId, ownerUserId)).orderBy(sql`${characters.createdAt} DESC`);
+    return db.select().from(characters)
+      .where(and(
+        eq(characters.ownerUserId, ownerUserId),
+        sql`${characters.deletedAt} IS NULL`,
+      ))
+      .orderBy(sql`${characters.createdAt} DESC`);
   }
 
   async findPublic(page = 1, limit = 20) {
     const db = getDb();
     return db.select().from(characters).where(
-      and(eq(characters.visibility, 'public'), eq(characters.status, 'published'))
+      and(
+        eq(characters.visibility, 'public'),
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      )
     ).limit(limit).offset((page - 1) * limit);
   }
 
