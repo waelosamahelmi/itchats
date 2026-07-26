@@ -4,7 +4,7 @@ import { useSelector } from 'react-redux';
 import { ArrowLeft, ArrowRight, Sparkles, Globe, Lock, Wand2, Bot, Mic, MapPin, Clock, Check, Volume2, Trash2, Pencil } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
-const STEPS = ['Type', 'Identity', 'Personality', 'Voice', 'Location', 'Autonomy', 'Review'];
+const STEPS = ['Type', 'Identity', 'Appearance', 'Personality', 'Voice', 'Location', 'Autonomy', 'Review'];
 
 export default function CreateCharacterPage() {
   const nav = useNavigate();
@@ -234,7 +234,7 @@ export default function CreateCharacterPage() {
         {step === 1 && (
           <div className="space-y-4 animate-slide-up">
             <div className="flex items-center justify-between">
-              <p className="text-text-secondary text-sm">What does your AI character look like?</p>
+              <p className="text-text-secondary text-sm">Who is your AI character?</p>
               <button onClick={async () => {
                 if (!token) return;
                 setAutofilling(true);
@@ -258,8 +258,17 @@ export default function CreateCharacterPage() {
             </div>
             <div className="space-y-3">
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Character name *" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
-              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Short description" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+              <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="Who are they? A short concept...&#10;e.g. A free-spirited photographer who travels the world capturing moments" rows={3} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4 animate-slide-up">
+            <p className="text-text-secondary text-sm">What do they look like?</p>
+            <div className="space-y-3">
               {/* Gender selector */}
+              <p className="text-xs text-text-muted">Gender presentation</p>
               <div className="flex gap-2">
                 {['Female', 'Male', 'Non-binary'].map(g => (
                   <button key={g} onClick={() => setGender(gender === g ? '' : g)}
@@ -284,7 +293,7 @@ export default function CreateCharacterPage() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Give them a personality and history</p>
             <div className="space-y-3">
@@ -298,7 +307,7 @@ export default function CreateCharacterPage() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Choose how they sound</p>
             {voices.map(v => (
@@ -335,7 +344,7 @@ export default function CreateCharacterPage() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Where are they based?</p>
             <p className="text-[10px] text-text-muted">Only a coarse city-level location is used. Your exact location is never shared.</p>
@@ -343,7 +352,7 @@ export default function CreateCharacterPage() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">How independent should they be?</p>
             {[
@@ -362,9 +371,9 @@ export default function CreateCharacterPage() {
           </div>
         )}
 
-        {step === 6 && (
+        {step === 7 && (
           <div className="space-y-5 animate-slide-up">
-            <p className="text-text-secondary text-sm">Review before creating</p>
+            <p className="text-text-secondary text-sm">Review before {isEdit ? 'saving' : 'creating'}</p>
             <div className="glass rounded-2xl p-5 space-y-3">
               {[
                 ['Type', vis === 'public' ? '🌐 Public' : '🔒 Private'],
