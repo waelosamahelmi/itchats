@@ -154,7 +154,6 @@ export class AiService {
       content: messages.content,
       type: messages.type,
       createdAt: messages.createdAt,
-      metadata: messages.metadata,
     }).from(messages)
       .where(eq(messages.conversationId, conv.id))
       .orderBy(sql`${messages.createdAt} ASC`)

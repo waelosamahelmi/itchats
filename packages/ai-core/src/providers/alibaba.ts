@@ -245,8 +245,6 @@ const TTS_VOICES: Record<string, { label: string; gender: string; style: string;
   longcheng:     { label: 'Alex',   gender: 'male',   style: 'Clear',    desc: 'Crisp, professional — business voice' },
 };
 
-export function getTTSVoices() { return TTS_VOICES; }
-
 /** Chat / LLM models in fallback order — general-purpose fast models only */
 const CHAT_FALLBACK_MODELS = [
   'qwen3.6-flash',
@@ -314,37 +312,68 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2, timeo
   throw new Error('Unreachable');
 }
 
-const TTS_FALLBACK_MODELS = ['qwen3-tts-flash', 'qwen-audio-3.0-tts-flash', 'cosyvoice-v3-flash'];
+const TTS_FALLBACK_MODELS = ['qwen3-tts-instruct-flash', 'qwen3-tts-flash'];
 const TTS_COMPAT_VOICES = ['cherry', 'stella'];
 
-/** TTS via native DashScope API (works with workspace keys) */
+/** Voice profiles for qwen3-tts-instruct-flash — instruction-based natural voices */
+const TTS_VOICE_PROFILES: Record<string, { label: string; gender: string; accent: string; instruction: string }> = {
+  aria:    { label: 'Aria',    gender: 'female', accent: 'American', instruction: 'bright, energetic, young American female voice, cheerful and bubbly, modern Gen-Z style' },
+  stella:  { label: 'Stella',  gender: 'female', accent: 'British',  instruction: 'elegant, refined British female voice, calm and sophisticated, like a BBC presenter' },
+  luna:    { label: 'Luna',    gender: 'female', accent: 'American', instruction: 'soft, gentle, whispery female voice, warm and intimate, ASMR quality, slow pace' },
+  iris:    { label: 'Iris',    gender: 'female', accent: 'American', instruction: 'mature, wise female voice, motherly and reassuring, clear American accent, calm tone' },
+  sage:    { label: 'Sage',    gender: 'female', accent: 'American', instruction: 'casual, laid-back female voice, slightly husky, California style, relaxed and cool' },
+  marcus:  { label: 'Marcus',  gender: 'male',   accent: 'American', instruction: 'warm, friendly male voice, deep and resonant, natural American accent, like a podcast host' },
+  james:   { label: 'James',   gender: 'male',   accent: 'British',  instruction: 'deep, authoritative male voice, British accent, commanding and confident, like a movie narrator' },
+  theo:    { label: 'Theo',    gender: 'male',   accent: 'American', instruction: 'young, energetic male voice, upbeat American accent, friendly and approachable, Gen-Z style' },
+  oliver:  { label: 'Oliver',  gender: 'male',   accent: 'British',  instruction: 'warm, gentle male voice, soft British accent, kind and thoughtful, like a teacher' },
+};
+
+export function getTTSVoices() {
+  return Object.entries(TTS_VOICE_PROFILES).map(([id, p]) => ({
+    id, label: p.label, gender: p.gender, accent: p.accent, desc: p.instruction.substring(0, 80),
+  }));
+}
+
+/** TTS via native DashScope API — uses instruct model for natural voices */
 async function callTTSCompat(model: string, request: TTSRequest, config: ReturnType<typeof getConfig>): Promise<AudioResult> {
-  const voice = request.voice && TTS_COMPAT_VOICES.includes(request.voice) ? request.voice : TTS_COMPAT_VOICES[0];
   const nativeBase = getNativeBase();
+
+  // Use qwen3-tts-instruct-flash with voice profiles for natural English speech
+  if (request.voice && TTS_VOICE_PROFILES[request.voice]) {
+    const profile = TTS_VOICE_PROFILES[request.voice];
+    const instructText = `[Voice: ${profile.instruction}] [Style: ${request.emotion || 'neutral'}] Speak naturally: ${request.text}`;
+    const response = await fetchWithRetry(`${nativeBase}/aigc/multimodal-generation/generation`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3-tts-instruct-flash', input: { text: instructText }, parameters: { format: 'mp3', speed: request.speed ?? 1.0 } }),
+    }, 1, 30000);
+    if (!response.ok) { const errText = await response.text().catch(() => ''); throw new Error(`TTS instruct (${response.status}): ${errText.slice(0, 200)}`); }
+    const data: any = await response.json();
+    const audioUrl = data.output?.audio?.url;
+    if (!audioUrl) throw new Error(`TTS instruct: no audio URL`);
+    const audioRes = await fetchWithRetry(audioUrl, {}, 1, 15000);
+    if (!audioRes.ok) throw new Error(`TTS instruct: download failed (${audioRes.status})`);
+    const arrayBuffer = await audioRes.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) throw new Error(`TTS instruct: empty audio`);
+    return { audioBase64: Buffer.from(arrayBuffer).toString('base64'), format: 'mp3' };
+  }
+
+  // Fallback: qwen3-tts-flash with cherry/stella voices
+  const voice = request.voice && TTS_COMPAT_VOICES.includes(request.voice) ? request.voice : TTS_COMPAT_VOICES[0];
   const response = await fetchWithRetry(`${nativeBase}/aigc/multimodal-generation/generation`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.ALIBABA_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      input: { text: request.text },
-      parameters: { voice, format: 'mp3' },
-    }),
+    body: JSON.stringify({ model: 'qwen3-tts-flash', input: { text: request.text }, parameters: { voice, format: 'mp3' } }),
   }, 1, 30000);
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`TTS ${model} (${response.status}): ${errText.slice(0, 200)}`);
-  }
+  if (!response.ok) { const errText = await response.text().catch(() => ''); throw new Error(`TTS flash (${response.status}): ${errText.slice(0, 200)}`); }
   const data: any = await response.json();
-  // Native API returns output.audio.url — download and convert to base64
   const audioUrl = data.output?.audio?.url;
-  if (!audioUrl) throw new Error(`TTS ${model}: no audio URL — ${JSON.stringify(data).slice(0, 200)}`);
-  // Fetch the audio file and convert to base64
+  if (!audioUrl) throw new Error(`TTS flash: no audio URL`);
   const audioRes = await fetchWithRetry(audioUrl, {}, 1, 15000);
-  if (!audioRes.ok) throw new Error(`TTS ${model}: failed to download audio (${audioRes.status})`);
+  if (!audioRes.ok) throw new Error(`TTS flash: download failed (${audioRes.status})`);
   const arrayBuffer = await audioRes.arrayBuffer();
-  if (arrayBuffer.byteLength === 0) throw new Error(`TTS ${model}: empty audio`);
-  const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-  return { audioBase64, format: 'mp3' };
+  if (arrayBuffer.byteLength === 0) throw new Error(`TTS flash: empty audio`);
+  return { audioBase64: Buffer.from(arrayBuffer).toString('base64'), format: 'mp3' };
 }
 
 /**

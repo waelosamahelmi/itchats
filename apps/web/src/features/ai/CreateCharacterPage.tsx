@@ -16,6 +16,7 @@ export default function CreateCharacterPage() {
   const [personality, setPersonality] = useState('');
   const [backstory, setBackstory] = useState('');
   const [appearance, setAppearance] = useState('');
+  const [gender, setGender] = useState('');
   const [voice, setVoice] = useState('text-only');
   const [city, setCity] = useState('');
   const [autonomy, setAutonomy] = useState('off');
@@ -57,7 +58,9 @@ export default function CreateCharacterPage() {
       const data = await res.json();
       if (data.error) { console.warn('TTS error:', data.error); return; }
       if (data.audioBase64) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
+        // audioBase64 is already a full data URL: data:audio/mp3;base64,...
+        const audioUrl = data.audioBase64.startsWith('data:') ? data.audioBase64 : `data:audio/mp3;base64,${data.audioBase64}`;
+        const audio = new Audio(audioUrl);
         audioRef.current = audio;
         audio.volume = 1.0;
         await audio.play();
@@ -67,15 +70,16 @@ export default function CreateCharacterPage() {
   };
 
   const voices = [
-    { id: 'longanlingxi', label: 'Emily',  desc: '♀ Soft, natural voice — a warm companion' },
-    { id: 'longxiaochun', label: 'Claire', desc: '♀ Calm, tender voice — a close listener' },
-    { id: 'longxiaoxia',  label: 'Maya',   desc: '♀ Bright, cheerful voice — full of energy' },
-    { id: 'longxiaobai',  label: 'Lily',   desc: '♀ Sweet, playful voice — youthful charm' },
-    { id: 'longyuer',     label: 'Sophie', desc: '♀ Elegant, calm voice — perfect for stories' },
-    { id: 'longshu',      label: 'James',  desc: '♂ Deep, smooth voice — commanding presence' },
-    { id: 'longshao',     label: 'Daniel', desc: '♂ Warm, friendly voice — easy to talk to' },
-    { id: 'longcheng',    label: 'Alex',   desc: '♂ Clear, crisp voice — professional tone' },
-    { id: 'text-only',    label: 'Text only', desc: 'No voice, chat only' },
+    { id: 'aria',   label: 'Aria',   desc: '♀ Bright, energetic American — cheerful and bubbly' },
+    { id: 'stella', label: 'Stella', desc: '♀ Elegant British — calm and sophisticated' },
+    { id: 'luna',   label: 'Luna',   desc: '♀ Soft, gentle — warm and intimate, slow pace' },
+    { id: 'iris',   label: 'Iris',   desc: '♀ Mature, wise — motherly and reassuring' },
+    { id: 'sage',   label: 'Sage',   desc: '♀ Laid-back California — casual and cool' },
+    { id: 'marcus', label: 'Marcus', desc: '♂ Warm, deep American — like a podcast host' },
+    { id: 'james',  label: 'James',  desc: '♂ Authoritative British — commanding narrator' },
+    { id: 'theo',   label: 'Theo',   desc: '♂ Young, upbeat American — friendly Gen-Z' },
+    { id: 'oliver', label: 'Oliver', desc: '♂ Gentle British — kind teacher vibe' },
+    { id: 'text-only', label: 'Text only', desc: 'No voice, chat only' },
   ];
   const emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised'];
 
@@ -86,7 +90,7 @@ export default function CreateCharacterPage() {
       const res = await fetch(`${API}/characters`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          name, description: desc, personality, backstory,
+          name, description: desc, personality, backstory, gender,
           visibility: vis, city,
           autonomyLevel: autonomy as 'off' | 'low' | 'normal' | 'high',
           storyCadence: autonomy === 'off' ? 'manual' : autonomy === 'low' ? 'every_3_days' : autonomy === 'normal' ? 'every_2_days' : 'daily',
@@ -94,6 +98,16 @@ export default function CreateCharacterPage() {
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Creation failed'); }
       const char = await res.json();
+
+      // Generate character image if public
+      if (vis === 'public') {
+        try {
+          await fetch(`${API}/characters/${char.id}/generate-image`, {
+            method: 'POST', headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch { /* non-fatal */ }
+      }
+
       nav(`/ai/chat/${char.id}`);
     } catch (e: any) { setError(e.message); }
     setSaving(false);
@@ -172,6 +186,15 @@ export default function CreateCharacterPage() {
             <div className="space-y-3">
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Character name *" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Short description" className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+              {/* Gender selector */}
+              <div className="flex gap-2">
+                {['Female', 'Male', 'Non-binary'].map(g => (
+                  <button key={g} onClick={() => setGender(gender === g ? '' : g)}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-medium transition-all ${
+                      gender === g ? 'bg-brand-primary/20 text-brand-primary ring-1 ring-brand-primary/50' : 'glass text-text-muted hover:text-white'
+                    }`}>{g}</button>
+                ))}
+              </div>
               {vis === 'public' ? (
                 <div>
                   <textarea value={appearance} onChange={e => setAppearance(e.target.value)} placeholder="Describe their appearance in detail...&#10;e.g. 25-year-old woman, long dark curly hair, hazel eyes, warm olive skin, casual streetwear, natural makeup" rows={4} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />

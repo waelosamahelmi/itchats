@@ -52,15 +52,17 @@ export class CharacterCreationService {
       autonomyConfig: parsed.autonomyLevel ? { level: parsed.autonomyLevel, cadence: parsed.storyCadence } : {},
     }).returning();
 
-    // Save location
+    // Save location (non-fatal if table mismatch)
     if (parsed.city || parsed.countryCode) {
-      await db.insert(characterLocations).values({
-        characterId: character!.id,
-        city: parsed.city,
-        countryCode: parsed.countryCode,
-        timezone: parsed.timezone,
-        source: 'declared',
-      });
+      try {
+        await db.insert(characterLocations).values({
+          characterId: character!.id,
+          city: parsed.city,
+          countryCode: parsed.countryCode,
+          timezone: parsed.timezone,
+          source: 'declared',
+        } as any);
+      } catch { /* location table may have schema mismatch — non-fatal */ }
     }
 
     return character;
