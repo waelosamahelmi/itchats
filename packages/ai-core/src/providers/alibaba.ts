@@ -10,7 +10,6 @@ interface ChatRequest {
   model?: string;
   temperature?: number;
   maxTokens?: number;
-  timeoutMs?: number;
   stream?: boolean;
 }
 
@@ -36,7 +35,8 @@ export async function alibabaChat(request: ChatRequest): Promise<ChatResponse> {
       temperature: request.temperature ?? 0.8,
       max_tokens: request.maxTokens ?? 500,
       stream: false,
-    }), 2, request.timeoutMs ?? 8000);
+    }),
+  });
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
@@ -295,7 +295,7 @@ const IMAGE_FALLBACK_MODELS = [
 ];
 
 /** Fetch with timeout and retry for unreliable connections */
-async function fetchWithRetry(url: string, init: RequestInit, retries = 2, timeoutMs = 8000): Promise<Response> {
+async function fetchWithRetry(url: string, init: RequestInit, retries = 3, timeoutMs = 30000): Promise<Response> {
   for (let i = 0; i <= retries; i++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
