@@ -104,8 +104,8 @@ export default function CameraPage() {
     if (!ctx) return;
 
     // Apply filter to canvas context before drawing
-    const filterCss = FILTERS[filterIdx].css;
-    if (filterCss !== 'none') ctx.filter = filterCss;
+    const filterCss = FILTERS[filterIdx]?.css;
+    if (filterCss && filterCss !== 'none') ctx.filter = filterCss;
 
     // Mirror only for front camera + zoom via canvas transform
     ctx.save();
@@ -189,8 +189,11 @@ export default function CameraPage() {
 
   // Pinch-to-zoom handlers
   const getTouchDist = (touches: React.TouchList) => {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
+    if (touches.length < 2) return 0;
+    const t0 = touches[0]!;
+    const t1 = touches[1]!;
+    const dx = t0.clientX - t1.clientX;
+    const dy = t0.clientY - t1.clientY;
     return Math.sqrt(dx * dx + dy * dy);
   };
 
@@ -251,7 +254,7 @@ export default function CameraPage() {
             style={{
               transform: `scaleX(${facingMode === 'user' ? -1 : 1}) scale(${zoom})`,
               transformOrigin: 'center center',
-              filter: FILTERS[filterIdx].css,
+              filter: FILTERS[filterIdx]?.css || 'none',
             }} />
           <canvas ref={canvasRef} className="hidden" />
 
