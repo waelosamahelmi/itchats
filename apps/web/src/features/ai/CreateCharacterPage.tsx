@@ -139,18 +139,25 @@ export default function CreateCharacterPage() {
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Save failed'); }
       const char = await res.json();
 
-      // Regenerate image if editing a public character with changed appearance
+      // Generate image for ALL new characters (public gets AI portrait, private gets a generated icon)
+      if (!isEdit) {
+        try {
+          const imgRes = await fetch(`${API}/characters/${char.id}/generate-image`, {
+            method: 'POST', headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!imgRes.ok) {
+            const err = await imgRes.json().catch(() => ({}));
+            console.warn('Image generation failed:', err.message || 'Unknown error');
+          }
+        } catch (err: any) {
+          console.warn('Image generation error:', err.message);
+          // Don't block — character was created successfully
+        }
+      }
+      // Regenerate image if editing a public character
       if (isEdit && vis === 'public' && appearance) {
         try {
           await fetch(`${API}/characters/${characterId}/generate-image`, {
-            method: 'POST', headers: { Authorization: `Bearer ${token}` },
-          });
-        } catch { /* non-fatal */ }
-      }
-      // Generate image for new public characters
-      if (!isEdit && vis === 'public') {
-        try {
-          await fetch(`${API}/characters/${char.id}/generate-image`, {
             method: 'POST', headers: { Authorization: `Bearer ${token}` },
           });
         } catch { /* non-fatal */ }

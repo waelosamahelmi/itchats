@@ -15,6 +15,7 @@ interface Message {
   id: string;
   type?: string;
   audioUrl?: string;
+  metadata?: { status?: string; reactions?: Record<string, string> };
 }
 
 export default function AIChatPage() {
@@ -254,9 +255,9 @@ export default function AIChatPage() {
           </div>
         )}
         {msgs.map((m) => (
-          <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}>
+          <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} animate-slide-up`}>
             <div
-              className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+              className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed relative group ${
                 m.role === 'user'
                   ? 'bg-brand-primary text-white rounded-br-md shadow-lg shadow-brand-glow'
                   : 'glass text-text-primary rounded-bl-md'
@@ -277,7 +278,54 @@ export default function AIChatPage() {
               ) : (
                 <div className="whitespace-pre-wrap break-words">{m.content}</div>
               )}
+              {/* Reactions display */}
+              {m.metadata?.reactions && Object.keys(m.metadata.reactions).length > 0 && (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {Object.entries(m.metadata.reactions).map(([userId, emoji]) => (
+                    <span key={userId} className="text-xs bg-white/10 rounded-full px-1.5 py-0.5 leading-none" title={userId === 'ai' ? 'AI reacted' : 'Reaction'}>
+                      {emoji}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+            {/* Message status for user messages */}
+            {m.role === 'user' && (
+              <div className="flex items-center gap-1 mt-0.5 px-1">
+                <span className="text-[10px] text-text-muted">
+                  {m.metadata?.status === 'seen' ? '✓✓' : m.metadata?.status === 'delivered' ? '✓✓' : '✓'}
+                </span>
+              </div>
+            )}
+            {/* Quick reaction buttons (appear on hover for AI messages) */}
+            {m.role === 'assistant' && (
+              <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity px-1">
+                {['❤️', '😂', '😮', '🔥', '👍'].map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={async () => {
+                      try {
+                        await fetch(`${API}/conversations/${m.id.split('-')[0]}/messages/${m.id}/reactions`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ emoji }),
+                        });
+                        // Update local state
+                        const updated = msgs.map(msg => 
+                          msg.id === m.id 
+                            ? { ...msg, metadata: { ...msg.metadata, reactions: { ...(msg.metadata?.reactions || {}), me: emoji } } }
+                            : msg
+                        );
+                        setMsgs(updated);
+                      } catch {}
+                    }}
+                    className="text-sm hover:scale-125 transition-transform"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {streaming && (

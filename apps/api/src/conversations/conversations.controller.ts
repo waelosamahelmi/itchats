@@ -117,4 +117,63 @@ export class ConversationsController {
     `);
     return { forgotten: true, conversationId: id };
   }
+
+  // Message status (sent/delivered/seen)
+  @Post(':conversationId/messages/:messageId/status')
+  @UseGuards(JwtAuthGuard)
+  async updateMessageStatus(
+    @Param('conversationId') convId: string,
+    @Param('messageId') msgId: string,
+    @Body() body: { status: string },
+    @Req() req: any,
+  ) {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE messages SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{status}', ${JSON.stringify(body.status)}::jsonb)
+      WHERE id = ${msgId} AND conversation_id = ${convId}
+    `);
+    return { updated: true };
+  }
+
+  // Message reactions
+  @Post(':conversationId/messages/:messageId/reactions')
+  @UseGuards(JwtAuthGuard)
+  async addReaction(
+    @Param('conversationId') convId: string,
+    @Param('messageId') msgId: string,
+    @Body() body: { emoji: string },
+    @Req() req: any,
+  ) {
+    const db = getDb();
+    const userId = req.user.userId;
+    await db.execute(sql`
+      UPDATE messages SET metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{reactions}'::text[],
+        COALESCE(metadata->'reactions', '{}'::jsonb) || ${JSON.stringify({ [userId]: body.emoji })}::jsonb
+      )
+      WHERE id = ${msgId} AND conversation_id = ${convId}
+    `);
+    return { reacted: true, emoji: body.emoji };
+  }
+
+  @Delete(':conversationId/messages/:messageId/reactions')
+  @UseGuards(JwtAuthGuard)
+  async removeReaction(
+    @Param('conversationId') convId: string,
+    @Param('messageId') msgId: string,
+    @Req() req: any,
+  ) {
+    const db = getDb();
+    const userId = req.user.userId;
+    await db.execute(sql`
+      UPDATE messages SET metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{reactions}'::text[],
+        (COALESCE(metadata->'reactions', '{}'::jsonb) - ${userId})
+      )
+      WHERE id = ${msgId} AND conversation_id = ${convId}
+    `);
+    return { removed: true };
+  }
 }

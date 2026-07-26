@@ -111,8 +111,8 @@ export class AiService {
     try {
       for await (const chunk of alibabaChatStream({
         messages: chatMessages,
-        temperature: 0.85,
-        maxTokens: 800,
+        temperature: 0.95,
+        maxTokens: 200,
       })) {
         fullResponse += chunk;
         yield { type: 'chunk', content: chunk };
@@ -158,6 +158,8 @@ export class AiService {
     if (characterId) {
       await this.contextBuilder.updateRelationship(characterId, userId, 'positive');
       this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
+      // AI sometimes reacts to the user's message
+      this.autoReact(convId, message).catch(() => {});
     }
 
     yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost };
@@ -479,6 +481,45 @@ Rules:
 
   async clearMemories(characterId: string, userId: string) {
     return this.memoryService.clearMemories(characterId, userId);
+  }
+
+  /** AI character automatically reacts to user messages with emoji */
+  private async autoReact(conversationId: string, userMessage: string) {
+    try {
+      const msg = userMessage.toLowerCase();
+      let emoji: string | null = null;
+      
+      if (/😂|haha|lol|lmao|funny|joke/.test(msg)) emoji = '😂';
+      else if (/❤️|love|ily|adorable|cute|sweet/.test(msg)) emoji = '❤️';
+      else if (/🔥|fire|amazing|awesome|dope|lit/.test(msg)) emoji = '🔥';
+      else if (/😢|sad|cry|miss|crying|broke/.test(msg)) emoji = '😢';
+      else if (/😮|wow|omg|no way|really\?|what\?/.test(msg)) emoji = '😮';
+      else if (/👍|ok|sure|fine|alright|bet/.test(msg)) emoji = '👍';
+      else if (/👏|well done|congrats|proud/.test(msg)) emoji = '👏';
+      
+      if (!emoji) return;
+
+      const db = getDb();
+      // Find the latest user message in this conversation
+      const [latestMsg] = await db.select({ id: messages.id }).from(messages)
+        .where(and(eq(messages.conversationId, conversationId), eq(messages.senderType, 'user')))
+        .orderBy(sql`${messages.createdAt} DESC`)
+        .limit(1);
+      
+      if (!latestMsg) return;
+
+      // Add reaction to the user's message
+      await db.execute(sql`
+        UPDATE messages SET metadata = jsonb_set(
+          COALESCE(metadata, '{}'::jsonb),
+          '{reactions}'::text[],
+          COALESCE(metadata->'reactions', '{}'::jsonb) || ${JSON.stringify({ ai: emoji })}::jsonb
+        )
+        WHERE id = ${latestMsg.id}
+      `);
+    } catch {
+      // Non-critical, never block the main flow
+    }
   }
 
   async getRelationship(characterId: string, userId: string) {
