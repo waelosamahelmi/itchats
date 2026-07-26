@@ -40,6 +40,28 @@ async function bootstrap() {
     { logger: config.LOG_LEVEL === 'debug' ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error', 'warn', 'log'] },
   );
 
+  const { default: helmet } = await import('@fastify/helmet');
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        mediaSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'https:', 'wss:'],
+      },
+    },
+    hsts: config.NODE_ENV === 'production'
+      ? { maxAge: 15552000, includeSubDomains: true, preload: false }
+      : false,
+    referrerPolicy: { policy: 'no-referrer' },
+  });
+
   // Manual CORS — handles all requests including SSE raw writes
   const fastify = app.getHttpAdapter().getInstance();
 

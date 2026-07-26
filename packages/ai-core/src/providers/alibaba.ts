@@ -43,7 +43,7 @@ export async function alibabaChat(request: ChatRequest): Promise<ChatResponse> {
     throw new Error(`Alibaba chat error (${response.status}): ${errorBody.slice(0, 200)}`);
   }
 
-  const data = await response.json();
+  const data: any = await response.json();
   return {
     content: data.choices?.[0]?.message?.content ?? '',
     model: data.model ?? model,
@@ -124,7 +124,7 @@ interface ImageResult {
 
 export async function alibabaTextToImage(request: TextToImageRequest): Promise<ImageResult> {
   const config = getConfig();
-  const model = request.model || IMAGE_FALLBACK_MODELS[0];
+  const model = request.model || IMAGE_FALLBACK_MODELS[0] || 'qwen-image-2.0';
   return callImageGen(model, request, config);
 }
 
@@ -187,7 +187,7 @@ async function callImageGen(model: string, request: TextToImageRequest, config: 
     const errText = await response.text().catch(() => '');
     throw new Error(`Image ${model} (${response.status}): ${errText.slice(0, 200)}`);
   }
-  const data = await response.json();
+  const data: any = await response.json();
   const url = data.output?.results?.[0]?.url || data.data?.[0]?.url;
   if (!url) throw new Error(`Image ${model}: no URL in response — ${JSON.stringify(data).slice(0, 200)}`);
   return { url, model };
@@ -342,7 +342,7 @@ async function callTTSCompat(model: string, request: TTSRequest, config: ReturnT
 
   // Use qwen3-tts-instruct-flash with voice profiles for natural English speech
   if (request.voice && TTS_VOICE_PROFILES[request.voice]) {
-    const profile = TTS_VOICE_PROFILES[request.voice];
+    const profile = TTS_VOICE_PROFILES[request.voice]!;
     // Give the model explicit gender + voice instruction as the FIRST thing it reads
     const genderTag = profile.explicitGender === 'male' ? 'SPEAK WITH A MALE VOICE.' : 'SPEAK WITH A FEMALE VOICE.';
     const instructText = `${genderTag} Voice style: ${profile.instruction}. Emotion: ${request.emotion || 'neutral'}. Say this naturally: ${request.text}`;
@@ -413,7 +413,7 @@ async function callTTS(model: string, request: TTSRequest, apiKey: string, _base
 
     ws.on('message', (data: any) => {
       if (data instanceof Buffer || data instanceof ArrayBuffer) {
-        audioChunks.push(Buffer.from(data));
+        audioChunks.push(Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data));
         return;
       }
       try {
@@ -451,7 +451,7 @@ async function callTTS(model: string, request: TTSRequest, apiKey: string, _base
 
 export async function alibabaTTS(request: TTSRequest): Promise<AudioResult> {
   const config = getConfig();
-  const model = request.model || TTS_FALLBACK_MODELS[0];
+  const model = request.model || TTS_FALLBACK_MODELS[0] || 'qwen3-tts-flash';
   return callTTSCompat(model, request, config);
 }
 
@@ -506,7 +506,7 @@ export async function alibabaEmbedText(request: EmbeddingRequest): Promise<numbe
     throw new Error(`Alibaba embedding error (${response.status})`);
   }
 
-  const data = await response.json();
+  const data: any = await response.json();
   return data.data?.map((d: { embedding: number[] }) => d.embedding) ?? [];
 }
 
@@ -544,7 +544,7 @@ export async function alibabaASR(request: ASRRequest): Promise<{ text: string; l
         const errText = await response.text().catch(() => '');
         throw new Error(`ASR ${model} compat (${response.status}): ${errText.slice(0, 200)}`);
       }
-      const data = await response.json();
+      const data: any = await response.json();
       const text = data.text || '';
       if (!text) throw new Error(`ASR ${model} compat: empty transcript`);
       return { text, language: data.language };
@@ -571,7 +571,7 @@ export async function alibabaASR(request: ASRRequest): Promise<{ text: string; l
         const errText = await response.text().catch(() => '');
         throw new Error(`ASR ${model} native (${response.status}): ${errText.slice(0, 200)}`);
       }
-      const data = await response.json();
+      const data: any = await response.json();
       const text = data.output?.text || data.output?.transcript || data.text || '';
       if (text) return { text, language: data.output?.language };
       tried.push(`${model}: empty transcript`);

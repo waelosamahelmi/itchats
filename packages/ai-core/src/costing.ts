@@ -34,15 +34,17 @@ export const PRICING = {
   'text-embedding-v4': 0.07,
 } as const;
 
-export function getEstimatedCost(model: string, capability: string, params: Record<string, number> = {}): number {
+export type CostParams = Record<string, number | string | boolean | undefined>;
+
+export function getEstimatedCost(model: string, capability: string, params: CostParams = {}): number {
   const pricing = PRICING[model as keyof typeof PRICING];
   if (!pricing) return 0.01;
 
   switch (capability) {
     case 'llm_chat': {
       const p = pricing as { input: number; output: number };
-      const inputTokens = params.inputTokens ?? 2000;
-      const outputTokens = params.outputTokens ?? 300;
+      const inputTokens = Number(params.inputTokens ?? 2000);
+      const outputTokens = Number(params.outputTokens ?? 300);
       return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
     }
     case 'text_to_image':
@@ -51,22 +53,22 @@ export function getEstimatedCost(model: string, capability: string, params: Reco
     case 'text_to_video':
     case 'image_to_video': {
       const p = pricing as Record<string, number>;
-      const seconds = params.seconds ?? 5;
-      const quality = params.quality ?? '720p';
-      const hasAudio = params.hasAudio ?? false;
+      const seconds = Number(params.seconds ?? 5);
+      const quality = String(params.quality ?? '720p');
+      const hasAudio = Boolean(params.hasAudio ?? false);
       const key = hasAudio ? `${quality}_audio` : `${quality}_silent`;
       return (p[key] ?? p['720p_silent'] ?? 0.025) * seconds;
     }
     case 'tts': {
-      const chars = params.chars ?? 300;
+      const chars = Number(params.chars ?? 300);
       return (pricing as number) * chars / 10_000;
     }
     case 'asr': {
-      const seconds = params.seconds ?? 30;
+      const seconds = Number(params.seconds ?? 30);
       return (pricing as number) * seconds;
     }
     case 'embedding': {
-      const tokens = params.tokens ?? 500;
+      const tokens = Number(params.tokens ?? 500);
       return (pricing as number) * tokens / 1_000_000;
     }
     default:
@@ -74,7 +76,7 @@ export function getEstimatedCost(model: string, capability: string, params: Reco
   }
 }
 
-export function getCreditCost(model: string, capability: string, params: Record<string, number> = {}): number {
+export function getCreditCost(model: string, capability: string, params: CostParams = {}): number {
   const providerCost = getEstimatedCost(model, capability, params);
   const credits = calculateCredits(providerCost);
   return Math.max(credits, 2); // Minimum 2 credits

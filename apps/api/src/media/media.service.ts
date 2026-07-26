@@ -7,6 +7,9 @@ export class MediaService {
   async createUploadUrl(userId: string, mimeType: string, fileName: string) {
     const config = getConfig();
     if (!config.S3_ENDPOINT) {
+      if (config.NODE_ENV === 'production') {
+        throw new Error('Object storage is not configured');
+      }
       // Development fallback: return a placeholder signed URL
       const objectKey = `uploads/${userId}/${randomUUID()}-${fileName}`;
       return {
@@ -18,6 +21,9 @@ export class MediaService {
     }
     // Production: Generate real S3 signed URL using AWS SDK or compatible client
     const objectKey = `uploads/${userId}/${randomUUID()}-${fileName}`;
+    if (config.NODE_ENV === 'production') {
+      throw new Error('Signed upload URL generation is not configured');
+    }
     return { uploadUrl: '', objectKey, bucket: config.S3_BUCKET, storageProvider: 's3' };
   }
 

@@ -13,7 +13,7 @@ export const characterMemories = pgTable('character_memories', {
   importance: numeric('importance', { precision: 5, scale: 4 }).notNull().default('0.5'),
   confidence: numeric('confidence', { precision: 5, scale: 4 }).notNull().default('0.5'),
   // embedding: vector('embedding', { dimensions: 1024 }), -- requires pgvector extension
-  sourceMessageIds: uuid('source_message_ids').array().notNull().default('{}'),
+  sourceMessageIds: uuid('source_message_ids').array().notNull().default([]),
   lastRecalledAt: timestamp('last_recalled_at', { withTimezone: true }),
   recallCount: integer('recall_count').notNull().default(0),
   expiresAt: timestamp('expires_at', { withTimezone: true }),

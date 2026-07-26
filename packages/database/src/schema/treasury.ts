@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, bigint, timestamp, jsonb, varchar, numeric, unique, index, boolean, check, integer } from 'drizzle-orm/pg-core';
+import { inArray, sql } from 'drizzle-orm';
 
 // ── Treasury Core ──
 export const treasuryJournals = pgTable('treasury_journals', {
@@ -25,8 +26,8 @@ export const treasuryLedgerEntries = pgTable('treasury_ledger_entries', {
   metadata: jsonb('metadata').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
-  check('direction_check', table.direction.in(['debit', 'credit'])),
-  check('amount_positive', table.amountMinor >= 0),
+  check('direction_check', inArray(table.direction, ['debit', 'credit'])),
+  check('amount_positive', sql`${table.amountMinor} >= 0`),
 ]);
 
 export const treasuryAccounts = pgTable('treasury_accounts', {

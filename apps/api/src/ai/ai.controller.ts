@@ -8,6 +8,10 @@ import { Readable } from 'node:stream';
 const ttsCache = new Map<string, { audioBase64: string; format: string }>();
 const TTS_SAMPLE = 'Hello! I am an AI character.';
 
+function safeAiError(fallback: string) {
+  return { error: fallback };
+}
+
 @Controller('v1/ai')
 export class AiController {
   constructor(
@@ -37,7 +41,7 @@ export class AiController {
           readable.push(`data: ${JSON.stringify(chunk)}\n\n`);
         }
       } catch (err: any) {
-        readable.push(`data: ${JSON.stringify({ type: 'error', message: err.message || 'Unknown error' })}\n\n`);
+        readable.push(`data: ${JSON.stringify({ type: 'error', message: 'AI generation failed. Please try again.' })}\n\n`);
       }
       readable.push(null);
     })();
@@ -45,13 +49,32 @@ export class AiController {
     return readable;
   }
 
+  @Post('chat')
+  @UseGuards(JwtAuthGuard)
+  async chat(@Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string }, @Req() req: any) {
+    let content = '';
+    let creditsUsed = 0;
+    for await (const chunk of this.aiService.streamChat(
+      req.user.userId,
+      body.characterId ?? null,
+      body.message,
+      body.conversationId,
+      body.imageBase64,
+    )) {
+      if (chunk.type === 'chunk') content += chunk.content;
+      if (chunk.type === 'done') creditsUsed = chunk.creditsUsed ?? 0;
+      if (chunk.type === 'error') return safeAiError(chunk.message || 'AI generation failed. Please try again.');
+    }
+    return { content, creditsUsed };
+  }
+
   @Post('selfie')
   @UseGuards(JwtAuthGuard)
   async selfie(@Body() body: { characterId: string; context?: string }, @Req() req: any) {
     try {
       return await this.aiService.generateSelfie(req.user.userId, body.characterId, body.context);
-    } catch (err: any) {
-      return { error: err.message || 'Selfie generation failed' };
+    } catch {
+      return safeAiError('Selfie generation failed. Please try again.');
     }
   }
 
@@ -70,8 +93,8 @@ export class AiController {
     try {
       const result = await this.aiService.generateImage(req.user.userId, body.prompt, body.model);
       return result;
-    } catch (err: any) {
-      return { error: err.message || 'Image generation failed' };
+    } catch {
+      return safeAiError('Image generation failed. Please try again.');
     }
   }
 
@@ -93,8 +116,8 @@ export class AiController {
         ttsCache.set(voice, { audioBase64: result.audioUrl, format: result.format });
       }
       return { audioBase64: result.audioUrl, format: result.format, creditsUsed: result.creditsUsed };
-    } catch (err: any) {
-      return { error: err.message || 'TTS generation failed' };
+    } catch {
+      return safeAiError('TTS generation failed. Please try again.');
     }
   }
 
@@ -111,8 +134,8 @@ export class AiController {
       const result = { audioBase64: audio.audioBase64, format: audio.format };
       ttsCache.set(cacheKey, result);
       return result;
-    } catch (err: any) {
-      return { error: err.message || 'Voice preview failed' };
+    } catch {
+      return safeAiError('Voice preview failed. Please try again.');
     }
   }
 
@@ -139,7 +162,7 @@ export class AiController {
     try {
       const result = await this.aiService.generateImageToImage(req.user.userId, body.prompt, body.imageBase64);
       return result;
-    } catch (err: any) { return { error: err.message || 'ITI failed' }; }
+    } catch { return safeAiError('Image edit failed. Please try again.'); }
   }
 
   @Post('text-to-video')
@@ -148,7 +171,7 @@ export class AiController {
     try {
       const result = await this.aiService.generateTextToVideo(req.user.userId, body.prompt);
       return result;
-    } catch (err: any) { return { error: err.message || 'TTV failed' }; }
+    } catch { return safeAiError('Video generation failed. Please try again.'); }
   }
 
   @Post('image-to-video')
@@ -157,7 +180,7 @@ export class AiController {
     try {
       const result = await this.aiService.generateImageToVideo(req.user.userId, body.prompt, body.imageBase64);
       return result;
-    } catch (err: any) { return { error: err.message || 'ITV failed' }; }
+    } catch { return safeAiError('Video generation failed. Please try again.'); }
   }
 
   @Get('video/result/:taskId')
@@ -165,7 +188,7 @@ export class AiController {
   async getVideoResult(@Param('taskId') taskId: string) {
     try {
       return await this.aiService.getVideoResult(taskId);
-    } catch (err: any) { return { error: err.message || 'Video result fetch failed' }; }
+    } catch { return safeAiError('Video result fetch failed. Please try again.'); }
   }
 
   @Post('asr')
@@ -174,5 +197,5 @@ export class AiController {
     try {
       const result = await this.aiService.transcribeVoice(req.user.userId, body.audioBase64);
       return result;
-    } catch (err: any) { return { error: err.message || 'ASR failed' }; }
+    } catch { return safeAiError('Transcription failed. Please try again.'); }
   }}

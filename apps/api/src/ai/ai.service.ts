@@ -7,6 +7,31 @@ import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
 import { MemoryService } from './memory.service';
 import { getCreditCost } from '@itchats/ai-core/costing';
+import { z } from 'zod';
+
+const MemoryExtractionSchema = z.object({
+  hasMemory: z.boolean(),
+  content: z.string().max(300).optional(),
+  type: z.enum([
+    'identity_fact',
+    'preference',
+    'relationship_event',
+    'promise',
+    'recurring_topic',
+    'sensitive_fact',
+    'temporary_context',
+  ]).optional(),
+  importance: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+});
+
+function parseStructuredJson<T>(content: string, schema: z.ZodType<T>): T | null {
+  try {
+    return schema.parse(JSON.parse(content));
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class AiService {
@@ -197,7 +222,7 @@ export class AiService {
     const db = getDb();
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = Math.max(getCreditCost('qwen3-tts-flash', 'tts', { characters: text.length }), 2);
+    const cost = Math.max(getCreditCost('qwen3-tts-flash', 'tts', { chars: text.length }), 2);
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const audio = await alibabaTTS({ text, voice });
@@ -230,7 +255,7 @@ export class AiService {
     const db = getDb();
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = getCreditCost('qwen-image-2.0', 'text_to_image') * 1.5;
+    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const result = await alibabaImageToImage({ prompt, imageBase64 });
@@ -247,6 +272,12 @@ export class AiService {
       lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
       updatedAt: new Date(),
     }).where(eq(creditWallets.userId, userId));
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
+      imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
+      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost },
+    });
 
     return { url: result.url, model: result.model, creditsUsed: cost };
   }
@@ -284,10 +315,29 @@ export class AiService {
     const db = getDb();
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = 50;
+    const cost = getCreditCost('wan2.6-i2v-flash', 'text_to_video', { seconds: 5, quality: '720p', hasAudio: 0 });
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const result = await alibabaTextToVideo({ prompt });
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'text_to_video', routeKey: 'video.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt }, status: 'succeeded',
+      responseJson: result as any, completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_video',
+      videoSeconds: '5', providerCostUsd: '0.1250', creditsDebited: cost,
+      pricingSnapshot: { model: 'wan2.6-i2v-flash', credits: cost, seconds: 5, quality: '720p', hasAudio: false },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
     return { ...result, creditsUsed: cost };
   }
 
@@ -295,10 +345,29 @@ export class AiService {
     const db = getDb();
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = 50;
+    const cost = getCreditCost('wan2.6-i2v-flash', 'image_to_video', { seconds: 5, quality: '720p', hasAudio: 0 });
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const result = await alibabaImageToVideo({ prompt, imageBase64 });
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'image_to_video', routeKey: 'video.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt }, status: 'succeeded',
+      responseJson: result as any, completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_video',
+      videoSeconds: '5', providerCostUsd: '0.1250', creditsDebited: cost,
+      pricingSnapshot: { model: 'wan2.6-i2v-flash', credits: cost, seconds: 5, quality: '720p', hasAudio: false },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
     return { ...result, creditsUsed: cost };
   }
 
@@ -310,10 +379,29 @@ export class AiService {
     const db = getDb();
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = 2;
+    const cost = Math.max(getCreditCost('qwen3-asr-flash', 'asr', { seconds: 30 }), 6);
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const result = await alibabaASR({ audioBase64 });
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, generationType: 'asr', routeKey: 'asr.standard',
+      idempotencyKey: randomUUID(), requestJson: { audioLength: audioBase64.length }, status: 'succeeded',
+      responseJson: { language: result.language }, completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'asr',
+      audioSeconds: '30', providerCostUsd: '0.00105', creditsDebited: cost,
+      pricingSnapshot: { model: 'qwen3-asr-flash', credits: cost, estimatedSeconds: 30 },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
     return { text: result.text, language: result.language, creditsUsed: cost };
   }
 
@@ -366,7 +454,8 @@ Rules:
         maxTokens: 200,
       });
 
-      const json = JSON.parse(result.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
+      const json = parseStructuredJson(result.content, MemoryExtractionSchema);
+      if (!json) return;
       if (!json.hasMemory || !json.content || json.content.length < 3) return;
 
       await this.memoryService.store({

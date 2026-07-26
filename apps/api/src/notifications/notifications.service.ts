@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { notifications } from '@itchats/database/schema';
-import { eq, desc } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 
 @Injectable()
 export class NotificationsService {
@@ -15,15 +15,18 @@ export class NotificationsService {
 
   async list(userId: string, unreadOnly?: boolean) {
     const db = getDb();
-    let q = db.select().from(notifications).where(eq(notifications.userId, userId));
-    if (unreadOnly) q = q.where(eq(notifications.readAt, null as any));
-    return q.orderBy(desc(notifications.createdAt)).limit(50);
+    return db.select().from(notifications)
+      .where(unreadOnly
+        ? and(eq(notifications.userId, userId), isNull(notifications.readAt))
+        : eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(50);
   }
 
   async markRead(userId: string, notificationId: string) {
     const db = getDb();
     await db.update(notifications).set({ readAt: new Date() as any })
-      .where(eq(notifications.id, notificationId));
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
     return { read: true };
   }
 

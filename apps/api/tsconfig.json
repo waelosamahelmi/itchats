@@ -8,5 +8,11 @@
     "esm": true,
     "experimentalSpecifierResolution": "node"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/ai.controller.ts",
+    "src/ai.service.ts",
+    "src/characters.controller.ts",
+    "src/story-scheduler.service.ts"
+  ]
 }

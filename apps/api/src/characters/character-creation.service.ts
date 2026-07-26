@@ -9,6 +9,29 @@ import { CreateCharacterSchema, type CreateCharacterInput } from '@itchats/contr
 import { getCreditCost } from '@itchats/ai-core/costing';
 import { alibabaChat, alibabaTextToImageWithFallback } from '@itchats/ai-core';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+
+const CharacterAutofillSchema = z.object({
+  name: z.string().max(100).optional(),
+  description: z.string().max(500).optional(),
+  appearance: z.string().max(500).optional(),
+  personality: z.string().max(2000).optional(),
+  backstory: z.string().max(2000).optional(),
+  ageDisplay: z.string().max(50).optional(),
+  gender: z.string().max(50).optional(),
+  pronouns: z.string().max(50).optional(),
+  occupation: z.string().max(100).optional(),
+  interests: z.array(z.string().max(100)).max(20).optional(),
+  speakingStyle: z.string().max(500).optional(),
+});
+
+function parseStructuredJson<T>(content: string, schema: z.ZodType<T>): T | null {
+  try {
+    return schema.parse(JSON.parse(content));
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class CharacterCreationService {
@@ -82,8 +105,8 @@ export class CharacterCreationService {
       maxTokens: 150,
     });
 
-    try {
-      const json = JSON.parse(result.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
+    const json = parseStructuredJson(result.content, CharacterAutofillSchema);
+    if (json) {
       return {
         name: isRandom ? (json.name ?? name) : name,
         personality: json.personality ?? '',
@@ -98,21 +121,21 @@ export class CharacterCreationService {
         speakingStyle: json.speakingStyle ?? '',
         estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 200, outputTokens: 300 }),
       };
-    } catch {
-      return {
-        name: isRandom ? 'Mystery Character' : name,
-        personality: 'Friendly and curious',
-        description: 'A unique individual with their own style',
-        backstory: 'Living their life one day at a time',
-        ageDisplay: '20s',
-        gender: '',
-        pronouns: 'they/them',
-        occupation: '',
-        interests: [],
-        speakingStyle: 'casual',
-        estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 200, outputTokens: 300 }),
-      };
     }
+
+    return {
+      name: isRandom ? 'Mystery Character' : name,
+      personality: 'Friendly and curious',
+      description: 'A unique individual with their own style',
+      backstory: 'Living their life one day at a time',
+      ageDisplay: '20s',
+      gender: '',
+      pronouns: 'they/them',
+      occupation: '',
+      interests: [],
+      speakingStyle: 'casual',
+      estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 200, outputTokens: 300 }),
+    };
   }
 
   async generateCharacterImage(characterId: string, ownerUserId: string) {
@@ -182,11 +205,11 @@ export class CharacterCreationService {
       }).where(eq(creditWallets.userId, ownerUserId));
 
       return { url: result.url, model: result.usedModel, status: 'ready' };
-    } catch (err: any) {
+    } catch {
       // Revert to draft on failure
       await db.update(characters).set({ status: 'draft' as any })
         .where(eq(characters.id, characterId));
-      throw new BadRequestException(`Image generation failed: ${err.message}`);
+      throw new BadRequestException('Image generation failed. Please try again.');
     }
   }
 

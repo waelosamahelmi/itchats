@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, index, jsonb } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { characters } from './characters';
 
@@ -58,7 +58,7 @@ export const notifications = pgTable('notifications', {
   type: text('type').notNull(),
   title: text('title').notNull(),
   body: text('body').notNull(),
-  data: text('data').notNull().default('{}'),
+  data: jsonb('data').notNull().default({}),
   readAt: timestamp('read_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
