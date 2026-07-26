@@ -1,21 +1,26 @@
 import { useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, ChevronRight, Sparkles, Trash2 } from 'lucide-react';
+import { MessageCircle, ChevronRight, Sparkles, Trash2, AlertCircle } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { fetchConvs, deleteConv, useAppDispatch } from '@/app/store';
 
 export default function ChatsPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { convs } = useSelector((s: RootState) => s.chat);
+  const { convs, error: chatError } = useSelector((s: RootState) => s.chat);
   const { user } = useSelector((s: RootState) => s.auth);
 
   useEffect(() => { if (user) dispatch(fetchConvs()); }, [user, dispatch]);
 
   const handleDelete = async (e: React.MouseEvent, cid: string) => {
     e.stopPropagation();
-    if (confirm('Delete this conversation?')) dispatch(deleteConv(cid));
+    if (!confirm('Delete this conversation?')) return;
+    try {
+      await dispatch(deleteConv(cid)).unwrap();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete conversation');
+    }
   };
 
   if (!user) {
@@ -47,6 +52,11 @@ export default function ChatsPage() {
         </div>
       </header>
       <div className="flex-1 overflow-y-auto px-5">
+        {chatError && (
+          <div className="mb-3 glass rounded-xl px-4 py-3 text-sm text-danger text-center flex items-center justify-center gap-2">
+            <AlertCircle size={14} /> {chatError}
+          </div>
+        )}
         {convs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <MessageCircle size={36} className="text-text-muted opacity-40" />

@@ -34,7 +34,7 @@ export class ConversationsController {
     const [conv] = await db.insert(conversations).values({
       type: body.type as 'human_character',
       characterId: body.characterId,
-      createdByUserId: req.user.id,
+      createdByUserId: req.user.userId,
     }).returning();
     return conv;
   }
@@ -57,7 +57,7 @@ export class ConversationsController {
     const [msg] = await db.insert(messages).values({
       conversationId: id,
       senderType: 'user',
-      senderUserId: req.user.id,
+      senderUserId: req.user.userId,
       type: input.type,
       content: input.content,
       clientIdempotencyKey: input.clientIdempotencyKey,

@@ -29,7 +29,13 @@ async function refreshToken(): Promise<string | null> {
 
 async function api(path: string, opts?: RequestInit) {
   const t = token();
-  const res = await fetch(`${API}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}), ...opts?.headers } });
+  const hasBody = opts?.body != null;
+  const headers: Record<string, string> = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    ...(opts?.headers as Record<string, string> || {}),
+  };
+  const res = await fetch(`${API}${path}`, { ...opts, headers });
 
   // Auto-refresh on 401 — try once, then redirect if still failing
   if (res.status === 401 && refresh()) {
@@ -56,7 +62,8 @@ async function api(path: string, opts?: RequestInit) {
   }
 
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
-  return res.json();
+  const text = await res.text();
+  return text ? JSON.parse(text) : {};
 }
 
 // Auth
@@ -111,16 +118,19 @@ export const fetchMsgs = createAsyncThunk('chat/msgs', async (cid: string) => (a
 export const deleteConv = createAsyncThunk('chat/deleteConv', async (cid: string) => { await api(`/conversations/${cid}`, { method: 'DELETE' }); return cid; });
 export const deleteMsg = createAsyncThunk('chat/deleteMsg', async ({ convId, msgId }: { convId: string; msgId: string }) => { await api(`/conversations/${convId}/messages/${msgId}`, { method: 'DELETE' }); return msgId; });
 const chat = createSlice({
-  name: 'chat', initialState: { convs: [] as any[], msgs: [] as Msg[], active: null as string | null },
-  reducers: { setActive(s, a) { s.active = a.payload; } },
+  name: 'chat', initialState: { convs: [] as any[], msgs: [] as Msg[], active: null as string | null, error: null as string | null },
+  reducers: { setActive(s, a) { s.active = a.payload; }, clearError(s) { s.error = null; } },
   extraReducers: (b) => {
-    b.addCase(fetchConvs.fulfilled, (s, a) => { s.convs = a.payload; });
+    b.addCase(fetchConvs.fulfilled, (s, a) => { s.convs = a.payload; s.error = null; });
+    b.addCase(fetchConvs.rejected, (s, a) => { s.error = a.error.message || 'Failed to load conversations'; });
     b.addCase(fetchMsgs.fulfilled, (s, a) => { s.msgs = a.payload; });
-    b.addCase(deleteConv.fulfilled, (s, a) => { s.convs = s.convs.filter(c => c.id !== a.payload); s.msgs = []; });
+    b.addCase(deleteConv.fulfilled, (s, a) => { s.convs = s.convs.filter(c => c.id !== a.payload); s.msgs = []; s.error = null; });
+    b.addCase(deleteConv.rejected, (s, a) => { s.error = a.error.message || 'Failed to delete conversation'; });
     b.addCase(deleteMsg.fulfilled, (s, a) => { s.msgs = s.msgs.filter(m => m.id !== a.payload); });
+    b.addCase(deleteMsg.rejected, (s, a) => { s.error = a.error.message || 'Failed to delete message'; });
   },
 });
-export const { setActive } = chat.actions;
+export const { setActive, clearError } = chat.actions;
 
 // Camera
 const camera = createSlice({
