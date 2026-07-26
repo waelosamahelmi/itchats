@@ -93,23 +93,84 @@ export class CharacterCreationService {
 
   async autofillCharacter(name: string, concept: string) {
     const isRandom = !name || concept === 'random character';
-    // Use multiple entropy sources for true uniqueness
+    // Pre-generate truly random attributes in code to force diversity
     const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 10) + randomUUID().slice(0, 8);
-    const prompt = isRandom
-      ? `Create a COMPLETELY UNIQUE random character. Use seed "${seed}" to ensure diversity — pick a name, gender, age, occupation, personality, and backstory that you have NOT used before. Be creative and unexpected. Mix cultures, professions, and personality types.\n\nReturn ONLY valid JSON, nothing else:\n{"name":"First Last","gender":"Female/Male/Non-binary","ageDisplay":"e.g. mid-20s","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang"}`
-      : `Character: "${name}". Concept: "${concept}". Return ONLY valid JSON:\n{"description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`;
+
+    if (isRandom) {
+      // Force variety by picking random starting attributes
+      const genders = ['Female', 'Male', 'Non-binary'];
+      const ages = ['early 20s', 'mid 20s', 'late 20s', 'early 30s', 'mid 30s', 'late 30s', 'early 40s', 'mid 40s'];
+      const randomGender = genders[Math.floor(Math.random() * genders.length)];
+      const randomAge = ages[Math.floor(Math.random() * ages.length)];
+
+      const prompt = `Generate a COMPLETELY UNIQUE fictional character. Seed: "${seed}". Gender: ${randomGender}. Age: ${randomAge}.
+
+RULES:
+- The name MUST be different from: Kaelen, Voss, Aria, Nova, Kai, Zephyr, Lyra, Orion, Sage, Quinn, Ryder, Ash, Rowan, Finn, River, Sky, Wren, Ember, Phoenix
+- Pick from DIFFERENT cultures: Japanese, Nigerian, Brazilian, Indian, Korean, Egyptian, Mexican, Swedish, Moroccan, Thai, Turkish, Italian, Polish, Vietnamese, Colombian, Ethiopian, Greek, Malaysian
+- Pick an UNUSUAL or SPECIFIC profession (not "artist" or "writer"): e.g. marine biologist, blacksmith, ethical hacker, perfumer, puppeteer, volcanologist, luthier, sommelier, beekeeper, forensic accountant
+
+Return ONLY valid JSON, nothing else:
+{"name":"First Last","gender":"${randomGender}","ageDisplay":"${randomAge}","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style, ethnicity","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang"}`;
+
+      const result = await alibabaChat({
+        messages: [
+          { role: 'system', content: 'You are a creative character generator. NEVER repeat names. Every generation must be completely unique. Pick from the cultures and professions listed. Be unexpected.' },
+          { role: 'user', content: prompt },
+        ],
+        model: 'qwen-plus',
+        temperature: 2.0,
+        maxTokens: 500,
+        // @ts-expect-error top_p not in interface but supported by API
+        top_p: 0.98,
+      } as any);
+
+      const json = parseStructuredJson(result.content, CharacterAutofillSchema);
+      if (json) {
+        return {
+          name: json.name ?? 'Mystery Character',
+          personality: json.personality ?? '',
+          description: json.description ?? '',
+          appearance: json.appearance ?? json.description ?? '',
+          backstory: json.backstory ?? '',
+          ageDisplay: json.ageDisplay ?? randomAge,
+          gender: json.gender ?? randomGender,
+          pronouns: json.pronouns ?? 'they/them',
+          occupation: json.occupation ?? '',
+          interests: Array.isArray(json.interests) ? json.interests : [],
+          speakingStyle: json.speakingStyle ?? '',
+          estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 300, outputTokens: 500 }),
+        };
+      }
+      return {
+        name: 'Mystery Character',
+        personality: 'Friendly and curious',
+        description: 'A unique individual with their own style',
+        backstory: 'Living their life one day at a time',
+        ageDisplay: randomAge,
+        gender: randomGender,
+        pronouns: 'they/them',
+        occupation: '',
+        interests: [],
+        speakingStyle: 'casual',
+        estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 300, outputTokens: 500 }),
+      };
+    }
+
+    // Non-random: use the provided concept
+    const prompt = `Character: "${name}". Concept: "${concept}". Return ONLY valid JSON:\n{"description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`;
 
     const result = await alibabaChat({
       messages: [{ role: 'user', content: prompt }],
       model: 'qwen-plus',
-      temperature: 1.5,
-      maxTokens: 400,
+      temperature: 1.2,
+      maxTokens: 300,
     });
 
     const json = parseStructuredJson(result.content, CharacterAutofillSchema);
     if (json) {
       return {
-        name: isRandom ? (json.name ?? name) : name,
+        name: name,
         personality: json.personality ?? '',
         description: json.description ?? '',
         appearance: json.appearance ?? json.description ?? '',
@@ -125,7 +186,7 @@ export class CharacterCreationService {
     }
 
     return {
-      name: isRandom ? 'Mystery Character' : name,
+      name: name,
       personality: 'Friendly and curious',
       description: 'A unique individual with their own style',
       backstory: 'Living their life one day at a time',
