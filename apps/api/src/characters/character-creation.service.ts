@@ -93,16 +93,17 @@ export class CharacterCreationService {
 
   async autofillCharacter(name: string, concept: string) {
     const isRandom = !name || concept === 'random character';
-    const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    // Use multiple entropy sources for true uniqueness
+    const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 10) + randomUUID().slice(0, 8);
     const prompt = isRandom
-      ? `Create a random character (seed: ${seed}). Return ONLY valid JSON, nothing else:\n{"name":"Name","description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`
+      ? `Create a COMPLETELY UNIQUE random character. Use seed "${seed}" to ensure diversity — pick a name, gender, age, occupation, personality, and backstory that you have NOT used before. Be creative and unexpected. Mix cultures, professions, and personality types.\n\nReturn ONLY valid JSON, nothing else:\n{"name":"First Last","gender":"Female/Male/Non-binary","ageDisplay":"e.g. mid-20s","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang"}`
       : `Character: "${name}". Concept: "${concept}". Return ONLY valid JSON:\n{"description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`;
 
     const result = await alibabaChat({
       messages: [{ role: 'user', content: prompt }],
       model: 'qwen-plus',
-      temperature: 1.2,
-      maxTokens: 150,
+      temperature: 1.5,
+      maxTokens: 400,
     });
 
     const json = parseStructuredJson(result.content, CharacterAutofillSchema);
