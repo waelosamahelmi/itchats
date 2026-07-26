@@ -22,6 +22,17 @@ export default function CreateCharacterPage() {
   const [voice, setVoice] = useState('text-only');
   const [city, setCity] = useState('');
   const [autonomy, setAutonomy] = useState('off');
+  // New identity fields
+  const [nationality, setNationality] = useState('');
+  const [ethnicity, setEthnicity] = useState('');
+  const [height, setHeight] = useState('');
+  const [bodyType, setBodyType] = useState('');
+  const [eyeColor, setEyeColor] = useState('');
+  const [hairStyle, setHairStyle] = useState('');
+  const [skinTone, setSkinTone] = useState('');
+  const [speakingStyle, setSpeakingStyle] = useState('');
+  const [humorStyle, setHumorStyle] = useState('');
+  const [occupation, setOccupation] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
@@ -123,7 +134,9 @@ export default function CreateCharacterPage() {
     try {
       const body: any = {
         name, description: desc, personality, backstory, gender, appearance,
-        visibility: vis, city,
+        visibility: vis, city, occupation,
+        nationality, ethnicity, height, bodyType, eyeColor,
+        hair: hairStyle, skinTone, speakingStyle, humorStyle,
         autonomyLevel: autonomy as 'off' | 'low' | 'normal' | 'high',
         storyCadence: autonomy === 'off' ? 'manual' : autonomy === 'low' ? 'every_3_days' : autonomy === 'normal' ? 'every_2_days' : 'daily',
       };
@@ -287,6 +300,14 @@ export default function CreateCharacterPage() {
               {vis === 'public' ? (
                 <div>
                   <textarea value={appearance} onChange={e => setAppearance(e.target.value)} placeholder="Describe their appearance in detail...&#10;e.g. 25-year-old woman, long dark curly hair, hazel eyes, warm olive skin, casual streetwear, natural makeup" rows={4} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    <input value={height} onChange={e => setHeight(e.target.value)} placeholder='Height (e.g. 5&apos;8&quot;)' className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                    <input value={bodyType} onChange={e => setBodyType(e.target.value)} placeholder="Body type (e.g. athletic)" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                    <input value={eyeColor} onChange={e => setEyeColor(e.target.value)} placeholder="Eye color" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                    <input value={hairStyle} onChange={e => setHairStyle(e.target.value)} placeholder="Hair (color, style, length)" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                    <input value={skinTone} onChange={e => setSkinTone(e.target.value)} placeholder="Skin tone" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                    <input value={occupation} onChange={e => setOccupation(e.target.value)} placeholder="Occupation" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                  </div>
                   <p className="text-[10px] text-text-muted mt-1 flex items-center gap-1"><Sparkles size={10} /> AI will generate their visual identity from this description</p>
                 </div>
               ) : (
@@ -306,6 +327,12 @@ export default function CreateCharacterPage() {
             <div className="space-y-3">
               <textarea value={personality} onChange={e => setPersonality(e.target.value)} placeholder="Personality traits...&#10;e.g. Warm, curious, witty, slightly sarcastic, loves deep conversations" rows={3} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
               <textarea value={backstory} onChange={e => setBackstory(e.target.value)} placeholder="Backstory...&#10;e.g. A former architect who left corporate life to travel the world" rows={3} className="w-full glass rounded-2xl px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none" />
+              <div className="grid grid-cols-2 gap-2">
+                <input value={speakingStyle} onChange={e => setSpeakingStyle(e.target.value)} placeholder="Speaking style (e.g. casual, sarcastic)" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                <input value={humorStyle} onChange={e => setHumorStyle(e.target.value)} placeholder="Humor style (e.g. dry, playful)" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                <input value={nationality} onChange={e => setNationality(e.target.value)} placeholder="Nationality" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+                <input value={ethnicity} onChange={e => setEthnicity(e.target.value)} placeholder="Ethnicity" className="glass rounded-xl px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/50" />
+              </div>
               <button onClick={handleAutofill} disabled={autofilling}
                 className="w-full glass rounded-2xl p-3 text-sm text-brand-primary flex items-center justify-center gap-2 hover:bg-brand-glow/20 transition-all disabled:opacity-50">
                 <Sparkles size={16} /> {autofilling ? 'Generating...' : 'AI Auto-Fill Personality'}
@@ -388,8 +415,12 @@ export default function CreateCharacterPage() {
                 ['Description', desc || '(not set)'],
                 ['Appearance', appearance || '(not set)'],
                 ['Personality', personality || '(not set)'],
+                ['Speaking', speakingStyle || 'casual'],
+                ['Humor', humorStyle || 'natural'],
+                ['Occupation', occupation || '(not set)'],
                 ['Voice', voice.replace(/-/g, ' ')],
                 ['Location', city || '(not set)'],
+                ['Nationality', nationality || '(not set)'],
                 ['Autonomy', autonomy],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between items-center">
