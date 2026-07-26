@@ -53,19 +53,71 @@ export class MemoryService {
     return mem;
   }
 
+  /**
+   * Section 24.3: Retrieve top memories ranked by combined score.
+   * Formula: semantic_similarity * 0.50 + importance * 0.25 + recency_score * 0.15 + relationship_relevance * 0.10
+   * For MVP without pgvector, uses importance + recency scoring with content overlap for relevance.
+   */
   async retrieve(characterId: string, userId: string, query: string, limit = 8) {
     const db = getDb();
-    // For MVP: retrieve by recency + importance since we don't have pgvector yet
-    return db.select().from(characterMemories)
+    const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    
+    // Get all active memories
+    const allMemories = await db.select().from(characterMemories)
       .where(and(
         eq(characterMemories.characterId, characterId),
         eq(characterMemories.userId, userId),
         sql`(${characterMemories.expiresAt} IS NULL OR ${characterMemories.expiresAt} > NOW())`,
       ))
-      .orderBy(
-        desc(sql`${characterMemories.importance}::numeric * 0.5 + (EXTRACT(EPOCH FROM NOW() - ${characterMemories.createdAt}) / 86400.0)::numeric * 0.1`),
-      )
-      .limit(limit);
+      .orderBy(desc(characterMemories.createdAt))
+      .limit(50);
+
+    if (allMemories.length === 0) return [];
+
+    // Score each memory
+    const now = Date.now();
+    const scored = allMemories.map(m => {
+      const content = (m.content || '').toLowerCase();
+      
+      // Content relevance: how many query terms appear in the memory
+      const matchCount = queryTerms.filter(t => content.includes(t)).length;
+      const relevance = queryTerms.length > 0 ? matchCount / queryTerms.length : 0.25;
+      
+      // Recency: days ago (0 = today, capped at 30 days)
+      const ageDays = Math.min(30, (now - new Date(m.createdAt).getTime()) / (86400000));
+      const recencyScore = Math.max(0, 1 - ageDays / 30);
+      
+      // Importance from DB
+      const importance = Number(m.importance) || 0.5;
+      
+      // Combined score per spec Section 24.3
+      const score = relevance * 0.50 + importance * 0.25 + recencyScore * 0.15 + (Number(m.recallCount || 0) > 0 ? 0.10 : 0.05);
+      
+      return { memory: m, score };
+    });
+
+    // Sort by score descending, return top N
+    scored.sort((a, b) => b.score - a.score);
+    
+    // Update recall counts for retrieved memories
+    const topMemories = scored.slice(0, limit);
+    for (const { memory } of topMemories) {
+      db.update(characterMemories).set({
+        lastRecalledAt: new Date(),
+        recallCount: sql`${characterMemories.recallCount} + 1`,
+        updatedAt: new Date(),
+      }).where(eq(characterMemories.id, memory.id)).execute().catch(() => {});
+    }
+
+    return topMemories.map(({ memory, score }) => ({
+      id: memory.id,
+      content: memory.content,
+      type: memory.memoryType,
+      importance: Number(memory.importance),
+      confidence: Number(memory.confidence),
+      score: Math.round(score * 100) / 100,
+      createdAt: memory.createdAt,
+    }));
   }
 
   async getUserMemories(characterId: string, userId: string) {

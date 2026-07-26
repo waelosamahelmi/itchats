@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { characters, characterRelationships, characterMemories, messages, conversations } from '@itchats/database/schema';
+import { characters, characterRelationships, messages, conversations } from '@itchats/database/schema';
 import { eq, and, desc, asc } from 'drizzle-orm';
+import { MemoryService } from './memory.service';
 
 export interface AssembledContext {
   systemPrompt: string;
@@ -14,6 +15,10 @@ export interface AssembledContext {
 
 @Injectable()
 export class ContextBuilderService {
+  constructor(
+    @Inject(MemoryService) private readonly memoryService: MemoryService,
+  ) {}
+
   async buildContext(
     characterId: string,
     userId: string,
@@ -32,13 +37,9 @@ export class ContextBuilderService {
         eq(characterRelationships.userId, userId),
       )).limit(1);
 
-    const memories = await db.select().from(characterMemories)
-      .where(and(
-        eq(characterMemories.characterId, characterId),
-        eq(characterMemories.userId, userId),
-      ))
-      .orderBy(desc(characterMemories.importance), desc(characterMemories.createdAt))
-      .limit(8);
+    // Section 24: Use MemoryService for scored retrieval instead of raw DB query
+    const retrievedMemories = await this.memoryService.retrieve(characterId, userId, userMessage, 8);
+    const memoryContents = retrievedMemories.map(m => m.content);
 
     const recentMessages: { role: string; content: string }[] = [];
     if (conversationId) {
@@ -60,12 +61,12 @@ export class ContextBuilderService {
       }
     }
 
-    const systemPrompt = this.buildSystemPrompt(char, rel, memories.map(m => m.content), recentMessages);
+    const systemPrompt = this.buildSystemPrompt(char, rel, memoryContents, recentMessages);
 
     return {
       systemPrompt,
       recentMessages,
-      memories: memories.map(m => m.content),
+      memories: memoryContents,
       characterName: char.name,
       characterEmotion: (char.emotionState as any)?.mood ?? undefined,
       relationship: rel ? {

@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { alibabaChatStream, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR } from '@itchats/ai-core';
+import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
 import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters } from '@itchats/database/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
@@ -317,6 +317,11 @@ export class AiService {
     return { text: result.text, language: result.language, creditsUsed: cost };
   }
 
+  /**
+   * Section 24: LLM-based memory extraction.
+   * Uses a cheap model to evaluate whether the exchange contains anything worth remembering,
+   * classifies it, and stores it with proper importance/confidence scores.
+   */
   private async extractMemory(
     characterId: string,
     userId: string,
@@ -325,30 +330,53 @@ export class AiService {
     aiResponse: string,
   ) {
     try {
-      const combined = `${userMessage} ${aiResponse}`.toLowerCase();
-      const signalWords = [
-        'i am', "i'm", 'my name is', 'i live in', 'i work', 'i like', 'i love', 'i enjoy',
-        'i hate', 'i dislike', 'my favorite', 'i prefer', 'i remember', 'i feel', 'i think',
-        'my birthday', 'my family', 'my job', 'i study', 'i went', 'i used to',
-        'always', 'never', 'sometimes', 'often', 'usually', 'maybe', 'probably',
-      ];
-      const hasSignal = signalWords.some(w => combined.includes(w));
-      if (!hasSignal && combined.length < 50) return;
+      // Skip trivial exchanges
+      const combined = userMessage + aiResponse;
+      if (combined.length < 30) return;
 
-      const importance = combined.length > 100 ? 0.4 : 0.25;
-      const memoryType = combined.includes('promise') || combined.includes('swear')
-        ? 'promise' as const
-        : signalWords.some(w => combined.includes(w))
-          ? 'preference' as const
-          : 'temporary_context' as const;
+      // Use cheap model for extraction per spec Section 15.2 (qwen-flash: $0.05/1M input)
+      const extractionPrompt = `Analyze this conversation exchange and determine if the user revealed anything worth remembering about themselves.
 
-      const content = userMessage.length > 300 ? userMessage.slice(0, 297) + '...' : userMessage;
+USER: ${userMessage.slice(0, 400)}
+AI: ${aiResponse.slice(0, 200)}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{
+  "hasMemory": true/false,
+  "content": "What to remember (1 short sentence, max 120 chars)",
+  "type": "identity_fact|preference|relationship_event|promise|recurring_topic|sensitive_fact|temporary_context",
+  "importance": 0.0-1.0 (how important is this for future conversations?),
+  "confidence": 0.0-1.0 (how certain are you this is accurate?)
+}
+
+Rules:
+- identity_fact: name, age, location, job, family, background
+- preference: likes, dislikes, favorites, opinions
+- relationship_event: something meaningful between us
+- promise: they committed to something
+- recurring_topic: topic they bring up often
+- sensitive_fact: potentially private/sensitive info — set importance LOW
+- temporary_context: short-term context only, set importance LOW
+- Only return hasMemory:true if there's genuinely something worth remembering. Small talk = false.`;
+
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: extractionPrompt }],
+        model: 'qwen-flash',
+        temperature: 0.2,
+        maxTokens: 200,
+      });
+
+      const json = JSON.parse(result.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
+      if (!json.hasMemory || !json.content || json.content.length < 3) return;
+
       await this.memoryService.store({
-        characterId, userId, conversationId,
-        content,
-        memoryType,
-        importance,
-        confidence: 0.6,
+        characterId,
+        userId,
+        conversationId,
+        content: json.content.slice(0, 300),
+        memoryType: json.type || 'temporary_context',
+        importance: Math.min(1, Math.max(0, Number(json.importance) || 0.4)),
+        confidence: Math.min(1, Math.max(0, Number(json.confidence) || 0.5)),
         sourceMessageIds: [],
       });
     } catch {

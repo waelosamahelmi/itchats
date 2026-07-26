@@ -46,4 +46,12 @@ export class SocialController {
     await db.delete(userBlocks).where(and(eq(userBlocks.blockerUserId, req.user.id), eq(userBlocks.blockedUserId, userId)));
     return { unblocked: true };
   }
+
+  @Delete('blocks/characters/:characterId')
+  @UseGuards(JwtAuthGuard)
+  async unblockCharacter(@Param('characterId') id: string, @Req() req: any) {
+    const db = getDb();
+    await db.delete(userBlocks).where(and(eq(userBlocks.blockerUserId, req.user.id), eq(userBlocks.blockedCharacterId, id)));
+    return { unblocked: true };
+  }
 }
