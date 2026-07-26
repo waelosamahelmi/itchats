@@ -48,6 +48,7 @@ export function Router() {
             <Route path="/chat/:convId" element={<ChatDetailPage />} />
             <Route path="/ai" element={<AIPage />} />
             <Route path="/ai/create" element={<CreateCharacterPage />} />
+            <Route path="/ai/edit/:characterId" element={<CreateCharacterPage />} />
             <Route path="/ai/chat/:characterId" element={<AIChatPage />} />
             <Route path="/ai/profile/:characterId" element={<CharacterProfilePage />} />
             <Route path="/discover" element={<DiscoverPage />} />

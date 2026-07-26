@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
   ArrowLeft, MessageCircle, Heart, Share2, Flag, MapPin, Sparkles,
-  Globe, Lock,
+  Globe, Lock, Pencil,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { Badge } from '@itchats/ui';
@@ -13,13 +13,14 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
 export default function CharacterProfilePage() {
   const { characterId } = useParams<{ characterId: string }>();
   const nav = useNavigate();
-  const { token } = useSelector((s: RootState) => s.auth);
+  const { token, user } = useSelector((s: RootState) => s.auth);
   const [char, setChar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [following, setFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
+  const isOwner = user?.id === char?.ownerUserId;
 
   useEffect(() => {
     if (!token || !characterId) return;
@@ -118,6 +119,11 @@ export default function CharacterProfilePage() {
         </button>
         <h1 className="text-lg font-semibold text-text-primary">{char.name}</h1>
         <div className="flex-1" />
+        {isOwner && (
+          <button onClick={() => nav(`/ai/edit/${characterId}`)} className="p-1.5 rounded-full hover:bg-white/5 transition-colors" title="Edit character">
+            <Pencil size={18} className="text-text-secondary" />
+          </button>
+        )}
         <button onClick={handleShare} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
           <Share2 size={18} className="text-text-secondary" />
         </button>

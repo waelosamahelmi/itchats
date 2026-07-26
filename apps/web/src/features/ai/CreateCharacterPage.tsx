@@ -1,13 +1,15 @@
-import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { ArrowLeft, ArrowRight, Sparkles, Globe, Lock, Wand2, Bot, Mic, MapPin, Clock, Check, Volume2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Sparkles, Globe, Lock, Wand2, Bot, Mic, MapPin, Clock, Check, Volume2, Trash2, Pencil } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
 const STEPS = ['Type', 'Identity', 'Personality', 'Voice', 'Location', 'Autonomy', 'Review'];
 
 export default function CreateCharacterPage() {
   const nav = useNavigate();
+  const { characterId } = useParams<{ characterId?: string }>();
+  const isEdit = !!characterId;
   const { token } = useSelector((s: RootState) => s.auth);
   const [step, setStep] = useState(0);
   const [vis, setVis] = useState<'public' | 'private'>('private');
@@ -21,12 +23,43 @@ export default function CreateCharacterPage() {
   const [city, setCity] = useState('');
   const [autonomy, setAutonomy] = useState('off');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [autofilling, setAutofilling] = useState(false);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [loadingChar, setLoadingChar] = useState(isEdit);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const API = (import.meta as any).env?.VITE_API_URL || '/v1';
+
+  // Fetch character data when editing
+  useEffect(() => {
+    if (!isEdit || !token || !characterId) return;
+    setLoadingChar(true);
+    (async () => {
+      try {
+        const res = await fetch(`${API}/characters/${characterId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Character not found');
+        const data = await res.json();
+        setName(data.name || '');
+        setDesc(data.description || '');
+        setPersonality(data.personality || '');
+        setBackstory(data.backstory || '');
+        setAppearance(data.appearance || '');
+        setGender(data.gender || '');
+        setVoice(data.voiceProfileId || 'text-only');
+        setCity(data.location?.city || '');
+        setVis(data.visibility || 'private');
+        const autoConfig = data.autonomyConfig || {};
+        setAutonomy(autoConfig.level || 'off');
+      } catch (e: any) {
+        setError(e.message || 'Failed to load character');
+      }
+      setLoadingChar(false);
+    })();
+  }, [characterId, token, isEdit]);
 
   const handleAutofill = async () => {
     if (!token || !name) return;
@@ -83,24 +116,39 @@ export default function CreateCharacterPage() {
   ];
   const emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised'];
 
-  const handleCreate = async () => {
+  const handleSave = async () => {
     if (!token) { nav('/auth'); return; }
     setSaving(true);
+    setError('');
     try {
-      const res = await fetch(`${API}/characters`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name, description: desc, personality, backstory, gender,
-          visibility: vis, city,
-          autonomyLevel: autonomy as 'off' | 'low' | 'normal' | 'high',
-          storyCadence: autonomy === 'off' ? 'manual' : autonomy === 'low' ? 'every_3_days' : autonomy === 'normal' ? 'every_2_days' : 'daily',
-        }),
+      const body: any = {
+        name, description: desc, personality, backstory, gender, appearance,
+        visibility: vis, city,
+        autonomyLevel: autonomy as 'off' | 'low' | 'normal' | 'high',
+        storyCadence: autonomy === 'off' ? 'manual' : autonomy === 'low' ? 'every_3_days' : autonomy === 'normal' ? 'every_2_days' : 'daily',
+      };
+      if (voice !== 'text-only') body.voiceProfileId = voice;
+
+      const url = isEdit ? `${API}/characters/${characterId}` : `${API}/characters`;
+      const method = isEdit ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Creation failed'); }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Save failed'); }
       const char = await res.json();
 
-      // Generate character image if public
-      if (vis === 'public') {
+      // Regenerate image if editing a public character with changed appearance
+      if (isEdit && vis === 'public' && appearance) {
+        try {
+          await fetch(`${API}/characters/${characterId}/generate-image`, {
+            method: 'POST', headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch { /* non-fatal */ }
+      }
+      // Generate image for new public characters
+      if (!isEdit && vis === 'public') {
         try {
           await fetch(`${API}/characters/${char.id}/generate-image`, {
             method: 'POST', headers: { Authorization: `Bearer ${token}` },
@@ -108,9 +156,24 @@ export default function CreateCharacterPage() {
         } catch { /* non-fatal */ }
       }
 
-      nav(`/ai/chat/${char.id}`);
+      nav(`/ai/chat/${isEdit ? characterId : char.id}`);
     } catch (e: any) { setError(e.message); }
     setSaving(false);
+  };
+
+  const handleDelete = async () => {
+    if (!token || !characterId) return;
+    if (!window.confirm('Are you sure you want to delete this character? This action cannot be undone.')) return;
+    setDeleting(true);
+    setError('');
+    try {
+      const res = await fetch(`${API}/characters/${characterId}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Delete failed'); }
+      nav('/ai');
+    } catch (e: any) { setError(e.message); }
+    setDeleting(false);
   };
 
   const next = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
@@ -119,8 +182,18 @@ export default function CreateCharacterPage() {
   if (!token) return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
       <Lock size={48} className="text-text-muted" />
-      <p className="text-text-secondary text-center text-sm">Sign in to create AI characters</p>
+      <p className="text-text-secondary text-center text-sm">Sign in to {isEdit ? 'edit' : 'create'} AI characters</p>
       <button onClick={() => nav('/auth')} className="rounded-full bg-brand-primary px-6 py-3 text-white text-sm font-medium">Sign In</button>
+    </div>
+  );
+
+  if (loadingChar) return (
+    <div className="flex h-full items-center justify-center bg-bg-canvas">
+      <div className="flex gap-1">
+        <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-2 h-2 rounded-full bg-brand-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
     </div>
   );
 
@@ -134,7 +207,7 @@ export default function CreateCharacterPage() {
             <p className="text-xs text-text-muted">{STEPS[step]} • Step {step + 1} of {STEPS.length}</p>
           </div>
         </div>
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Create Character</h1>
+        <h1 className="text-2xl font-bold text-text-primary tracking-tight">{isEdit ? 'Edit Character' : 'Create Character'}</h1>
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {error && <div className="mb-4 glass rounded-xl px-4 py-3 text-sm text-danger text-center">{error}</div>}
@@ -318,11 +391,17 @@ export default function CreateCharacterPage() {
           </div>
         )}
       </div>
-      <div className="safe-bottom p-4">
-        <button onClick={step === STEPS.length - 1 ? handleCreate : next} disabled={saving || (step === 1 && !name)}
+      <div className="safe-bottom p-4 space-y-3">
+        <button onClick={step === STEPS.length - 1 ? handleSave : next} disabled={saving || deleting || (step === 1 && !name)}
           className="w-full rounded-2xl bg-brand-primary py-3.5 text-white font-semibold text-sm flex items-center justify-center gap-2 accent-glow hover:brightness-110 transition-all disabled:opacity-40">
-          {saving ? 'Creating...' : step === STEPS.length - 1 ? <><Sparkles size={17} /> Create Character</> : <><ArrowRight size={17} /> Continue</>}
+          {saving ? (isEdit ? 'Saving...' : 'Creating...') : step === STEPS.length - 1 ? <>{isEdit ? <Pencil size={17} /> : <Sparkles size={17} />} {isEdit ? 'Save Changes' : 'Create Character'}</> : <><ArrowRight size={17} /> Continue</>}
         </button>
+        {isEdit && (
+          <button onClick={handleDelete} disabled={deleting || saving}
+            className="w-full rounded-2xl glass py-3 text-danger font-medium text-sm flex items-center justify-center gap-2 hover:bg-danger/10 transition-all disabled:opacity-40">
+            <Trash2 size={16} /> {deleting ? 'Deleting...' : 'Delete Character'}
+          </button>
+        )}
       </div>
     </div>
   );

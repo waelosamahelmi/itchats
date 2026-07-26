@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject, NotFoundException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { characters, characterFollows, characterLocations, characterReferenceAssets } from '@itchats/database/schema';
+import { characters, characterFollows, characterLocations, characterReferenceAssets, characterVoiceProfiles } from '@itchats/database/schema';
 import { eq, and, or, ilike, sql } from 'drizzle-orm';
 import { CharactersService } from './characters.service';
 import { CharacterCreationService } from './character-creation.service';
@@ -73,10 +73,74 @@ export class CharactersController {
     const [char] = await db.select().from(characters)
       .where(and(eq(characters.id, id), eq(characters.ownerUserId, req.user.userId))).limit(1);
     if (!char) throw new NotFoundException('Character not found or not owned by you');
-    const updatable = { name: body.name, description: body.description, personality: body.personality, backstory: body.backstory, ageDisplay: body.ageDisplay, gender: body.gender, pronouns: body.pronouns, occupation: body.occupation, interests: body.interests, speakingStyle: body.speakingStyle, emotionState: body.emotionState };
-    const clean: Record<string, any> = {};
-    for (const [k, v] of Object.entries(updatable)) { if (v !== undefined) clean[k] = v; }
-    const [updated] = await db.update(characters).set(clean).where(eq(characters.id, id)).returning();
+
+    // Core character fields
+    const updatable: Record<string, any> = {};
+    const fields = ['name', 'description', 'personality', 'backstory', 'ageDisplay', 'gender', 'pronouns', 'occupation', 'interests', 'speakingStyle', 'visibility'];
+    for (const f of fields) { if (body[f] !== undefined) updatable[f] = body[f]; }
+
+    // Handle appearance as a top-level field (store in description if no dedicated column)
+    if (body.appearance !== undefined && !updatable.description) {
+      updatable.description = body.appearance;
+    }
+
+    // Autonomy config (JSON)
+    if (body.autonomyLevel !== undefined || body.storyCadence !== undefined) {
+      const current = (char.autonomyConfig as Record<string, any>) || {};
+      const newConfig: Record<string, any> = { ...current };
+      if (body.autonomyLevel !== undefined) newConfig.level = body.autonomyLevel;
+      if (body.storyCadence !== undefined) newConfig.cadence = body.storyCadence;
+      updatable.autonomyConfig = newConfig;
+    }
+
+    // Emotion state
+    if (body.emotionState !== undefined) updatable.emotionState = body.emotionState;
+
+    if (Object.keys(updatable).length > 0) {
+      await db.update(characters).set(updatable as any).where(eq(characters.id, id));
+    }
+
+    // Update location
+    if (body.city !== undefined || body.countryCode !== undefined) {
+      const [existingLoc] = await db.select().from(characterLocations)
+        .where(eq(characterLocations.characterId, id)).limit(1);
+      const locData: Record<string, any> = {};
+      if (body.city !== undefined) locData.city = body.city;
+      if (body.countryCode !== undefined) locData.countryCode = body.countryCode;
+      if (body.timezone !== undefined) locData.timezone = body.timezone;
+
+      if (existingLoc) {
+        await db.update(characterLocations).set(locData as any).where(eq(characterLocations.characterId, id));
+      } else if (body.city) {
+        try {
+          await db.insert(characterLocations).values({
+            characterId: id, city: body.city,
+            countryCode: body.countryCode,
+            timezone: body.timezone,
+            source: 'declared',
+          } as any);
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // Update voice profile
+    if (body.voiceProfileId !== undefined) {
+      const [existingVoice] = await db.select().from(characterVoiceProfiles)
+        .where(eq(characterVoiceProfiles.characterId, id)).limit(1);
+      if (existingVoice) {
+        await db.update(characterVoiceProfiles).set({ voiceId: body.voiceProfileId } as any)
+          .where(eq(characterVoiceProfiles.characterId, id));
+      } else {
+        try {
+          await db.insert(characterVoiceProfiles).values({
+            characterId: id, voiceId: body.voiceProfileId, provider: 'alibaba',
+          } as any);
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // Return updated character
+    const [updated] = await db.select().from(characters).where(eq(characters.id, id)).limit(1);
     return updated;
   }
 
