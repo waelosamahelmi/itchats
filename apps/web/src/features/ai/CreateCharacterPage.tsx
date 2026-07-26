@@ -269,6 +269,17 @@ export default function CreateCharacterPage() {
                   if (data.appearance) setAppearance(data.appearance);
                   if (data.personality) setPersonality(data.personality);
                   if (data.backstory) setBackstory(data.backstory);
+                  if (data.gender) setGender(data.gender);
+                  if (data.occupation) setOccupation(data.occupation);
+                  if (data.speakingStyle) setSpeakingStyle(data.speakingStyle);
+                  if (data.humorStyle) setHumorStyle(data.humorStyle);
+                  if (data.nationality) setNationality(data.nationality);
+                  if (data.ethnicity) setEthnicity(data.ethnicity);
+                  if (data.height) setHeight(data.height);
+                  if (data.bodyType) setBodyType(data.bodyType);
+                  if (data.eyeColor) setEyeColor(data.eyeColor);
+                  if (data.hair) setHairStyle(data.hair);
+                  if (data.skinTone) setSkinTone(data.skinTone);
                 } catch {}
                 setAutofilling(false);
               }} disabled={autofilling}

@@ -23,6 +23,15 @@ const CharacterAutofillSchema = z.object({
   occupation: z.string().max(100).optional(),
   interests: z.array(z.string().max(100)).max(20).optional(),
   speakingStyle: z.string().max(500).optional(),
+  // Identity fields
+  nationality: z.string().max(100).optional(),
+  ethnicity: z.string().max(100).optional(),
+  height: z.string().max(20).optional(),
+  bodyType: z.string().max(50).optional(),
+  eyeColor: z.string().max(50).optional(),
+  hair: z.string().max(200).optional(),
+  skinTone: z.string().max(50).optional(),
+  humorStyle: z.string().max(200).optional(),
 });
 
 function parseStructuredJson<T>(content: string, schema: z.ZodType<T>): T | null {
@@ -111,7 +120,7 @@ RULES:
 - Pick an UNUSUAL or SPECIFIC profession (not "artist" or "writer"): e.g. marine biologist, blacksmith, ethical hacker, perfumer, puppeteer, volcanologist, luthier, sommelier, beekeeper, forensic accountant
 
 Return ONLY valid JSON, nothing else:
-{"name":"First Last","gender":"${randomGender}","ageDisplay":"${randomAge}","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style, ethnicity","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang"}`;
+{"name":"First Last","gender":"${randomGender}","ageDisplay":"${randomAge}","pronouns":"they/them","description":"Short distinctive 1-line bio","appearance":"Physical look 1 sentence — be specific about hair, eyes, build, style, ethnicity","personality":"Vibe 1-2 sentences — what makes them unique","backstory":"Origin 1-2 sentences — where they came from","occupation":"Specific job title","interests":["3-5 specific interests"],"speakingStyle":"e.g. casual with dad jokes, formal and precise, uses lots of slang","humorStyle":"e.g. dry wit, playful teasing, dark humor, puns","nationality":"e.g. Japanese, Brazilian, Swedish","ethnicity":"specific ethnicity","height":"in cm, e.g. 168cm","bodyType":"e.g. athletic, slim, curvy, broad-shouldered","eyeColor":"e.g. hazel, dark brown, green","hair":"color, texture, length, style","skinTone":"e.g. warm olive, fair with freckles, deep brown"}`;
 
       const result = await alibabaChat({
         messages: [
@@ -121,9 +130,7 @@ Return ONLY valid JSON, nothing else:
         model: 'qwen-plus',
         temperature: 2.0,
         maxTokens: 500,
-        // @ts-expect-error top_p not in interface but supported by API
-        top_p: 0.98,
-      } as any);
+      });
 
       const json = parseStructuredJson(result.content, CharacterAutofillSchema);
       if (json) {
@@ -139,7 +146,15 @@ Return ONLY valid JSON, nothing else:
           occupation: json.occupation ?? '',
           interests: Array.isArray(json.interests) ? json.interests : [],
           speakingStyle: json.speakingStyle ?? '',
-          estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 300, outputTokens: 500 }),
+          humorStyle: json.humorStyle ?? '',
+          nationality: json.nationality ?? '',
+          ethnicity: json.ethnicity ?? '',
+          height: json.height ?? '',
+          bodyType: json.bodyType ?? '',
+          eyeColor: json.eyeColor ?? '',
+          hair: json.hair ?? '',
+          skinTone: json.skinTone ?? '',
+          estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 400, outputTokens: 600 }),
         };
       }
       return {
@@ -153,7 +168,15 @@ Return ONLY valid JSON, nothing else:
         occupation: '',
         interests: [],
         speakingStyle: 'casual',
-        estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 300, outputTokens: 500 }),
+        humorStyle: '',
+        nationality: '',
+        ethnicity: '',
+        height: '',
+        bodyType: '',
+        eyeColor: '',
+        hair: '',
+        skinTone: '',
+        estimatedCredits: getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 400, outputTokens: 600 }),
       };
     }
 
