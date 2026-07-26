@@ -11,6 +11,7 @@ interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  timeoutMs?: number;
 }
 
 interface ChatResponse {
@@ -26,7 +27,7 @@ export async function alibabaChat(request: ChatRequest): Promise<ChatResponse> {
   const response = await fetchWithRetry(`${config.ALIBABA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.ALIBABA_API_KEY}`,
+      Authorization: *** ${config.ALIBABA_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -36,7 +37,7 @@ export async function alibabaChat(request: ChatRequest): Promise<ChatResponse> {
       max_tokens: request.maxTokens ?? 500,
       stream: false,
     }),
-  });
+  }, 2, request.timeoutMs ?? 8000);
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');

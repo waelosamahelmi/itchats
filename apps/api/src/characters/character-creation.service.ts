@@ -129,9 +129,10 @@ Return ONLY valid JSON, nothing else:
           { role: 'system', content: 'You are a creative character generator. NEVER repeat names. Every generation must be completely unique. Pick from the cultures and professions listed. Be unexpected.' },
           { role: 'user', content: prompt },
         ],
-        model: 'qwen-plus',
+        model: 'qwen-flash',
         temperature: 1.99,
-        maxTokens: 500,
+        maxTokens: 400,
+        timeoutMs: 30000,
       });
 
       const json = parseStructuredJson(result.content, CharacterAutofillSchema);
