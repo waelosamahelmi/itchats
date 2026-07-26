@@ -218,4 +218,80 @@ export class CharacterCreationService {
 
     return { published: true, characterId };
   }
+
+  /**
+   * Section 2.3 / 13.4: Regenerate public-safe visual identity for a private character
+   * whose identity originated from an uploaded reference or image-to-image.
+   * Preserves personality/backstory, creates new text-generated identity lineage.
+   */
+  async regeneratePublicIdentity(characterId: string, ownerUserId: string) {
+    const db = getDb();
+    const [char] = await db.select().from(characters)
+      .where(and(eq(characters.id, characterId), eq(characters.ownerUserId, ownerUserId)))
+      .limit(1);
+
+    if (!char) throw new BadRequestException('Character not found');
+    if (char.visibility !== 'private') throw new BadRequestException('Only private characters can regenerate for public use');
+    if (char.identityOrigin !== 'private_uploaded_reference' && char.identityOrigin !== 'private_image_to_image') {
+      throw new BadRequestException('This character already has a text-generated identity — no regeneration needed');
+    }
+
+    // Build a text-based visual description from existing character attributes
+    const genderText = char.gender || '';
+    const ageText = char.ageDisplay || 'young adult';
+    const descText = char.description || char.personality || '';
+
+    const visualPrompt = [
+      'photorealistic portrait of a',
+      genderText || 'person',
+      ageText ? `in their ${ageText}` : '',
+      descText ? `with ${descText.substring(0, 150)}` : '',
+      'professional headshot, studio lighting, sharp focus, neutral background',
+    ].filter(Boolean).join(' ');
+
+    // Generate the new public-safe identity image
+    const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.userId, ownerUserId)).limit(1);
+    if ((wallet?.balance ?? 0) < cost) throw new BadRequestException(`Insufficient credits: need ${cost}, have ${wallet?.balance ?? 0}`);
+
+    const result = await alibabaTextToImageWithFallback({ prompt: visualPrompt, size: '1024*1024' });
+
+    // Update character with regenerated public-safe identity
+    await db.execute(sql`
+      UPDATE characters 
+      SET avatar_url = ${result.url},
+          identity_origin = 'public_regenerated_from_private_metadata',
+          identity_version = identity_version + 1,
+          status = 'ready',
+          updated_at = NOW()
+      WHERE id = ${characterId}
+    `);
+
+    // Record usage
+    await db.insert(usageEvents).values({
+      userId: ownerUserId,
+      characterId,
+      generationType: 'text_to_image',
+      providerId: 'alibaba',
+      imageCount: 1,
+      providerCostUsd: '0.075',
+      creditsDebited: cost,
+      pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0-pro', credits: cost, reason: 'public_identity_regeneration' },
+    } as any);
+
+    // Debit wallet
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, ownerUserId));
+
+    return {
+      url: result.url,
+      model: result.usedModel || 'qwen-image-2.0-pro',
+      identityOrigin: 'public_regenerated_from_private_metadata' as const,
+      status: 'ready',
+      message: 'Identity regenerated. You can now publish this character as public.',
+    };
+  }
 }

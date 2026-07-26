@@ -174,6 +174,24 @@ export class CharactersController {
     return this.creationService.publishCharacter(id, req.user.userId);
   }
 
+  @Post(':characterId/unpublish')
+  @UseGuards(JwtAuthGuard)
+  async unpublish(@Param('characterId') id: string, @Req() req: any) {
+    const db = getDb();
+    const [char] = await db.select().from(characters)
+      .where(and(eq(characters.id, id), eq(characters.ownerUserId, req.user.userId))).limit(1);
+    if (!char) throw new NotFoundException('Character not found or not owned by you');
+    if (char.status !== 'published') throw new NotFoundException('Character is not published');
+    await db.update(characters).set({ status: 'ready' as any }).where(eq(characters.id, id));
+    return { unpublished: true, id };
+  }
+
+  @Post(':characterId/regenerate-public-identity')
+  @UseGuards(JwtAuthGuard)
+  async regeneratePublicIdentity(@Param('characterId') id: string, @Req() req: any) {
+    return this.creationService.regeneratePublicIdentity(id, req.user.userId);
+  }
+
   @Post(':characterId/generate-image')
   @UseGuards(JwtAuthGuard)
   async generateImage(@Param('characterId') id: string, @Req() req: any) {
