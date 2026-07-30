@@ -11,7 +11,7 @@ const API = (import.meta as any).env?.VITE_API_URL || '/v1';
 export default function AuthPage() {
   const dispatch = useAppDispatch();
   const nav = useNavigate();
-  const { error, token, loading } = useSelector((s: RootState) => s.auth);
+  const { error, token, loading, user } = useSelector((s: RootState) => s.auth);
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -22,7 +22,7 @@ export default function AuthPage() {
   const [newPassword, setNewPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
-  useEffect(() => { if (token) nav('/', { replace: true }); }, [token, nav]);
+  useEffect(() => { if (token && user) nav('/', { replace: true }); }, [token, user, nav]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setLocalError('');

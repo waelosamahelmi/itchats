@@ -58,8 +58,7 @@ async function api(path: string, opts?: RequestInit) {
   if (res.status === 401) {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
-    window.location.href = '/auth';
-    throw new Error('Session expired');
+    throw new Error('Session expired — please sign in');
   }
 
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
