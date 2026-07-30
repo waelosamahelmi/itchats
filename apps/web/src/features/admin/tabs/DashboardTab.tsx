@@ -154,6 +154,69 @@ export default function DashboardTab() {
           </div>
         ))}
       </div>
+
+      {/* Relationship Cheats */}
+      <div className="rounded-xl bg-zinc-900 border border-pink-500/20 p-4">
+        <h3 className="text-sm font-semibold text-pink-400 mb-3">⚡ Relationship Cheats</h3>
+        <RelationshipCheats token={token!} />
+      </div>
+    </div>
+  );
+}
+
+const PRESETS = ['stranger', 'acquaintance', 'friend', 'close_friend', 'best_friend', 'romantic', 'soulmate'] as const;
+
+function RelationshipCheats({ token }: { token: string }) {
+  const [chars, setChars] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [charId, setCharId] = useState('');
+  const [userId, setUserId] = useState('');
+  const [preset, setPreset] = useState<string>('close_friend');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    fetch('/v1/admin/characters?limit=50', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => setChars(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch('/v1/admin/users?limit=20', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [token]);
+
+  const apply = async () => {
+    if (!charId || !userId || !preset) return;
+    setMsg('');
+    const res = await fetch('/v1/admin/relationship-cheats/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ characterId: charId, userId, preset }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setMsg(res.ok ? `✅ Applied "${preset}"` : `❌ ${data.message || 'Failed'}`);
+  };
+
+  return (
+    <div className="space-y-3">
+      <select value={charId} onChange={e => setCharId(e.target.value)}
+        className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-white">
+        <option value="">Select character...</option>
+        {chars.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <select value={userId} onChange={e => setUserId(e.target.value)}
+        className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-white">
+        <option value="">Select user...</option>
+        {users.map(u => <option key={u.id} value={u.id}>{u.username || u.email}</option>)}
+      </select>
+      <div className="flex gap-2">
+        {PRESETS.map(p => (
+          <button key={p} onClick={() => setPreset(p)}
+            className={`px-2 py-1 rounded text-[10px] font-medium transition ${preset === p ? 'bg-pink-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>
+            {p.replace(/_/g, ' ')}
+          </button>
+        ))}
+      </div>
+      <button onClick={apply} className="w-full rounded-lg bg-pink-500 hover:bg-pink-600 py-2 text-xs font-semibold text-white transition">
+        Apply Relationship
+      </button>
+      {msg && <p className={`text-xs ${msg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{msg}</p>}
     </div>
   );
 }
