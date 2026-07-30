@@ -8,7 +8,7 @@ export interface Character {
   personality: string; description: string; backstory: string;
   ageDisplay?: string; gender?: string; visibility: string; status: string;
   followersCount?: number; score?: number; online?: boolean;
-  voiceId?: string; city?: string; interests?: string[];
+  voiceId?: string; ttsVoice?: string; city?: string; interests?: string[];
   occupation?: string; speakingStyle?: string; humorStyle?: string;
 }
 export interface Post {
@@ -69,7 +69,11 @@ const auth = createSlice({
     });
   },
 });
-export const fetchMe = createAsyncThunk('auth/me', async () => await apiFetch('/users/me'));
+export const fetchMe = createAsyncThunk('auth/me', async () => {
+  const user = await apiFetch('/users/me');
+  localStorage.setItem('itchats-user', JSON.stringify(user));
+  return user;
+});
 export const saveWizard = createAsyncThunk('auth/saveWizard', async (data: {
   displayName?: string; country?: string; referrer?: string; avatarUrl?: string;
   preferredLanguage?: string; autoTranslate?: boolean; theme?: string;

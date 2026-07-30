@@ -713,7 +713,7 @@ export default function AIChatPage() {
           if (payload.type === 'error') throw new Error(payload.message);
         }
       }
-    } catch { /* call error */ }
+    } catch (e) { console.error('Voice call error:', e); }
     setCallSpeaking(false);
   }
 
@@ -722,12 +722,12 @@ export default function AIChatPage() {
       const res = await fetch(`${API}/ai/tts`, {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: character?.voiceId || 'Cherry' }),
+        body: JSON.stringify({ text, voice: (character as any)?.ttsVoice || character?.voiceId || 'longxiaochun' }),
       });
       if (!res.ok) return;
       const data = await res.json() as any;
       if (data.audioBase64) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
+        const audio = new Audio(data.audioBase64.startsWith('data:') ? data.audioBase64 : `data:audio/mp3;base64,${data.audioBase64}`);
         ttsAudioRef.current = audio;
         await audio.play();
       }
