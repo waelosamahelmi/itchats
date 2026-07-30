@@ -21,6 +21,10 @@ export const identityOriginEnum = pgEnum('identity_origin', [
   'private_image_to_image', 'public_regenerated_from_private_metadata',
 ]);
 export const moderationStatusEnum = pgEnum('moderation_status', ['pending', 'approved', 'flagged', 'rejected']);
+export const characterMoodEnum = pgEnum('character_mood', [
+  'happy', 'sad', 'excited', 'angry', 'upset', 'loving', 'depressed', 'horny', 'neutral', 'curious', 'anxious', 'playful',
+]);
+export const characterPostFrequencyEnum = pgEnum('character_post_frequency', ['low', 'medium', 'high']);
 
 export const characters = pgTable('characters', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -93,6 +97,16 @@ export const characters = pgTable('characters', {
   moderationStatus: moderationStatusEnum('moderation_status').notNull().default('pending'),
   isAiDisclosureRequired: text('is_ai_disclosure_required').notNull().default('true'),
   publishedAt: timestamp('published_at', { withTimezone: true }),
+  // ── Character social & mood ──
+  mood: characterMoodEnum('mood').notNull().default('neutral'),
+  moodUpdatedAt: timestamp('mood_updated_at', { withTimezone: true }),
+  lastPostAt: timestamp('last_post_at', { withTimezone: true }),
+  postFrequency: characterPostFrequencyEnum('post_frequency').notNull().default('medium'),
+  characterScore: integer('character_score').notNull().default(0),
+  followerCount: integer('follower_count').notNull().default(0),
+  isRoleplayAvailable: boolean('is_roleplay_available').notNull().default(false),
+  roleplayAgreedAt: timestamp('roleplay_agreed_at', { withTimezone: true }),
+  roleplayLeftAt: timestamp('roleplay_left_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

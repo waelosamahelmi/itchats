@@ -12,3 +12,8 @@ export * from './billing';
 export * from './treasury';
 export * from './ai-models';
 export * from './admin';
+export * from './posts';
+export * from './friends';
+export * from './voices';
+export * from './autonomy';
+export * from './score';

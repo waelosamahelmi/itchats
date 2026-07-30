@@ -5,6 +5,7 @@ import {
   timestamp,
   date,
   pgEnum,
+  integer,
 } from 'drizzle-orm/pg-core';
 
 export const userStatusEnum = pgEnum('user_status', ['pending', 'active', 'suspended', 'deleted']);
@@ -34,6 +35,13 @@ export const userProfiles = pgTable('user_profiles', {
   themeId: text('theme_id').notNull().default('midnight'),
   discoverable: text('discoverable').notNull().default('true'),
   privateAccount: text('private_account').notNull().default('false'),
+  coverPhotoUrl: text('cover_photo_url'),
+  coverPhotoMediaId: uuid('cover_photo_media_id'),
+  score: integer('score').notNull().default(0),
+  about: text('about'),
+  website: text('website'),
+  location: text('location'),
+  friendshipCount: integer('friendship_count').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
