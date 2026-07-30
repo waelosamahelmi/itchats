@@ -1,34 +1,45 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException, Inject, Logger, InternalServerErrorException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters } from '@itchats/database/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { MessageReactionsService } from './message-reactions.service';
 
 @Controller('v1/conversations')
 export class ConversationsController {
+  private readonly logger = new Logger(ConversationsController.name);
+
   constructor(@Inject(MessageReactionsService) private readonly messageReactions: MessageReactionsService) {}
 
   @Get()
   @UseGuards(JwtAuthGuard)
   async list(@Req() req: any) {
-    const db = getDb();
-    return db.select({
-      id: conversations.id,
-      type: conversations.type,
-      mode: conversations.mode,
-      characterId: conversations.characterId,
-      title: conversations.title,
-      lastMessageAt: conversations.lastMessageAt,
-      createdAt: conversations.createdAt,
-      updatedAt: conversations.updatedAt,
-      characterName: characters.name,
-    }).from(conversations)
-      .leftJoin(characters, eq(conversations.characterId, characters.id))
-      .where(eq(conversations.createdByUserId, req.user.userId))
-      .orderBy(desc(conversations.lastMessageAt))
-      .limit(50);
+    try {
+      const db = getDb();
+      const rows = await db.select({
+        id: conversations.id,
+        type: conversations.type,
+        mode: conversations.mode,
+        characterId: conversations.characterId,
+        title: conversations.title,
+        lastMessageAt: conversations.lastMessageAt,
+        createdAt: conversations.createdAt,
+        updatedAt: conversations.updatedAt,
+        characterName: characters.name,
+      }).from(conversations)
+        .leftJoin(characters, eq(conversations.characterId, characters.id))
+        .where(and(
+          eq(conversations.createdByUserId, req.user.userId),
+          isNull(conversations.deletedAt),
+        ))
+        .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
+        .limit(50);
+      return rows;
+    } catch (err: any) {
+      this.logger.error('Failed to list conversations', err?.message || err);
+      throw new InternalServerErrorException('Failed to load conversations');
+    }
   }
 
   @Post()

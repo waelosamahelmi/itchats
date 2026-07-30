@@ -1,10 +1,49 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { stories, storyViews, contentLikes, characterFollows } from '@itchats/database/schema';
-import { eq, and, desc, count, inArray } from 'drizzle-orm';
+import { stories, storyViews, contentLikes, characterFollows, users, characters } from '@itchats/database/schema';
+import { eq, and, desc, count, inArray, isNull, or, sql } from 'drizzle-orm';
 
 @Injectable()
 export class StoriesService {
+  /** GET /v1/stories — all published, active (non-expired) stories with author info */
+  async getAllStories() {
+    const db = getDb();
+    const now = new Date();
+    const results = await db.select({
+      id: stories.id,
+      authorUserId: stories.authorUserId,
+      authorCharacterId: stories.authorCharacterId,
+      status: stories.status,
+      caption: stories.caption,
+      storyType: stories.storyType,
+      mediaUrl: stories.mediaUrl,
+      mediaType: stories.mediaType,
+      thumbnailUrl: stories.thumbnailUrl,
+      duration: stories.duration,
+      viewCount: stories.viewCount,
+      likeCount: stories.likeCount,
+      publishedAt: stories.publishedAt,
+      expiresAt: stories.expiresAt,
+      createdAt: stories.createdAt,
+      authorUsername: users.username,
+      authorCharacterName: characters.name,
+    }).from(stories)
+      .leftJoin(users, eq(stories.authorUserId, users.id))
+      .leftJoin(characters, eq(stories.authorCharacterId, characters.id))
+      .where(and(
+        eq(stories.status, 'published'),
+        or(isNull(stories.expiresAt), sql`${stories.expiresAt} > ${now}`),
+      ))
+      .orderBy(desc(stories.publishedAt))
+      .limit(50);
+
+    return results.map(r => ({
+      ...r,
+      authorName: r.authorUsername || r.authorCharacterName || 'Unknown',
+      authorAvatar: null,
+    }));
+  }
+
   async getFeed() {
     const db = getDb();
     return db.select().from(stories)

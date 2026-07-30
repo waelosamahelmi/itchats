@@ -7,6 +7,11 @@ import { StoriesService } from './stories.service';
 export class StoriesController {
   constructor(@Inject(StoriesService) private readonly storiesService: StoriesService) {}
 
+  @Get()
+  async getAllStories() {
+    return this.storiesService.getAllStories();
+  }
+
   @Get('feed')
   async getFeed() {
     return this.storiesService.getFeed();

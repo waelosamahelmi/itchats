@@ -114,20 +114,20 @@ export const { setDiscoverCharacters, appendDiscoverCharacters, setMyCharacters,
 
 // ── Posts ──
 export const fetchFeed = createAsyncThunk('posts/feed', async (page?: number) => {
-  return (await apiFetch(`/feed?page=${page ?? 1}&limit=10`)) as Post[];
+  return (await apiFetch(`/posts/feed?page=${page ?? 1}&limit=10`)) as Post[];
 });
 export const createNewPost = createAsyncThunk('posts/create', async (data: { content: string; mediaUrl?: string }) => {
-  return (await apiFetch('/feed', { method: 'POST', body: JSON.stringify(data) })) as Post;
+  return (await apiFetch('/posts', { method: 'POST', body: JSON.stringify(data) })) as Post;
 });
 export const reactToPostThunk = createAsyncThunk('posts/react', async ({ postId, emoji }: { postId: string; emoji: string }) => {
-  await apiFetch(`/feed/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
+  await apiFetch(`/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ reactionType: emoji }) });
   return { postId, emoji };
 });
 export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId, content }: { postId: string; content: string }) => {
-  return { postId, comment: (await apiFetch(`/feed/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) })) as Comment };
+  return { postId, comment: (await apiFetch(`/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) })) as Comment };
 });
 export const deletePostThunk = createAsyncThunk('posts/delete', async (postId: string) => {
-  await apiFetch(`/feed/${postId}`, { method: 'DELETE' }); return postId;
+  await apiFetch(`/posts/${postId}`, { method: 'DELETE' }); return postId;
 });
 const posts = createSlice({
   name: 'posts',
@@ -201,7 +201,7 @@ const profile = createSlice({
 
 // ── Voices ──
 export const fetchVoicesThunk = createAsyncThunk('voices/fetch', async () => {
-  return (await apiFetch('/characters/voices')) as Voice[];
+  return (await apiFetch('/voices')) as Voice[];
 });
 const voices = createSlice({
   name: 'voices',

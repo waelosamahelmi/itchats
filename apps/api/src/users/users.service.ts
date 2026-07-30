@@ -316,6 +316,10 @@ export class UsersService {
     return { friends: friendDetails, count: friendDetails.length };
   }
 
+  async getMyFriends(userId: string) {
+    return this.getUserFriends(userId);
+  }
+
   async getScore(userId: string) {
     const db = getDb();
     const [score] = await db

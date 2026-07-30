@@ -232,7 +232,7 @@ export default function ProfilePage() {
             <div className="flex items-center gap-2 mt-1">
               <div className="flex items-center gap-1 text-xs">
                 <Star size={12} className="text-social-warm fill-current" />
-                <span className="font-semibold text-text-primary">{profileData.score.toLocaleString()}</span>
+                <span className="font-semibold text-text-primary">{(profileData.score ?? 0).toLocaleString()}</span>
                 <span className="text-text-muted">points</span>
               </div>
               {profileData.rank && (
@@ -362,11 +362,11 @@ export default function ProfilePage() {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-text-muted">Total Followers</span>
-                      <span className="text-xs text-text-primary font-medium">{profileData.followerCount.toLocaleString()}</span>
+                      <span className="text-xs text-text-primary font-medium">{(profileData.followerCount ?? 0).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-text-muted">Score</span>
-                      <span className="text-xs text-brand-primary font-bold">{profileData.score.toLocaleString()}</span>
+                      <span className="text-xs text-brand-primary font-bold">{(profileData.score ?? 0).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>

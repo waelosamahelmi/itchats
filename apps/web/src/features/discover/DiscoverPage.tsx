@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Compass, Search, Star, Heart, Users, Sparkles } from 'lucide-react';
+import { Compass, Search, Star, Heart, Users, Sparkles, Plus, Loader2 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import type { Character } from '@/app/store';
 import { useAppDispatch, fetchDiscover, followChar, unfollowChar } from '@/app/store';
@@ -115,15 +115,23 @@ export default function DiscoverPage() {
     setRefreshing(false);
   }
 
-  const filteredChars = useMemo(() => {
-    if (!search.trim()) return chars;
+  // Filter out user's own characters
+  const visibleChars = useMemo(() => {
+    // The discover endpoint returns public characters; we additionally filter by ownerUserId
+    const filtered = chars.filter(c => {
+      // If the character has ownerUserId, don't show if it matches current user
+      if ((c as any).ownerUserId && (c as any).ownerUserId === user?.id) return false;
+      return true;
+    });
+
+    if (!search.trim()) return filtered;
     const q = search.toLowerCase();
-    return chars.filter(c =>
+    return filtered.filter(c =>
       c.name.toLowerCase().includes(q) ||
       c.description.toLowerCase().includes(q) ||
       (c.interests?.some(i => i.toLowerCase().includes(q)))
     );
-  }, [chars, search]);
+  }, [chars, search, user?.id]);
 
   if (!user) {
     return (
@@ -147,6 +155,12 @@ export default function DiscoverPage() {
             <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">Discover</h1>
             <p className="text-text-muted text-xs mt-0.5">Explore the AI world</p>
           </div>
+          <button
+            onClick={() => nav('/ai/create')}
+            className="flex items-center gap-1.5 rounded-full bg-brand-primary text-white px-4 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
+          >
+            <Plus size={16} /> Create Character
+          </button>
         </div>
 
         {/* Search bar */}
@@ -171,7 +185,7 @@ export default function DiscoverPage() {
       <div className="flex-1 overflow-y-auto px-4">
         {refreshing && (
           <div className="flex justify-center py-3">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
+            <Loader2 size={20} className="animate-spin text-brand-primary" />
           </div>
         )}
 
@@ -197,7 +211,7 @@ export default function DiscoverPage() {
             <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
             <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">Retry</button>
           </div>
-        ) : filteredChars.length === 0 ? (
+        ) : visibleChars.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
               <Compass size={28} className="text-text-muted opacity-50" />
@@ -206,10 +220,18 @@ export default function DiscoverPage() {
             <p className="text-text-muted text-xs text-center max-w-[260px]">
               {search ? 'Try a different search term' : 'Characters created by the community will appear here'}
             </p>
+            {!search && (
+              <button
+                onClick={() => nav('/ai/create')}
+                className="mt-2 flex items-center gap-1.5 rounded-full bg-brand-primary text-white px-5 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
+              >
+                <Plus size={16} /> Create Your First Character
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 pb-24">
-            {filteredChars.map((char, i) => (
+            {visibleChars.map((char, i) => (
               <CharacterCard key={char.id} char={char} index={i} />
             ))}
           </div>

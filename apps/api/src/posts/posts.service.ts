@@ -330,4 +330,27 @@ export class PostsService {
 
     return { postId, reactions: counts };
   }
+
+  async getUserPhotos(userId: string) {
+    const db = getDb();
+    const results = await db
+      .select({
+        id: posts.id,
+        url: posts.mediaUrl,
+        mediaType: posts.mediaType,
+        createdAt: posts.createdAt,
+      })
+      .from(posts)
+      .where(
+        and(
+          eq(posts.authorUserId, userId),
+          isNull(posts.deletedAt),
+          sql`${posts.mediaUrl} IS NOT NULL`,
+        ),
+      )
+      .orderBy(desc(posts.createdAt))
+      .limit(30);
+
+    return results.filter(r => r.url).map(r => ({ id: r.id, url: r.url! }));
+  }
 }

@@ -1,10 +1,14 @@
-import { Controller, Get, Patch, Delete, Post, Param, Body, Req, UseGuards, Inject, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, Post, Param, Body, Req, UseGuards, Inject, BadRequestException, Query } from '@nestjs/common';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
 import { UsersService } from './users.service';
+import { PostsService } from '../posts/posts.service';
 
 @Controller('v1/users')
 export class UsersController {
-  constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
+  constructor(
+    @Inject(UsersService) private readonly usersService: UsersService,
+    @Inject(PostsService) private readonly postsService: PostsService,
+  ) {}
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
@@ -24,6 +28,13 @@ export class UsersController {
     return this.usersService.deleteMe(req.user.userId);
   }
 
+  // ── Friends (current user) ──
+  @Get('friends')
+  @UseGuards(JwtAuthGuard)
+  async getMyFriends(@Req() req: any) {
+    return this.usersService.getMyFriends(req.user.userId);
+  }
+
   // ── New endpoints ──
 
   @Get('score')
@@ -35,6 +46,23 @@ export class UsersController {
   @Get(':handle')
   async getByHandle(@Param('handle') handle: string) {
     return this.usersService.getByHandle(handle);
+  }
+
+  @Get(':id/posts')
+  @UseGuards(OptionalJwtAuthGuard)
+  async getUserPosts(
+    @Param('id') userId: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+    @Req() req: any,
+  ) {
+    return this.postsService.getUserPosts(req?.user?.userId || '', userId, Number(page), Number(limit));
+  }
+
+  @Get(':id/photos')
+  @UseGuards(OptionalJwtAuthGuard)
+  async getUserPhotos(@Param('id') userId: string) {
+    return this.postsService.getUserPhotos(userId);
   }
 
   @Get(':id/profile')
