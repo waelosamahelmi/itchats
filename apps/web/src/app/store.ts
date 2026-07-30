@@ -1,70 +1,6 @@
 import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { useDispatch } from 'react-redux';
-
-const API = '/v1';
-const getToken = () => localStorage.getItem('accessToken');
-const getRefresh = () => localStorage.getItem('refreshToken');
-let refreshPromise: Promise<string | null> | null = null;
-
-async function refreshToken(): Promise<string | null> {
-  const r = getRefresh();
-  if (!r) return null;
-  try {
-    const res = await fetch(`${API}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: r }),
-    });
-    if (!res.ok) throw new Error('Refresh failed');
-    const data = await res.json();
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    return data.accessToken;
-  } catch {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    return null;
-  }
-}
-
-async function api(path: string, opts?: RequestInit) {
-  const t = getToken();
-  const hasBody = opts?.body != null;
-  const headers: Record<string, string> = {
-    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-    ...(t ? { Authorization: `Bearer ${t}` } : {}),
-    ...(opts?.headers as Record<string, string> || {}),
-  };
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
-
-  if (res.status === 401 && getRefresh()) {
-    if (!refreshPromise) refreshPromise = refreshToken();
-    const newToken = await refreshPromise;
-    refreshPromise = null;
-    if (newToken) {
-      const retry = await fetch(`${API}${path}`, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}), ...opts?.headers },
-      });
-      if (!retry.ok) { const e = await retry.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
-      return retry.json();
-    }
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    window.location.href = '/auth';
-    throw new Error('Session expired');
-  }
-
-  if (res.status === 401) {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    throw new Error('Session expired — please sign in');
-  }
-
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Request failed'); }
-  const text = await res.text();
-  return text ? JSON.parse(text) : {};
-}
+import { apiFetch } from '@/lib/api';
 
 // ── Types ──
 export interface Character {
@@ -107,17 +43,17 @@ export interface Msg {
 
 // ── Auth ──
 export const registerUser = createAsyncThunk('auth/register', async (d: { email: string; username: string; password: string }) => {
-  const data = await api('/auth/register', { method: 'POST', body: JSON.stringify(d) });
+  const data = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(d) });
   localStorage.setItem('accessToken', data.accessToken); localStorage.setItem('refreshToken', data.refreshToken);
   return data;
 });
 export const loginUser = createAsyncThunk('auth/login', async (d: { email: string; password: string }) => {
-  const data = await api('/auth/login', { method: 'POST', body: JSON.stringify(d) });
+  const data = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(d) });
   localStorage.setItem('accessToken', data.accessToken); localStorage.setItem('refreshToken', data.refreshToken);
   return data;
 });
 const auth = createSlice({
-  name: 'auth', initialState: { user: null as any, token: getToken(), loading: false, error: null as string | null },
+  name: 'auth', initialState: { user: null as any, token: localStorage.getItem('accessToken'), loading: false, error: null as string | null },
   reducers: { logout(s) { s.user = null; s.token = null; localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); } },
   extraReducers: (b) => {
     b.addCase(registerUser.fulfilled, (s, a) => { s.user = a.payload.user; s.token = a.payload.accessToken; s.error = null; });
@@ -127,20 +63,20 @@ const auth = createSlice({
     b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; });
   },
 });
-export const fetchMe = createAsyncThunk('auth/me', async () => await api('/users/me'));
+export const fetchMe = createAsyncThunk('auth/me', async () => await apiFetch('/users/me'));
 export const { logout } = auth.actions;
 
 // ── Characters (updated) ──
-export const fetchMine = createAsyncThunk('chars/mine', async () => (await api('/characters/mine')) as Character[]);
+export const fetchMine = createAsyncThunk('chars/mine', async () => (await apiFetch('/characters/mine')) as Character[]);
 export const fetchDiscover = createAsyncThunk('chars/discover', async (p?: number) => {
   const page = p ?? 1;
-  return (await api(`/characters/discover?page=${page}&limit=20`)) as Character[];
+  return (await apiFetch(`/characters/discover?page=${page}&limit=20`)) as Character[];
 });
 export const followChar = createAsyncThunk('chars/follow', async (id: string) => {
-  await api(`/characters/${id}/follow`, { method: 'POST' }); return id;
+  await apiFetch(`/characters/${id}/follow`, { method: 'POST' }); return id;
 });
 export const unfollowChar = createAsyncThunk('chars/unfollow', async (id: string) => {
-  await api(`/characters/${id}/follow`, { method: 'DELETE' }); return id;
+  await apiFetch(`/characters/${id}/follow`, { method: 'DELETE' }); return id;
 });
 const chars = createSlice({
   name: 'chars',
@@ -178,20 +114,20 @@ export const { setDiscoverCharacters, appendDiscoverCharacters, setMyCharacters,
 
 // ── Posts ──
 export const fetchFeed = createAsyncThunk('posts/feed', async (page?: number) => {
-  return (await api(`/feed?page=${page ?? 1}&limit=10`)) as Post[];
+  return (await apiFetch(`/feed?page=${page ?? 1}&limit=10`)) as Post[];
 });
 export const createNewPost = createAsyncThunk('posts/create', async (data: { content: string; mediaUrl?: string }) => {
-  return (await api('/feed', { method: 'POST', body: JSON.stringify(data) })) as Post;
+  return (await apiFetch('/feed', { method: 'POST', body: JSON.stringify(data) })) as Post;
 });
 export const reactToPostThunk = createAsyncThunk('posts/react', async ({ postId, emoji }: { postId: string; emoji: string }) => {
-  await api(`/feed/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
+  await apiFetch(`/feed/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
   return { postId, emoji };
 });
 export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId, content }: { postId: string; content: string }) => {
-  return { postId, comment: (await api(`/feed/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) })) as Comment };
+  return { postId, comment: (await apiFetch(`/feed/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) })) as Comment };
 });
 export const deletePostThunk = createAsyncThunk('posts/delete', async (postId: string) => {
-  await api(`/feed/${postId}`, { method: 'DELETE' }); return postId;
+  await apiFetch(`/feed/${postId}`, { method: 'DELETE' }); return postId;
 });
 const posts = createSlice({
   name: 'posts',
@@ -237,13 +173,13 @@ export const { setFeedPosts, appendFeedPosts, setUserPosts } = posts.actions;
 
 // ── Profile ──
 export const fetchProfile = createAsyncThunk('profile/fetch', async () => {
-  return (await api('/users/me')) as UserProfile;
+  return (await apiFetch('/users/me')) as UserProfile;
 });
 export const updateProfileThunk = createAsyncThunk('profile/update', async (data: Partial<UserProfile>) => {
-  return (await api('/users/me', { method: 'PATCH', body: JSON.stringify(data) })) as UserProfile;
+  return (await apiFetch('/users/me', { method: 'PATCH', body: JSON.stringify(data) })) as UserProfile;
 });
 export const fetchFriendsThunk = createAsyncThunk('profile/friends', async () => {
-  return (await api('/users/friends')) as UserProfile[];
+  return (await apiFetch('/users/friends')) as UserProfile[];
 });
 const profile = createSlice({
   name: 'profile',
@@ -265,7 +201,7 @@ const profile = createSlice({
 
 // ── Voices ──
 export const fetchVoicesThunk = createAsyncThunk('voices/fetch', async () => {
-  return (await api('/characters/voices')) as Voice[];
+  return (await apiFetch('/characters/voices')) as Voice[];
 });
 const voices = createSlice({
   name: 'voices',
@@ -286,7 +222,7 @@ export const { setSelectedVoice, setCurrentlyPlaying } = voices.actions;
 
 // ── Stories ──
 export const fetchStoriesThunk = createAsyncThunk('stories/fetch', async () => {
-  return (await api('/stories')) as Story[];
+  return (await apiFetch('/stories')) as Story[];
 });
 const stories = createSlice({
   name: 'stories',
@@ -300,10 +236,10 @@ const stories = createSlice({
 });
 
 // ── Chat ──
-export const fetchConvs = createAsyncThunk('chat/convs', async () => (await api('/conversations')) as any[]);
-export const fetchMsgs = createAsyncThunk('chat/msgs', async (cid: string) => (await api(`/conversations/${cid}/messages`)) as Msg[]);
-export const deleteConv = createAsyncThunk('chat/deleteConv', async (cid: string) => { await api(`/conversations/${cid}`, { method: 'DELETE' }); return cid; });
-export const deleteMsg = createAsyncThunk('chat/deleteMsg', async ({ convId, msgId }: { convId: string; msgId: string }) => { await api(`/conversations/${convId}/messages/${msgId}`, { method: 'DELETE' }); return msgId; });
+export const fetchConvs = createAsyncThunk('chat/convs', async () => (await apiFetch('/conversations')) as any[]);
+export const fetchMsgs = createAsyncThunk('chat/msgs', async (cid: string) => (await apiFetch(`/conversations/${cid}/messages`)) as Msg[]);
+export const deleteConv = createAsyncThunk('chat/deleteConv', async (cid: string) => { await apiFetch(`/conversations/${cid}`, { method: 'DELETE' }); return cid; });
+export const deleteMsg = createAsyncThunk('chat/deleteMsg', async ({ convId, msgId }: { convId: string; msgId: string }) => { await apiFetch(`/conversations/${convId}/messages/${msgId}`, { method: 'DELETE' }); return msgId; });
 const chat = createSlice({
   name: 'chat', initialState: { convs: [] as any[], msgs: [] as Msg[], active: null as string | null, error: null as string | null },
   reducers: { setActive(s, a) { s.active = a.payload; }, clearError(s) { s.error = null; } },

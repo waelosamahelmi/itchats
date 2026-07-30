@@ -8,25 +8,31 @@ import {
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
 import type { Post, Comment, Story } from '@/app/store';
+import {
+  fetchFeed,
+  fetchStoriesThunk,
+  createNewPost,
+  reactToPostThunk,
+  addCommentThunk,
+} from '@/app/store';
+import { genId, reactionEmojis } from '@/lib/api';
 import { Badge } from '@itchats/ui';
-import {
-  fetchFeedPosts,
-  reactToPost,
-  addComment,
-  likeComment,
-  deletePost,
-  createPost,
-  fetchStories,
-} from '@/lib/api';
-import {
-  mockPosts, mockStories, mockCurrentUser,
-  reactionEmojis,
-  type MockPost, type MockComment, type MockStory,
-  genId,
-} from '@/lib/mockData';
+
+// ── Time ago helper ──
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
 
 // ── Story Circle ──
-function StoryCircle({ story, isYours }: { story: MockStory; isYours?: boolean }) {
+function StoryCircle({ story, isYours, userAvatar }: { story: Story; isYours?: boolean; userAvatar?: string }) {
   return (
     <button className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
       <div className={`relative p-[2px] rounded-full ${story.viewed ? '' : 'bg-gradient-to-br from-brand-primary via-social-warm to-brand-secondary'} ${story.isLive ? 'ring-2 ring-danger ring-offset-2 ring-offset-bg-canvas' : ''}`}>
@@ -50,13 +56,8 @@ function StoryCircle({ story, isYours }: { story: MockStory; isYours?: boolean }
 }
 
 // ── Stories Bar ──
-function StoriesBar({ stories }: { stories: MockStory[] }) {
+function StoriesBar({ stories, userAvatar }: { stories: Story[]; userAvatar?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const scroll = (dir: 'left' | 'right') => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollBy({ left: dir === 'left' ? -200 : 200, behavior: 'smooth' });
-  };
 
   return (
     <div className="relative mb-4">
@@ -66,12 +67,14 @@ function StoriesBar({ stories }: { stories: MockStory[] }) {
         style={{ scrollSnapType: 'x mandatory' }}
       >
         {/* Your story */}
-        <StoryCircle story={{ id: 'you', authorId: 'you', authorName: 'You', authorAvatar: mockCurrentUser.avatarUrl, isAI: false, viewed: false, isLive: false }} isYours />
+        <StoryCircle
+          story={{ id: 'you', authorId: 'you', authorName: 'You', authorAvatar: userAvatar ?? '', isAI: false, viewed: false, isLive: false }}
+          isYours
+        />
         {stories.map(s => (
           <StoryCircle key={s.id} story={s} />
         ))}
       </div>
-      {/* Right gradient fade */}
       <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-bg-canvas to-transparent" />
     </div>
   );
@@ -97,16 +100,16 @@ function ReactionPicker({ onSelect, show, onClose }: { onSelect: (e: string) => 
 }
 
 // ── Post Card ──
-function PostCard({ post }: { post: MockPost }) {
+function PostCard({ post }: { post: Post }) {
+  const dispatch = useAppDispatch();
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.likes);
-  const [comments, setComments] = useState<MockComment[]>(post.comments);
+  const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
   const [showAllComments, setShowAllComments] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [expandedContent, setExpandedContent] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const likeBtnRef = useRef<HTMLButtonElement>(null);
   const nav = useNavigate();
 
   const isLongContent = post.content.length > 200;
@@ -116,12 +119,12 @@ function PostCard({ post }: { post: MockPost }) {
     const newLiked = !liked;
     setLiked(newLiked);
     setLikeCount(c => c + (newLiked ? 1 : -1));
-    reactToPost(post.id, '❤️').catch(() => {});
+    dispatch(reactToPostThunk({ postId: post.id, emoji: '❤️' }));
   };
 
   const handleReaction = (emoji: string) => {
     if (!liked) { setLiked(true); setLikeCount(c => c + 1); }
-    reactToPost(post.id, emoji).catch(() => {});
+    dispatch(reactToPostThunk({ postId: post.id, emoji }));
   };
 
   const handleLikeMouseDown = () => {
@@ -135,20 +138,20 @@ function PostCard({ post }: { post: MockPost }) {
 
   const handleAddComment = () => {
     if (!commentText.trim()) return;
-    const newComment: MockComment = {
-      id: genId(), authorName: mockCurrentUser.username, authorAvatar: mockCurrentUser.avatarUrl,
+    dispatch(addCommentThunk({ postId: post.id, content: commentText.trim() }));
+    // Optimistic
+    const newComment: Comment = {
+      id: genId(), authorName: 'You', authorAvatar: '',
       authorIsAI: false, content: commentText.trim(), createdAt: 'just now', likes: 0, liked: false, replies: [],
     };
     setComments(c => [...c, newComment]);
     setCommentText('');
-    addComment(post.id, commentText.trim()).catch(() => {});
   };
 
   const handleLikeComment = (commentId: string) => {
     setComments(c => c.map(cmt =>
       cmt.id === commentId ? { ...cmt, liked: !cmt.liked, likes: cmt.likes + (cmt.liked ? -1 : 1) } : cmt
     ));
-    likeComment(post.id, commentId).catch(() => {});
   };
 
   const visibleComments = showAllComments ? comments : comments.slice(0, 2);
@@ -206,13 +209,13 @@ function PostCard({ post }: { post: MockPost }) {
       {(likeCount > 0 || post.commentCount > 0 || post.shares > 0) && (
         <div className="flex items-center justify-between px-4 py-2 text-[11px] text-text-muted">
           <div className="flex items-center gap-1">
-            {post.topReactions.slice(0, 3).map((r, i) => (
+            {post.topReactions?.slice(0, 3).map((r, i) => (
               <span key={i} className="-mr-1">{r.emoji}</span>
             ))}
             <span>{likeCount}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span>{post.commentCount + comments.length - post.comments.length} comments</span>
+            <span>{Math.max(post.commentCount, comments.length)} comments</span>
             <span>{post.shares} shares</span>
           </div>
         </div>
@@ -222,7 +225,6 @@ function PostCard({ post }: { post: MockPost }) {
       <div className="flex items-center border-t border-border-subtle mx-4 py-1">
         <div className="relative flex-1">
           <button
-            ref={likeBtnRef}
             onMouseDown={handleLikeMouseDown}
             onMouseUp={handleLikeMouseUp}
             onMouseLeave={() => { if (showReactionPicker) setShowReactionPicker(false); }}
@@ -251,7 +253,7 @@ function PostCard({ post }: { post: MockPost }) {
         <div className="px-4 pb-3">
           <div className="border-t border-border-subtle pt-3 space-y-3">
             {visibleComments.map(c => (
-              <div key={c.id} className={`${c.replies.length > 0 ? '' : ''}`}>
+              <div key={c.id}>
                 <div className="flex gap-2.5">
                   <img src={c.authorAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
                   <div className="flex-1 min-w-0">
@@ -272,12 +274,12 @@ function PostCard({ post }: { post: MockPost }) {
                   </div>
                   {c.likes > 0 && (
                     <div className="flex items-center gap-0.5 shrink-0 self-start mt-7">
-                      <span className="text-[10px]">{c.likes > 0 ? '❤️' : ''}</span>
+                      <span className="text-[10px]">❤️</span>
                     </div>
                   )}
                 </div>
                 {/* Threaded replies */}
-                {c.replies.map(r => (
+                {c.replies?.map(r => (
                   <div key={r.id} className="flex gap-2.5 ml-9 mt-2">
                     <img src={r.authorAvatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -307,7 +309,7 @@ function PostCard({ post }: { post: MockPost }) {
 
       {/* Comment Composer */}
       <div className="flex items-center gap-2.5 px-4 py-3 border-t border-border-subtle">
-        <img src={mockCurrentUser.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+        <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
         <div className="flex-1 flex items-center gap-2 glass rounded-full px-3 py-2">
           <input
             id={`comment-input-${post.id}`}
@@ -328,7 +330,7 @@ function PostCard({ post }: { post: MockPost }) {
 }
 
 // ── Composer ──
-function Composer({ onPost }: { onPost: (text: string) => void }) {
+function Composer({ onPost, userAvatar, username }: { onPost: (text: string) => void; userAvatar?: string; username?: string }) {
   const [text, setText] = useState('');
   const [expanded, setExpanded] = useState(false);
 
@@ -342,18 +344,22 @@ function Composer({ onPost }: { onPost: (text: string) => void }) {
   return (
     <div className={`glass rounded-2xl p-4 mb-4 transition-all duration-300 ${expanded ? 'shadow-lg shadow-brand-glow/10' : ''}`}>
       <div className="flex items-center gap-3">
-        <img src={mockCurrentUser.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+        {userAvatar ? (
+          <img src={userAvatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-bg-elevated shrink-0" />
+        )}
         <button
           onClick={() => setExpanded(true)}
           className={`flex-1 text-left glass rounded-full px-4 py-2.5 text-sm text-text-muted hover:bg-white/8 transition-colors ${expanded ? 'hidden' : ''}`}
         >
-          What's on your mind, {mockCurrentUser.username}?
+          What's on your mind{username ? `, ${username}` : ''}?
         </button>
         {expanded && (
           <textarea
             value={text}
             onChange={e => setText(e.target.value)}
-            placeholder={`What's on your mind, ${mockCurrentUser.username}?`}
+            placeholder={`What's on your mind${username ? `, ${username}` : ''}?`}
             rows={3}
             autoFocus
             className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none"
@@ -383,59 +389,35 @@ function Composer({ onPost }: { onPost: (text: string) => void }) {
   );
 }
 
-// ── Time ago helper ──
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
-
 // ── Main FeedPage ──
 export default function FeedPage() {
   const dispatch = useAppDispatch();
   const nav = useNavigate();
   const { user } = useSelector((s: RootState) => s.auth);
-  const [posts, setPosts] = useState<MockPost[]>([]);
-  const [stories, setStories] = useState<MockStory[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { feedPosts, loading, error } = useSelector((s: RootState) => s.posts);
+  const { stories } = useSelector((s: RootState) => s.stories);
+  const profile = useSelector((s: RootState) => s.profile.profile);
+
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    setLoading(true);
-    const [feedPosts, feedStories] = await Promise.all([
-      fetchFeedPosts().catch(() => mockPosts),
-      fetchStories().catch(() => mockStories),
-    ]);
-    setPosts(feedPosts);
-    setStories(feedStories);
-    setLoading(false);
-  }
+    if (user) {
+      dispatch(fetchFeed());
+      dispatch(fetchStoriesThunk());
+    }
+  }, [dispatch, user]);
 
   async function handleRefresh() {
     setRefreshing(true);
-    await loadData();
+    await Promise.all([
+      dispatch(fetchFeed()),
+      dispatch(fetchStoriesThunk()),
+    ]);
     setRefreshing(false);
   }
 
-  const handleCreatePost = async (text: string) => {
-    const newPost: MockPost = {
-      id: genId(),
-      authorId: 'user-me', authorName: mockCurrentUser.username, authorAvatar: mockCurrentUser.avatarUrl,
-      authorIsAI: false, content: text, createdAt: new Date().toISOString(), privacy: 'public',
-      likes: 0, liked: false, topReactions: [], comments: [], commentCount: 0, shares: 0,
-    };
-    setPosts(p => [newPost, ...p]);
-    createPost(text).catch(() => {});
+  const handleCreatePost = (text: string) => {
+    dispatch(createNewPost({ content: text }));
   };
 
   if (!user) {
@@ -465,7 +447,6 @@ export default function FeedPage() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
-        {/* Pull to refresh indicator */}
         {refreshing && (
           <div className="flex justify-center py-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
@@ -473,11 +454,11 @@ export default function FeedPage() {
         )}
 
         {/* Stories Bar */}
-        <StoriesBar stories={stories} />
+        <StoriesBar stories={stories} userAvatar={profile?.avatarUrl} />
 
         {/* Composer */}
         <div className="px-4">
-          <Composer onPost={handleCreatePost} />
+          <Composer onPost={handleCreatePost} userAvatar={profile?.avatarUrl} username={profile?.username ?? user?.username} />
         </div>
 
         {/* Posts Feed */}
@@ -499,7 +480,18 @@ export default function FeedPage() {
                 <div className="h-48 bg-bg-elevated rounded-xl" />
               </div>
             ))
-          ) : posts.length === 0 ? (
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
+                <Home size={28} className="text-text-muted opacity-50" />
+              </div>
+              <p className="text-text-muted text-sm">Failed to load feed</p>
+              <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
+              <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">
+                Retry
+              </button>
+            </div>
+          ) : feedPosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
               <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
                 <Home size={28} className="text-text-muted opacity-50" />
@@ -508,7 +500,7 @@ export default function FeedPage() {
               <p className="text-text-muted text-xs text-center max-w-[260px]">Your feed will fill up as AI characters start posting content</p>
             </div>
           ) : (
-            posts.map((post, i) => (
+            feedPosts.map(post => (
               <PostCard key={post.id} post={post} />
             ))
           )}

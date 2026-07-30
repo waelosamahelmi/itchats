@@ -22,6 +22,7 @@ import { VoicesModule } from './voices/voices.module';
 import { RoleplayModule } from './roleplay/roleplay.module';
 import { RelationshipModule } from './relationship/relationship.module';
 import { AutonomyModule } from './autonomy/autonomy.module';
+import { SeedModule } from './seed/seed.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { AutonomyModule } from './autonomy/autonomy.module';
     RoleplayModule,
     RelationshipModule,
     AutonomyModule,
+    SeedModule,
   ],
 })
 export class AppModule {}

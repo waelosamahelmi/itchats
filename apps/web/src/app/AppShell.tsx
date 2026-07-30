@@ -1,10 +1,11 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { MessageCircle, Compass, Home, Radio, User, Sun, Moon } from 'lucide-react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { MessageCircle, Compass, Home, Radio, User, Sun, Moon, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import CookieBanner from '@/components/CookieBanner';
 import { getStoredTheme, toggleAndNotify } from './theme';
 import type { Theme } from './theme';
+import { apiGet } from '@/lib/api';
 
 const tabs = [
   { to: '/chats', icon: MessageCircle, label: 'Chats' },
@@ -26,8 +27,42 @@ function activeTabIndex(pathname: string): number {
 
 export default function AppShell() {
   const loc = useLocation();
+  const navigate = useNavigate();
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
   const activeIdx = activeTabIndex(loc.pathname);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [justArrived, setJustArrived] = useState(false);
+  const prevCountRef = useRef(0);
+
+  // Fetch unread notifications count
+  useEffect(() => {
+    let mounted = true;
+    const getToken = () => localStorage.getItem('accessToken');
+
+    const fetchCount = async () => {
+      try {
+        const token = getToken();
+        if (!token) return;
+        const data = await apiGet<{ count: number }>('/notifications/unread-count');
+        if (mounted) {
+          const newCount = data?.count ?? 0;
+          if (newCount > prevCountRef.current) {
+            setJustArrived(false);
+            // Trigger re-animation
+            requestAnimationFrame(() => setJustArrived(true));
+          }
+          prevCountRef.current = newCount;
+          setUnreadCount(newCount);
+        }
+      } catch {
+        // Silently ignore — user might not be authenticated yet
+      }
+    };
+
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000); // Poll every 30s
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
 
   // Listen for external theme changes (e.g. from Settings page)
   useEffect(() => {
@@ -75,13 +110,43 @@ export default function AppShell() {
 
       {/* ── Floating theme toggle above the nav ── */}
       {!hideNav && (
-        <motion.button
-          onClick={handleToggleTheme}
-          className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
-          whileTap={{ scale: 0.88 }}
-          whileHover={{ scale: 1.06 }}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
+        <>
+          {/* Notification bell */}
+          <motion.button
+            onClick={() => navigate('/notifications')}
+            className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-[calc(3.25rem)] z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
+            whileTap={{ scale: 0.88 }}
+            whileHover={{ scale: 1.06 }}
+            aria-label="Notifications"
+          >
+            <motion.div
+              animate={justArrived ? { rotate: [0, -12, 10, -6, 0] } : {}}
+              transition={{ duration: 0.5, ease: 'easeInOut' }}
+            >
+              <Bell size={16} className="text-text-secondary" />
+            </motion.div>
+            {/* Unread badge */}
+            {unreadCount > 0 && (
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-danger flex items-center justify-center px-1"
+              >
+                <span className="text-[10px] font-bold text-white leading-none">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              </motion.span>
+            )}
+          </motion.button>
+
+          <motion.button
+            onClick={handleToggleTheme}
+            className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
+            whileTap={{ scale: 0.88 }}
+            whileHover={{ scale: 1.06 }}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
           <motion.div
             initial={false}
             animate={{ rotate: theme === 'dark' ? 0 : 180 }}
@@ -94,6 +159,7 @@ export default function AppShell() {
             )}
           </motion.div>
         </motion.button>
+        </>
       )}
 
       {/* ── Bottom tab navigation ── */}

@@ -19,6 +19,7 @@ const StoriesPage = lazy(() => import('@/features/stories/StoriesPage'));
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
 const ProfilePage = lazy(() => import('@/features/profile/ProfilePage'));
 const LivePage = lazy(() => import('@/features/live/LivePage'));
+const NotificationsPage = lazy(() => import('@/features/notifications/NotificationsPage'));
 const BillingPage = lazy(() => import('@/features/billing/BillingPage'));
 const AuthPage = lazy(() => import('@/features/auth/AuthPage'));
 const AuthCallbackPage = lazy(() => import('@/features/auth/AuthCallbackPage'));
@@ -77,6 +78,9 @@ export function Router() {
 
             {/* Live */}
             <Route path="/live" element={<LivePage />} />
+
+            {/* Notifications */}
+            <Route path="/notifications" element={<NotificationsPage />} />
 
             {/* Profile */}
             <Route path="/profile" element={<ProfilePage />} />

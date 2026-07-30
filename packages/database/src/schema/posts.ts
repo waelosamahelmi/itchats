@@ -26,6 +26,7 @@ export const posts = pgTable('posts', {
   mediaType: text('media_type'),
   thumbnailUrl: text('thumbnail_url'),
   visibility: postVisibilityEnum('visibility').notNull().default('public'),
+  repostOfPostId: uuid('repost_of_post_id'),
   nsfw: boolean('nsfw').notNull().default(false),
   likeCount: integer('like_count').notNull().default(0),
   commentCount: integer('comment_count').notNull().default(0),

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch } from '@/app/store';
-import { mockCurrentUser, mockCredits } from '@/lib/mockData';
+import { apiFetch } from '@/lib/api';
 import { getStoredTheme, toggleAndNotify, type Theme } from '@/app/theme';
 
 // ── Settings Row ──
@@ -85,6 +85,58 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Real wallet / subscription data
+  const [wallet, setWallet] = useState<{ balance: number } | null>(null);
+  const [subscription, setSubscription] = useState<{ plan?: string; planId?: string; status?: string; nextBilling?: string } | null>(null);
+  const [billingLoading, setBillingLoading] = useState(true);
+
+  useEffect(() => {
+    loadBilling();
+    // Load notification preferences from localStorage
+    try {
+      const stored = localStorage.getItem('itchats-notifs');
+      if (stored) {
+        const prefs = JSON.parse(stored);
+        setPushNotifs(prefs.pushNotifs ?? true);
+        setEmailNotifs(prefs.emailNotifs ?? false);
+        setCharPostNotifs(prefs.charPostNotifs ?? true);
+        setStoryNotifs(prefs.storyNotifs ?? true);
+        setMsgNotifs(prefs.msgNotifs ?? true);
+        setReactNotifs(prefs.reactNotifs ?? false);
+      }
+    } catch {}
+  }, []);
+
+  async function loadBilling() {
+    setBillingLoading(true);
+    try {
+      const [w, s] = await Promise.all([
+        apiFetch<{ balance: number }>('/billing/wallet').catch(() => null),
+        apiFetch<any>('/billing/subscription').catch(() => null),
+      ]);
+      setWallet(w);
+      setSubscription(s);
+    } catch {} finally { setBillingLoading(false); }
+  }
+
+  // Persist notification preferences to localStorage
+  function saveNotifPrefs(updates: Record<string, boolean>) {
+    const prefs = {
+      pushNotifs, emailNotifs, charPostNotifs, storyNotifs,
+      msgNotifs, reactNotifs, ...updates,
+    };
+    try { localStorage.setItem('itchats-notifs', JSON.stringify(prefs)); } catch {}
+    // Also attempt backend save (fire and forget)
+    apiFetch('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ notificationPreferences: prefs }),
+    }).catch(() => {});
+  }
+
+  const balance = wallet?.balance ?? 0;
+  const planName = subscription?.plan ?? subscription?.planId ?? 'Free';
+  const planStatus = subscription?.status ?? 'active';
+
   // ── Credit display card ──
   const CreditCard_ = () => (
     <div className="glass rounded-2xl p-5 mx-4 mb-2 bg-gradient-to-br from-brand-primary/10 to-transparent border border-brand-primary/10">
@@ -93,15 +145,23 @@ export default function SettingsPage() {
           <Sparkles size={18} className="text-brand-primary" />
           <span className="text-sm font-semibold text-text-primary">Credits</span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">
-          {mockCredits.subscription.status}
-        </span>
+        {billingLoading ? (
+          <div className="h-5 w-16 animate-pulse rounded-full bg-white/10" />
+        ) : (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">
+            {planStatus}
+          </span>
+        )}
       </div>
-      <p className="text-4xl font-extrabold text-text-primary mb-1">{mockCredits.balance.toLocaleString()}</p>
+      {billingLoading ? (
+        <div className="h-10 w-24 animate-pulse rounded bg-white/10 mb-1" />
+      ) : (
+        <p className="text-4xl font-extrabold text-text-primary mb-1">{balance.toLocaleString()}</p>
+      )}
       <p className="text-xs text-text-muted mb-4">Available credits for AI features</p>
       <div className="flex items-center justify-between text-xs text-text-secondary">
-        <span>{mockCredits.subscription.plan}</span>
-        <span>{mockCredits.subscription.price}</span>
+        <span>{planName} Plan</span>
+        {subscription?.nextBilling && <span>Next: {subscription.nextBilling}</span>}
       </div>
       <div className="flex gap-2 mt-3">
         <button
@@ -134,8 +194,8 @@ export default function SettingsPage() {
         {/* Account Info */}
         <SectionHeader title="Account" />
         <div className="space-y-1 px-4">
-          <SettingsRow icon={Mail} label="Email" value={user?.email || mockCurrentUser.email} disabled />
-          <SettingsRow icon={User} label="Username" value={user?.username || mockCurrentUser.username} />
+          <SettingsRow icon={Mail} label="Email" value={user?.email || '(not set)'} disabled />
+          <SettingsRow icon={User} label="Username" value={user?.username || '(not set)'} />
           <SettingsRow icon={Lock} label="Change Password" onClick={() => {}} />
           <SettingsRow
             icon={theme === 'dark' ? Moon : Sun}
@@ -157,12 +217,12 @@ export default function SettingsPage() {
         {/* Notifications */}
         <SectionHeader title="Notifications" />
         <div className="space-y-1 px-4">
-          <SettingsRow icon={Bell} label="Push Notifications" toggle toggled={pushNotifs} onToggle={() => setPushNotifs(!pushNotifs)} />
-          <SettingsRow icon={Mail} label="Email Notifications" toggle toggled={emailNotifs} onToggle={() => setEmailNotifs(!emailNotifs)} />
-          <SettingsRow icon={Sparkles} label="Character Posts" toggle toggled={charPostNotifs} onToggle={() => setCharPostNotifs(!charPostNotifs)} />
-          <SettingsRow icon={Globe} label="Stories" toggle toggled={storyNotifs} onToggle={() => setStoryNotifs(!storyNotifs)} />
-          <SettingsRow icon={Bell} label="Messages" toggle toggled={msgNotifs} onToggle={() => setMsgNotifs(!msgNotifs)} />
-          <SettingsRow icon={Bell} label="Reactions" toggle toggled={reactNotifs} onToggle={() => setReactNotifs(!reactNotifs)} />
+          <SettingsRow icon={Bell} label="Push Notifications" toggle toggled={pushNotifs} onToggle={() => { setPushNotifs(!pushNotifs); saveNotifPrefs({ pushNotifs: !pushNotifs }); }} />
+          <SettingsRow icon={Mail} label="Email Notifications" toggle toggled={emailNotifs} onToggle={() => { setEmailNotifs(!emailNotifs); saveNotifPrefs({ emailNotifs: !emailNotifs }); }} />
+          <SettingsRow icon={Sparkles} label="Character Posts" toggle toggled={charPostNotifs} onToggle={() => { setCharPostNotifs(!charPostNotifs); saveNotifPrefs({ charPostNotifs: !charPostNotifs }); }} />
+          <SettingsRow icon={Globe} label="Stories" toggle toggled={storyNotifs} onToggle={() => { setStoryNotifs(!storyNotifs); saveNotifPrefs({ storyNotifs: !storyNotifs }); }} />
+          <SettingsRow icon={Bell} label="Messages" toggle toggled={msgNotifs} onToggle={() => { setMsgNotifs(!msgNotifs); saveNotifPrefs({ msgNotifs: !msgNotifs }); }} />
+          <SettingsRow icon={Bell} label="Reactions" toggle toggled={reactNotifs} onToggle={() => { setReactNotifs(!reactNotifs); saveNotifPrefs({ reactNotifs: !reactNotifs }); }} />
         </div>
 
         {/* Permissions */}

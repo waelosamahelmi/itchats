@@ -7,13 +7,16 @@ import {
   creditWallets,
   creditLedger,
 } from '@itchats/database/schema';
-import { eq, and, sql, isNull, lt, gte } from 'drizzle-orm';
+import { eq, and, sql, isNull, lt, gte, ne } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
+import { TrendSearchService } from './trend-search.service';
 
 @Injectable()
 export class AutonomyService {
   private readonly logger = new Logger(AutonomyService.name);
   private intervalId: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly trendSearch: TrendSearchService) {}
 
   /**
    * Start the autonomous actions cron job (runs every 15 minutes).
@@ -77,6 +80,18 @@ export class AutonomyService {
         const shouldStory = await this.shouldCharacterPostStory(character, autonomy);
         if (shouldStory) {
           await this.generateAutonomousStory(character.id, character.name, character);
+        }
+
+        // Check if should search trends and post news reaction
+        const shouldSearchTrends = await this.shouldSearchTrends(character, autonomy);
+        if (shouldSearchTrends) {
+          await this.searchTrendsAndPost(character.id, character.name, character);
+        }
+
+        // Check if should repost from another character
+        const shouldRepost = await this.shouldRepost(character);
+        if (shouldRepost) {
+          await this.findAndRepostContent(character.id, character);
         }
       } catch (err: any) {
         this.logger.error(
@@ -259,15 +274,317 @@ Return ONLY JSON:
     );
   }
 
+  /**
+   * Determine if the character should search for trends and post about them.
+   */
+  private async shouldSearchTrends(
+    character: any,
+    autonomy: any,
+  ): Promise<boolean> {
+    if (!autonomy?.canSearchNews) return false;
+
+    // Check time since last news search
+    const lastSearchAt = autonomy?.lastNewsSearchAt
+      ? new Date(autonomy.lastNewsSearchAt)
+      : null;
+
+    if (lastSearchAt) {
+      const hoursSince =
+        (Date.now() - lastSearchAt.getTime()) / (1000 * 60 * 60);
+      // Don't search more than once every 6 hours by default
+      if (hoursSince < 6) return false;
+    }
+
+    // Random chance — not every character should post about news every cycle
+    return Math.random() < 0.3;
+  }
+
+  /**
+   * Determine if the character should repost another character's content.
+   */
+  private async shouldRepost(character: any): Promise<boolean> {
+    if (!character.interests || (character.interests as any[]).length === 0) {
+      return false;
+    }
+
+    // Extrovert characters repost more often
+    const personality = (character.personality || '').toLowerCase();
+    const isExtrovert =
+      personality.includes('extrovert') ||
+      personality.includes('outgoing') ||
+      personality.includes('social') ||
+      personality.includes('friendly') ||
+      personality.includes('gregarious');
+
+    const isIntrovert =
+      personality.includes('introvert') ||
+      personality.includes('shy') ||
+      personality.includes('private') ||
+      personality.includes('quiet');
+
+    // Base probability
+    let baseProb = isExtrovert ? 0.3 : isIntrovert ? 0.05 : 0.15;
+
+    // If they haven't posted in a while, more likely to repost
+    const lastPostAt = character.lastPostAt
+      ? new Date(character.lastPostAt)
+      : null;
+    if (lastPostAt) {
+      const hoursSince =
+        (Date.now() - lastPostAt.getTime()) / (1000 * 60 * 60);
+      if (hoursSince > 24) baseProb += 0.2;
+      if (hoursSince > 48) baseProb += 0.15;
+    } else {
+      baseProb += 0.2; // Never posted yet, eager to engage
+    }
+
+    // Happy/excited moods increase repost chance
+    const happyMoods = ['happy', 'excited', 'playful', 'loving'];
+    if (happyMoods.includes(character.mood || '')) baseProb += 0.1;
+
+    return Math.random() < Math.min(baseProb, 0.6);
+  }
+
+  /**
+   * Search trends for the character and create a feed post reacting to news.
+   */
+  async searchTrendsAndPost(
+    characterId: string,
+    characterName: string,
+    character: any,
+  ) {
+    const db = getDb();
+    const interests: string[] =
+      Array.isArray(character.interests) ? character.interests : [];
+    const newsInterests = Array.isArray(character.autonomy_config?.newsInterests)
+      ? character.autonomy_config.newsInterests
+      : [];
+
+    // Merge interests and newsInterests for topic selection
+    const allTopics = [...new Set([...interests, ...newsInterests])];
+
+    if (allTopics.length === 0) {
+      this.logger.debug(
+        `${characterName} has no interests — skipping trend search`,
+      );
+      return;
+    }
+
+    try {
+      const result = await this.trendSearch.searchTrendsForCharacter(
+        characterName,
+        character.personality || '',
+        allTopics,
+        character.mood || 'neutral',
+      );
+
+      if (result.characterReaction) {
+        const topStory = result.newsResults[0];
+
+        await db.insert(posts).values({
+          authorCharacterId: characterId,
+          content: result.characterReaction,
+          mediaUrl: result.selectedImageUrl ?? undefined,
+          mediaType: result.selectedImageUrl ? 'image' : undefined,
+          visibility: 'public',
+          isAiGenerated: true,
+          sourceNewsUrl: topStory?.url ?? undefined,
+          sourceNewsTitle: topStory?.title ?? undefined,
+        });
+
+        // Update lastPostAt on character
+        await db
+          .update(characters)
+          .set({ lastPostAt: new Date() })
+          .where(eq(characters.id, characterId));
+
+        // Update lastNewsSearchAt on autonomy
+        await db
+          .update(characterAutonomy)
+          .set({ lastNewsSearchAt: new Date(), updatedAt: new Date() })
+          .where(eq(characterAutonomy.characterId, characterId));
+
+        this.logger.log(
+          `Trend post created for ${characterName} about "${allTopics[0]}"${result.usedFallback ? ' (simulated trends)' : ''}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Trend search failed for ${characterName}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * Find content from other characters that this character might want to repost.
+   * Uses LLM to decide if the character would repost and with what commentary.
+   */
+  async findAndRepostContent(characterId: string, character: any) {
+    const db = getDb();
+
+    const charInterests: string[] = Array.isArray(character.interests)
+      ? character.interests
+      : [];
+
+    if (charInterests.length === 0) {
+      this.logger.debug(
+        `${character.name} has no interests — skipping repost`,
+      );
+      return;
+    }
+
+    try {
+      // Find recent posts from OTHER characters that this character hasn't already reposted
+      const recentPosts = await db
+        .select({
+          post: posts,
+          authorCharacter: {
+            id: characters.id,
+            name: characters.name,
+            personality: characters.personality,
+            mood: characters.mood,
+          },
+        })
+        .from(posts)
+        .innerJoin(characters, eq(posts.authorCharacterId, characters.id))
+        .where(
+          and(
+            ne(posts.authorCharacterId, characterId),
+            sql`${posts.content} IS NOT NULL`,
+            sql`${posts.content} != ''`,
+            isNull(posts.deletedAt),
+            eq(characters.status, 'published'),
+            eq(characters.visibility, 'public'),
+          ),
+        )
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(20);
+
+      if (recentPosts.length === 0) {
+        this.logger.debug(
+          `${character.name}: no recent posts from other characters to repost`,
+        );
+        return;
+      }
+
+      // Score each post for interest match
+      const scoredPosts = recentPosts.map(({ post, authorCharacter }) => {
+        const postText = ((post.content ?? '') as string).toLowerCase();
+        let matchScore = 0;
+
+        for (const interest of charInterests) {
+          if (postText.includes((interest as string).toLowerCase())) {
+            matchScore += 1;
+          }
+        }
+
+        return { post, authorCharacter, matchScore };
+      });
+
+      // Sort by match score descending
+      scoredPosts.sort((a, b) => b.matchScore - a.matchScore);
+
+      // Pick at most top candidates (with some randomness for variety)
+      const candidates = scoredPosts.slice(
+        0,
+        Math.min(5, scoredPosts.length),
+      );
+      if (candidates.length === 0) return;
+
+      // Use LLM to decide which post to repost and with what commentary
+      const candidatePick = candidates[Math.floor(Math.random() * candidates.length)];
+      if (!candidatePick) return;
+
+      const prompt = `You are ${character.name}. ${character.personality || ''}
+Your interests: ${charInterests.join(', ')}
+Your current mood: ${character.mood || 'neutral'}
+
+You're scrolling your social feed and see this post from ${candidatePick.authorCharacter.name}:
+"${candidatePick.post.content}"
+
+Decide whether you would repost (share/quote) this. Consider:
+- Do you actually care about this topic?
+- Does it match your interests or vibe?
+- Would sharing this add to YOUR online presence?
+- Are you the type of person who shares others' posts?
+
+If you would repost, write the commentary you'd add on top (like a quote-tweet style repost). Your commentary should sound like you — same voice, same style.
+
+Return ONLY a JSON object (no markdown, no code fences):
+{
+  "shouldRepost": true/false,
+  "commentary": "your commentary if reposting (max 200 chars)" | null,
+  "reason": "brief reason for your decision"
+}`;
+
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'qwen-flash',
+        temperature: 0.9,
+        maxTokens: 400,
+      });
+
+      const cleaned = result.content
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const decision = JSON.parse(cleaned);
+
+      if (decision.shouldRepost && decision.commentary) {
+        const commentary =
+          typeof decision.commentary === 'string'
+            ? decision.commentary.slice(0, 280)
+            : '';
+
+        // Create a repost — a new post with the character's commentary
+        // and a reference to the original post
+        await db.insert(posts).values({
+          authorCharacterId: characterId,
+          content: commentary,
+          repostOfPostId: candidatePick.post.id,
+          visibility: 'public',
+          isAiGenerated: true,
+        });
+
+        // Update lastPostAt on character
+        await db
+          .update(characters)
+          .set({ lastPostAt: new Date() })
+          .where(eq(characters.id, characterId));
+
+        this.logger.log(
+          `${character.name} reposted from ${candidatePick.authorCharacter.name}: "${commentary.slice(0, 60)}..."`,
+        );
+      } else {
+        this.logger.debug(
+          `${character.name} decided not to repost: ${decision.reason || 'no reason given'}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Repost decision failed for ${character.name}: ${err.message}`,
+      );
+    }
+  }
+
   async searchNewsForCharacter(characterId: string, topic: string) {
-    // Mock implementation — in production this would search news APIs
-    this.logger.log(
-      `News search for character ${characterId} on topic: ${topic} (mock)`,
+    const db = getDb();
+    const [character] = await db
+      .select()
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+
+    if (!character) {
+      return { results: [], message: 'Character not found' };
+    }
+
+    return this.trendSearch.searchTrendsForCharacter(
+      character.name,
+      character.personality || '',
+      [topic],
+      character.mood || 'neutral',
     );
-    return {
-      results: [],
-      message: 'News search integration pending',
-    };
   }
 
   /**

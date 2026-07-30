@@ -1,158 +1,126 @@
-// ── Extended API client for the social platform ──
-// Falls back to mock data when the real API is unavailable
-
-import {
-  mockPosts, mockCharacters, mockVoices, mockStories,
-  mockCurrentUser, mockFriends, fakeDelay,
-  type MockPost, type MockCharacter, type MockVoice, type MockUser, type MockStory, type MockComment,
-  genId,
-} from './mockData';
+// ── Clean API client — no mock fallbacks ──
+// All API calls go through this utility or Redux thunks.
+// Errors propagate so UI can show proper error/loading/empty states.
 
 const API = '/v1';
 
-function token() {
+function getToken() {
   return localStorage.getItem('accessToken');
 }
-
-function headers(): Record<string, string> {
-  const t = token();
-  return { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+function getRefresh() {
+  return localStorage.getItem('refreshToken');
 }
 
-async function realFetch<T>(path: string, opts?: RequestInit): Promise<T | null> {
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshToken(): Promise<string | null> {
+  const r = getRefresh();
+  if (!r) return null;
   try {
-    const t = token();
-    if (!t) return null;
-    const h: Record<string, string> = { ...headers(), ...opts?.headers as Record<string, string> || {} };
-    const res = await fetch(`${API}${path}`, { ...opts, headers: h });
-    if (!res.ok) throw new Error('API error');
-    return res.json();
+    const res = await fetch(`${API}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: r }),
+    });
+    if (!res.ok) throw new Error('Refresh failed');
+    const data = await res.json();
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    return data.accessToken;
   } catch {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     return null;
   }
 }
 
-// ── Posts API ──
-export async function fetchFeedPosts(page = 1): Promise<MockPost[]> {
-  const real = await realFetch<MockPost[]>(`/feed?page=${page}&limit=10`);
-  if (real && real.length > 0) return real;
-  await fakeDelay();
-  return mockPosts.map(p => ({ ...p }));
-}
-
-export async function createPost(content: string, mediaUrl?: string): Promise<MockPost> {
-  const real = await realFetch<MockPost>('/feed', { method: 'POST', body: JSON.stringify({ content, mediaUrl }) });
-  if (real) return real;
-  await fakeDelay(600);
-  return {
-    id: genId(), authorId: 'user-me', authorName: mockCurrentUser.username, authorAvatar: mockCurrentUser.avatarUrl,
-    authorIsAI: false, content, mediaUrl, mediaType: mediaUrl ? 'image' : undefined,
-    createdAt: new Date().toISOString(), privacy: 'public',
-    likes: 0, liked: false, topReactions: [], comments: [], commentCount: 0, shares: 0,
+/**
+ * Authenticated fetch wrapper.
+ * - Attaches Bearer token from localStorage
+ * - Parses JSON response
+ * - Handles 401 with automatic token refresh
+ * - Throws meaningful errors on failure
+ */
+export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
+  const t = getToken();
+  const hasBody = opts?.body != null;
+  const headers: Record<string, string> = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    ...(opts?.headers as Record<string, string> || {}),
   };
-}
 
-export async function deletePost(postId: string): Promise<boolean> {
-  const real = await realFetch(`/feed/${postId}`, { method: 'DELETE' });
-  if (real) return true;
-  await fakeDelay(300);
-  return true;
-}
-
-export async function reactToPost(postId: string, emoji: string): Promise<void> {
-  await realFetch(`/feed/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
-  await fakeDelay(100);
-}
-
-export async function addComment(postId: string, content: string): Promise<MockComment> {
-  const real = await realFetch<MockComment>(`/feed/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
-  if (real) return real;
-  await fakeDelay(300);
-  return {
-    id: genId(), authorName: mockCurrentUser.username, authorAvatar: mockCurrentUser.avatarUrl,
-    authorIsAI: false, content, createdAt: 'just now', likes: 0, liked: false, replies: [],
+  const doFetch = (tokenOverride?: string) => {
+    const h = { ...headers };
+    if (tokenOverride) h.Authorization = `Bearer ${tokenOverride}`;
+    return fetch(`${API}${path}`, { ...opts, headers: h });
   };
+
+  let res = await doFetch();
+
+  // 401 — try token refresh
+  if (res.status === 401 && getRefresh()) {
+    if (!refreshPromise) refreshPromise = refreshToken();
+    const newToken = await refreshPromise;
+    refreshPromise = null;
+
+    if (newToken) {
+      res = await doFetch(newToken);
+    } else {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/auth';
+      throw new Error('Session expired');
+    }
+  }
+
+  // Still 401 after refresh — redirect to auth
+  if (res.status === 401) {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    window.location.href = '/auth';
+    throw new Error('Session expired — please sign in');
+  }
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const e = await res.json();
+      if (e.message) message = e.message;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const text = await res.text();
+  return text ? JSON.parse(text) : {} as T;
 }
 
-export async function likeComment(postId: string, commentId: string): Promise<void> {
-  await realFetch(`/feed/${postId}/comments/${commentId}/like`, { method: 'POST' });
-  await fakeDelay(100);
+// ── Convenience methods ──
+export async function apiGet<T = any>(path: string): Promise<T> {
+  return apiFetch<T>(path);
 }
 
-// ── Characters API (enhanced) ──
-export async function fetchDiscoverCharacters(page = 1): Promise<MockCharacter[]> {
-  const real = await realFetch<MockCharacter[]>(`/characters/discover?page=${page}&limit=20`);
-  if (real && real.length > 0) return real;
-  await fakeDelay();
-  return mockCharacters.filter(c => c.visibility === 'public');
+export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'POST',
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }
 
-export async function fetchMyCharacters(): Promise<MockCharacter[]> {
-  const real = await realFetch<MockCharacter[]>('/characters/mine');
-  if (real && real.length > 0) return real;
-  await fakeDelay();
-  return mockCharacters.filter(c => c.visibility === 'private');
+export async function apiPatch<T = any>(path: string, body?: any): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'PATCH',
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }
 
-export async function followCharacter(charId: string): Promise<void> {
-  await realFetch(`/characters/${charId}/follow`, { method: 'POST' });
-  await fakeDelay(200);
+export async function apiDelete<T = any>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: 'DELETE' });
 }
 
-export async function unfollowCharacter(charId: string): Promise<void> {
-  await realFetch(`/characters/${charId}/follow`, { method: 'DELETE' });
-  await fakeDelay(200);
+// ── Shared utility helpers ──
+export function genId() {
+  return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
 
-// ── Profile API ──
-export async function fetchProfile(): Promise<MockUser> {
-  const real = await realFetch<MockUser>('/users/me');
-  if (real) return real;
-  await fakeDelay();
-  return mockCurrentUser;
-}
-
-export async function updateProfile(data: Partial<MockUser>): Promise<MockUser> {
-  const real = await realFetch<MockUser>('/users/me', { method: 'PATCH', body: JSON.stringify(data) });
-  if (real) return real;
-  await fakeDelay(400);
-  return { ...mockCurrentUser, ...data };
-}
-
-export async function fetchFriends(): Promise<MockUser[]> {
-  const real = await realFetch<MockUser[]>('/users/friends');
-  if (real && real.length > 0) return real;
-  await fakeDelay();
-  return mockFriends;
-}
-
-// ── Voices API ──
-export async function fetchVoices(): Promise<MockVoice[]> {
-  const real = await realFetch<MockVoice[]>('/characters/voices');
-  if (real && real.length > 0) return real;
-  await fakeDelay(300);
-  return mockVoices;
-}
-
-// ── Stories API ──
-export async function fetchStories(): Promise<MockStory[]> {
-  const real = await realFetch<MockStory[]>('/stories');
-  if (real && real.length > 0) return real;
-  await fakeDelay(250);
-  return mockStories;
-}
-
-// ── User posts ──
-export async function fetchUserPosts(userId: string): Promise<MockPost[]> {
-  const real = await realFetch<MockPost[]>(`/users/${userId}/posts`);
-  if (real && real.length > 0) return real;
-  await fakeDelay();
-  return mockPosts.filter(p => p.authorId === userId || userId === 'user-me');
-}
-
-export async function fetchPhotos(userId: string): Promise<{ id: string; url: string }[]> {
-  await fakeDelay(300);
-  return mockPosts
-    .filter(p => (p.authorId === userId || userId === 'user-me') && p.mediaUrl)
-    .map(p => ({ id: p.id, url: p.mediaUrl! }));
-}
+export const reactionEmojis = ['👍', '❤️', '😂', '😮', '😢', '😡', '🔥', '👏', '🎉', '💯'];

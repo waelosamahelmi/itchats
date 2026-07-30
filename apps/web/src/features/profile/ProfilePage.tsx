@@ -7,13 +7,14 @@ import {
   Plus, Pencil, Lock, ChevronRight, Shield, BadgeCheck,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
-import { logout, useAppDispatch } from '@/app/store';
-import { Badge, Tabs } from '@itchats/ui';
+import type { Post, UserProfile, Character } from '@/app/store';
 import {
-  mockCurrentUser, mockFriends, mockPosts, mockCharacters,
-  type MockUser, type MockPost, genId,
-} from '@/lib/mockData';
-import { fetchProfile, fetchFriends, fetchUserPosts, fetchPhotos } from '@/lib/api';
+  logout, useAppDispatch,
+  fetchProfile, fetchFriendsThunk,
+  setUserPosts,
+} from '@/app/store';
+import { apiFetch } from '@/lib/api';
+import { Badge, Tabs } from '@itchats/ui';
 
 // ── Section wrapper ──
 function Section({ title, children, className }: { title?: string; children: React.ReactNode; className?: string }) {
@@ -26,7 +27,7 @@ function Section({ title, children, className }: { title?: string; children: Rea
 }
 
 // ── Post Card (simplified, same design as feed) ──
-function ProfilePost({ post }: { post: MockPost }) {
+function ProfilePost({ post }: { post: Post }) {
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.likes);
 
@@ -93,7 +94,7 @@ function timeAgo(dateStr: string): string {
 }
 
 // ── Friend Card ──
-function FriendCard({ friend }: { friend: MockUser }) {
+function FriendCard({ friend }: { friend: UserProfile }) {
   const nav = useNavigate();
   return (
     <button
@@ -112,44 +113,66 @@ export default function ProfilePage() {
   const dispatch = useAppDispatch();
   const nav = useNavigate();
   const { user } = useSelector((s: RootState) => s.auth);
-  const [profile, setProfile] = useState<MockUser>(mockCurrentUser);
-  const [friends, setFriends] = useState<MockUser[]>([]);
-  const [posts, setPosts] = useState<MockPost[]>([]);
+  const profile = useSelector((s: RootState) => s.profile.profile);
+  const friends = useSelector((s: RootState) => s.profile.friends);
+  const profileLoading = useSelector((s: RootState) => s.profile.loading);
+  const profileError = useSelector((s: RootState) => s.profile.error);
+  const myCharacters = useSelector((s: RootState) => s.characters.myCharacters);
+
+  const [posts, setPosts] = useState<Post[]>([]);
   const [photos, setPhotos] = useState<{ id: string; url: string }[]>([]);
   const [tab, setTab] = useState('posts');
-  const [loading, setLoading] = useState(true);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [postsError, setPostsError] = useState<string | null>(null);
   const [composerText, setComposerText] = useState('');
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
-    loadAll();
-  }, [user]);
+    if (!user) return;
+    dispatch(fetchProfile());
+    dispatch(fetchFriendsThunk());
+    loadUserContent();
+  }, [user, dispatch]);
 
-  async function loadAll() {
-    setLoading(true);
-    const [prof, fr, pt, ph] = await Promise.all([
-      fetchProfile().catch(() => mockCurrentUser),
-      fetchFriends().catch(() => mockFriends),
-      fetchUserPosts('user-me').catch(() => mockPosts.slice(0, 3)),
-      fetchPhotos('user-me').catch(() => []),
-    ]);
-    setProfile(prof);
-    setFriends(fr);
-    setPosts(pt);
-    setPhotos(ph);
-    setLoading(false);
+  async function loadUserContent() {
+    setLoadingPosts(true);
+    setPostsError(null);
+    try {
+      const userId = user?.id ?? 'me';
+      const [pt, ph] = await Promise.all([
+        apiFetch<Post[]>(`/users/${userId}/posts`),
+        apiFetch<{ id: string; url: string }[]>(`/users/${userId}/photos`).catch(() => [] as { id: string; url: string }[]),
+      ]);
+      setPosts(pt);
+      dispatch(setUserPosts({ userId, posts: pt }));
+      setPhotos(ph);
+    } catch (e: any) {
+      setPostsError(e.message || 'Failed to load posts');
+      setPosts([]);
+    }
+    setLoadingPosts(false);
   }
 
   const handlePost = () => {
     if (!composerText.trim()) return;
-    const newPost: MockPost = {
-      id: genId(), authorId: 'user-me', authorName: profile.username,
-      authorAvatar: profile.avatarUrl, authorIsAI: false, content: composerText.trim(),
-      createdAt: new Date().toISOString(), privacy: 'public',
-      likes: 0, liked: false, topReactions: [], comments: [], commentCount: 0, shares: 0,
-    };
-    setPosts(p => [newPost, ...p]);
+    // Could be dispatched to Redux, but currently the profile composer is simpler
     setComposerText('');
+  };
+
+  const profileData = profile ?? {
+    id: user?.id ?? '',
+    username: user?.username ?? '',
+    email: '',
+    avatarUrl: '',
+    coverUrl: '',
+    bio: '',
+    website: '',
+    location: '',
+    joinDate: '',
+    score: 0,
+    rank: '',
+    friendCount: 0,
+    characterCount: myCharacters.length,
+    followerCount: 0,
   };
 
   if (!user) {
@@ -163,13 +186,16 @@ export default function ProfilePage() {
     );
   }
 
+  const isLoading = profileLoading || loadingPosts;
+  const charCount = myCharacters.length || profileData.characterCount;
+
   return (
     <div className="flex flex-col h-full bg-bg-canvas">
       <div className="flex-1 overflow-y-auto">
         {/* Cover Photo */}
         <div className="relative h-[200px] bg-gradient-to-br from-brand-primary/20 via-brand-primary/5 to-surface-elevated overflow-hidden">
-          {profile.coverUrl && (
-            <img src={profile.coverUrl} alt="" className="w-full h-full object-cover" />
+          {profileData.coverUrl && (
+            <img src={profileData.coverUrl} alt="" className="w-full h-full object-cover" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-bg-canvas to-transparent" />
           {/* Settings gear */}
@@ -185,7 +211,13 @@ export default function ProfilePage() {
         <div className="px-5 -mt-16 relative z-10">
           <div className="flex items-end justify-between">
             <div className="w-24 h-24 rounded-full overflow-hidden ring-4 ring-bg-canvas shadow-xl">
-              <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" />
+              {profileData.avatarUrl ? (
+                <img src={profileData.avatarUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-bg-elevated flex items-center justify-center">
+                  <User size={36} className="text-text-muted" />
+                </div>
+              )}
             </div>
             <button
               onClick={() => nav('/settings')}
@@ -196,33 +228,39 @@ export default function ProfilePage() {
           </div>
 
           <div className="mt-3">
-            <h1 className="text-2xl font-extrabold text-text-primary tracking-tight">{profile.username}</h1>
+            <h1 className="text-2xl font-extrabold text-text-primary tracking-tight">{profileData.username}</h1>
             <div className="flex items-center gap-2 mt-1">
               <div className="flex items-center gap-1 text-xs">
                 <Star size={12} className="text-social-warm fill-current" />
-                <span className="font-semibold text-text-primary">{profile.score.toLocaleString()}</span>
+                <span className="font-semibold text-text-primary">{profileData.score.toLocaleString()}</span>
                 <span className="text-text-muted">points</span>
               </div>
-              <span className="text-text-muted text-xs">·</span>
-              <span className="text-xs font-medium text-brand-primary">{profile.rank}</span>
+              {profileData.rank && (
+                <>
+                  <span className="text-text-muted text-xs">·</span>
+                  <span className="text-xs font-medium text-brand-primary">{profileData.rank}</span>
+                </>
+              )}
             </div>
           </div>
 
           {/* About text */}
-          {profile.bio && (
-            <p className="text-sm text-text-secondary mt-3 leading-relaxed whitespace-pre-line">{profile.bio}</p>
+          {profileData.bio && (
+            <p className="text-sm text-text-secondary mt-3 leading-relaxed whitespace-pre-line">{profileData.bio}</p>
           )}
 
           {/* Meta info */}
           <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-text-muted">
-            {profile.location && (
-              <span className="flex items-center gap-1"><MapPin size={12} /> {profile.location}</span>
+            {profileData.location && (
+              <span className="flex items-center gap-1"><MapPin size={12} /> {profileData.location}</span>
             )}
-            {profile.website && (
-              <span className="flex items-center gap-1"><Globe size={12} /> {profile.website}</span>
+            {profileData.website && (
+              <span className="flex items-center gap-1"><Globe size={12} /> {profileData.website}</span>
             )}
-            <span className="flex items-center gap-1"><Calendar size={12} /> Joined {new Date(profile.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
-            <span className="flex items-center gap-1"><Users2 size={12} /> {profile.friendCount} friends</span>
+            {profileData.joinDate && (
+              <span className="flex items-center gap-1"><Calendar size={12} /> Joined {new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+            )}
+            <span className="flex items-center gap-1"><Users2 size={12} /> {profileData.friendCount} friends</span>
           </div>
 
           {/* Stats */}
@@ -230,8 +268,8 @@ export default function ProfilePage() {
             {[
               { label: 'Posts', value: posts.length },
               { label: 'Friends', value: friends.length },
-              { label: 'Characters', value: profile.characterCount },
-              { label: 'Followers', value: profile.followerCount },
+              { label: 'Characters', value: charCount },
+              { label: 'Followers', value: profileData.followerCount },
             ].map(s => (
               <div key={s.label} className="text-center">
                 <p className="text-lg font-bold text-text-primary">{s.value}</p>
@@ -257,7 +295,7 @@ export default function ProfilePage() {
 
         {/* Tab Content */}
         <div className="px-5 pb-24">
-          {loading ? (
+          {isLoading && tab === 'posts' ? (
             <div className="space-y-3 py-8">
               {Array.from({ length: 2 }).map((_, i) => (
                 <div key={i} className="glass rounded-2xl p-4 animate-pulse">
@@ -280,28 +318,14 @@ export default function ProfilePage() {
               {/* Posts Tab */}
               {tab === 'posts' && (
                 <div className="space-y-4">
-                  {/* Composer */}
-                  <div className="glass rounded-2xl p-4">
-                    <div className="flex items-center gap-3">
-                      <img src={profile.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover" />
-                      <input
-                        value={composerText}
-                        onChange={e => setComposerText(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handlePost()}
-                        placeholder="What's on your mind?"
-                        className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none"
-                      />
-                      <button
-                        onClick={handlePost}
-                        disabled={!composerText.trim()}
-                        className="rounded-full bg-brand-primary px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40 transition-opacity"
-                      >
-                        Post
-                      </button>
+                  {postsError ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-4">
+                      <Camera size={32} className="text-text-muted opacity-40" />
+                      <p className="text-text-muted text-sm">Failed to load posts</p>
+                      <p className="text-text-muted text-xs text-center max-w-[260px]">{postsError}</p>
+                      <button onClick={loadUserContent} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">Retry</button>
                     </div>
-                  </div>
-
-                  {posts.length === 0 ? (
+                  ) : posts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-3">
                       <Camera size={32} className="text-text-muted opacity-40" />
                       <p className="text-text-muted text-sm">No posts yet</p>
@@ -318,10 +342,10 @@ export default function ProfilePage() {
                 <div className="space-y-4">
                   <div className="glass rounded-2xl p-5 space-y-4">
                     {[
-                      ['Bio', profile.bio || 'No bio yet'],
-                      ['Website', profile.website || 'Not set'],
-                      ['Location', profile.location || 'Not set'],
-                      ['Joined', new Date(profile.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })],
+                      ['Bio', profileData.bio || 'No bio yet'],
+                      ['Website', profileData.website || 'Not set'],
+                      ['Location', profileData.location || 'Not set'],
+                      ['Joined', profileData.joinDate ? new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Unknown'],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between items-center">
                         <span className="text-xs text-text-muted">{k}</span>
@@ -334,15 +358,15 @@ export default function ProfilePage() {
                     <h4 className="text-sm font-semibold text-text-primary">Character Stats</h4>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-text-muted">Characters Created</span>
-                      <span className="text-xs text-text-primary font-medium">{profile.characterCount}</span>
+                      <span className="text-xs text-text-primary font-medium">{charCount}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-text-muted">Total Followers</span>
-                      <span className="text-xs text-text-primary font-medium">{profile.followerCount.toLocaleString()}</span>
+                      <span className="text-xs text-text-primary font-medium">{profileData.followerCount.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-text-muted">Score</span>
-                      <span className="text-xs text-brand-primary font-bold">{profile.score.toLocaleString()}</span>
+                      <span className="text-xs text-brand-primary font-bold">{profileData.score.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>

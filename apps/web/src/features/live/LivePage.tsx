@@ -1,8 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSelector } from 'react-redux';
 import { Radio, Sparkles } from 'lucide-react';
-import { mockCharacters } from '@/lib/mockData';
+import type { RootState } from '@/app/store';
+import { useAppDispatch, fetchDiscover } from '@/app/store';
 
 export default function LivePage() {
+  const dispatch = useAppDispatch();
+  const chars = useSelector((s: RootState) => s.characters.discoverCharacters);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    dispatch(fetchDiscover()).finally(() => setLoaded(true));
+  }, [dispatch]);
+
   return (
     <div className="flex flex-col h-full bg-bg-canvas relative overflow-hidden">
       {/* Ambient background */}
@@ -14,9 +24,9 @@ export default function LivePage() {
 
       {/* Blurred character grid behind */}
       <div className="absolute inset-0 grid grid-cols-3 gap-3 p-8 opacity-[0.12] blur-[2px] pointer-events-none">
-        {mockCharacters.filter(c => c.visibility === 'public').slice(0, 9).map(c => (
+        {chars.filter(c => c.visibility === 'public').slice(0, 9).map(c => (
           <div key={c.id} className="aspect-square rounded-2xl overflow-hidden">
-            <img src={c.avatarUrl} alt="" className="w-full h-full object-cover" />
+            <img src={c.avatarUrl ?? ''} alt="" className="w-full h-full object-cover" />
           </div>
         ))}
       </div>
@@ -44,7 +54,7 @@ export default function LivePage() {
           Live streaming with AI characters is on the way.
         </p>
         <p className="text-text-muted text-xs text-center max-w-[280px] mb-8">
-          Soon you'll be able to broadcast live with your AI characters, host interactive shows, and stream real-time conversations.
+          Soon you'll be able to broadcast live with{loaded && chars.length > 0 ? ` ${chars.length}+ ` : ' '}AI characters, host interactive shows, and stream real-time conversations.
         </p>
 
         {/* Feature teasers */}

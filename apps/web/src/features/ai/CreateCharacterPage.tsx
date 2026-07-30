@@ -9,8 +9,10 @@ import {
   Camera, Video, CreditCard, AlertTriangle,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
+import type { Voice } from '@/app/store';
+import { useAppDispatch, fetchVoicesThunk } from '@/app/store';
+import { apiFetch } from '@/lib/api';
 import { Badge } from '@itchats/ui';
-import { mockVoices, mockCurrentUser, type MockVoice } from '@/lib/mockData';
 
 const STEPS = [
   { id: 'basics', label: 'Basics', icon: Sparkles },
@@ -56,35 +58,9 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
   );
 }
 
-// ── Card Select ──
-function CardSelect({ options, selected, onSelect, renderLabel }: {
-  options: string[];
-  selected: string;
-  onSelect: (v: string) => void;
-  renderLabel?: (v: string) => string;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {options.map(opt => (
-        <button
-          key={opt}
-          onClick={() => onSelect(opt === selected ? '' : opt)}
-          className={`rounded-xl px-4 py-2.5 text-xs font-medium transition-all ${
-            selected === opt
-              ? 'bg-brand-primary/20 text-brand-primary ring-1 ring-brand-primary/50'
-              : 'glass text-text-muted hover:text-text-primary hover:bg-white/5'
-          }`}
-        >
-          {renderLabel ? renderLabel(opt) : opt}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── Voice Card ──
 function VoiceCard({ voice, selected, onSelect, playing, onPlay }: {
-  voice: MockVoice;
+  voice: Voice;
   selected: boolean;
   onSelect: () => void;
   playing: boolean;
@@ -126,10 +102,12 @@ function VoiceCard({ voice, selected, onSelect, playing, onPlay }: {
 
 // ── MAIN COMPONENT ──
 export default function CreateCharacterPage() {
+  const dispatch = useAppDispatch();
   const nav = useNavigate();
   const { characterId } = useParams<{ characterId?: string }>();
   const isEdit = !!characterId;
   const { token } = useSelector((s: RootState) => s.auth);
+  const voices = useSelector((s: RootState) => s.voices.voices);
 
   // Step state
   const [step, setStep] = useState(0);
@@ -152,6 +130,7 @@ export default function CreateCharacterPage() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [occupation, setOccupation] = useState('');
+  const [createdCharId, setCreatedCharId] = useState<string | null>(null);
 
   // Step 4 - Voice
   const [voiceId, setVoiceId] = useState('');
@@ -164,12 +143,13 @@ export default function CreateCharacterPage() {
   const [maxVideos, setMaxVideos] = useState(0);
   const [agreeToDeductions, setAgreeToDeductions] = useState(false);
 
-  // Step 6 - Autonomy
-
   // ── Credit cost constants ──
   const IMAGE_COST = 175;
   const VIDEO_COST = 625;
-  const userBalance = mockCurrentUser.score;
+
+  // Real wallet balance
+  const [userBalance, setUserBalance] = useState(0);
+  const [balanceLoading, setBalanceLoading] = useState(true);
 
   const computeMonthlyCredits = () => {
     const totalPerPeriod = maxImages * IMAGE_COST + maxVideos * VIDEO_COST;
@@ -194,6 +174,21 @@ export default function CreateCharacterPage() {
 
   const totalSteps = STEPS.length;
 
+  // Fetch wallet balance & voices on mount
+  useEffect(() => {
+    if (!token) return;
+    dispatch(fetchVoicesThunk());
+    loadWallet();
+  }, [token, dispatch]);
+
+  async function loadWallet() {
+    try {
+      const w = await apiFetch<{ balance: number }>('/billing/wallet');
+      setUserBalance(w.balance ?? 0);
+    } catch { setUserBalance(0); }
+    finally { setBalanceLoading(false); }
+  }
+
   // Fetch character on edit
   useEffect(() => {
     if (!isEdit || !token || !characterId) return;
@@ -212,6 +207,7 @@ export default function CreateCharacterPage() {
         setVoiceId(data.voiceProfileId || '');
         setCity(data.location?.city || '');
         setVis(data.visibility || 'private');
+        if (data.avatarUrl) setGeneratedImage(data.avatarUrl);
         if (data.autonomyConfig) {
           setCanPost(data.autonomyConfig.canPost || false);
           setPostFrequency(data.autonomyConfig.frequency || 'medium');
@@ -231,12 +227,39 @@ export default function CreateCharacterPage() {
 
   const handleGenerateImage = async () => {
     setGenerating(true);
-    await new Promise(r => setTimeout(r, 2000));
-    setGeneratedImage(`https://picsum.photos/400/400?random=${Date.now()}`);
+    setError('');
+    try {
+      // If creating new character, save first to get an ID for image generation
+      let targetId = createdCharId;
+      if (!targetId) {
+        const body: any = {
+          name, description: desc, gender, appearance, visibility: vis,
+          city, occupation, personalityType, speakingStyle, humorStyle,
+          energyLevel, emotionalBaseline, interests,
+        };
+        if (voiceId) body.voiceProfileId = voiceId;
+        const char = await apiFetch<any>('/characters', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        targetId = char.id;
+        setCreatedCharId(targetId);
+      }
+
+      // Generate avatar
+      const result = await apiFetch<{ avatarUrl: string }>(
+        `/ai/character/${targetId}/generate-avatar`,
+        { method: 'POST' },
+      );
+      setGeneratedImage(result.avatarUrl);
+    } catch (e: any) {
+      setError(e.message || 'Image generation failed');
+      // Fallback: try the old POST endpoint as well
+    }
     setGenerating(false);
   };
 
-  const handlePlayVoice = (v: MockVoice) => {
+  const handlePlayVoice = (v: Voice) => {
     if (playingVoice === v.id) {
       audioRef.current?.pause();
       setPlayingVoice(null);
@@ -244,6 +267,11 @@ export default function CreateCharacterPage() {
     }
     if (audioRef.current) audioRef.current.pause();
     setPlayingVoice(v.id);
+    // Play preview if available
+    if (v.previewUrl && audioRef.current) {
+      audioRef.current.src = v.previewUrl;
+      audioRef.current.play().catch(() => {});
+    }
     setTimeout(() => setPlayingVoice(null), 3000);
   };
 
@@ -258,8 +286,10 @@ export default function CreateCharacterPage() {
     setSaving(true);
     setError('');
     try {
-      const url = isEdit ? `${API}/characters/${characterId}` : `${API}/characters`;
-      const method = isEdit ? 'PATCH' : 'POST';
+      const url = isEdit || createdCharId
+        ? `${API}/characters/${createdCharId || characterId}`
+        : `${API}/characters`;
+      const method = isEdit || createdCharId ? 'PATCH' : 'POST';
       const body: any = {
         name, description: desc, gender, appearance, visibility: vis,
         city, occupation, personalityType, speakingStyle, humorStyle,
@@ -428,7 +458,6 @@ export default function CreateCharacterPage() {
         {/* Step 2: Personality */}
         {step === 1 && (
           <div className="space-y-5 animate-slide-up">
-            {/* Personality Type */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Personality Type</label>
               <div className="grid grid-cols-2 gap-2">
@@ -450,7 +479,6 @@ export default function CreateCharacterPage() {
               </div>
             </div>
 
-            {/* Speaking Style */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Speaking Style</label>
               <div className="flex flex-wrap gap-2">
@@ -470,7 +498,6 @@ export default function CreateCharacterPage() {
               </div>
             </div>
 
-            {/* Humor Style */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Humor Style</label>
               <div className="flex flex-wrap gap-2">
@@ -490,7 +517,6 @@ export default function CreateCharacterPage() {
               </div>
             </div>
 
-            {/* Energy Level */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">
                 Energy Level: <span className="text-brand-primary font-bold">{energyLevel}/10</span>
@@ -504,13 +530,10 @@ export default function CreateCharacterPage() {
                 className="w-full h-2 rounded-full appearance-none bg-bg-elevated accent-brand-primary"
               />
               <div className="flex justify-between text-[10px] text-text-muted mt-1">
-                <span>Chill</span>
-                <span>Balanced</span>
-                <span>Hyper</span>
+                <span>Chill</span><span>Balanced</span><span>Hyper</span>
               </div>
             </div>
 
-            {/* Emotional Baseline */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Emotional Baseline</label>
               <div className="flex gap-2">
@@ -608,7 +631,7 @@ export default function CreateCharacterPage() {
           <div className="space-y-4 animate-slide-up">
             <p className="text-text-secondary text-sm">Choose how your character sounds</p>
             <div className="space-y-2">
-              {mockVoices.map(v => (
+              {voices.map(v => (
                 <VoiceCard
                   key={v.id}
                   voice={v}
@@ -618,6 +641,12 @@ export default function CreateCharacterPage() {
                   onPlay={() => handlePlayVoice(v)}
                 />
               ))}
+              {voices.length === 0 && (
+                <div className="glass rounded-2xl p-5 text-center">
+                  <Loader2 size={20} className="animate-spin text-brand-primary mx-auto mb-2" />
+                  <p className="text-sm text-text-muted">Loading voices...</p>
+                </div>
+              )}
               <button
                 onClick={() => setVoiceId('text-only')}
                 className={`w-full glass rounded-2xl p-4 text-left flex items-center gap-3 transition-all ${
@@ -719,13 +748,21 @@ export default function CreateCharacterPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-text-muted">Your balance</span>
-                  <span className="text-sm text-text-primary">{userBalance.toLocaleString()} credits</span>
+                  {balanceLoading ? (
+                    <div className="h-5 w-16 animate-pulse rounded bg-white/10" />
+                  ) : (
+                    <span className="text-sm text-text-primary">{userBalance.toLocaleString()} credits</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-text-muted">After deduction</span>
-                  <span className={`text-sm font-semibold ${remainingAfterDeduction >= 0 ? 'text-success' : 'text-danger'}`}>
-                    {remainingAfterDeduction.toLocaleString()} credits
-                  </span>
+                  {balanceLoading ? (
+                    <div className="h-5 w-16 animate-pulse rounded bg-white/10" />
+                  ) : (
+                    <span className={`text-sm font-semibold ${remainingAfterDeduction >= 0 ? 'text-success' : 'text-danger'}`}>
+                      {remainingAfterDeduction.toLocaleString()} credits
+                    </span>
+                  )}
                 </div>
 
                 <div className="border-t border-white/5 pt-3">
@@ -742,7 +779,7 @@ export default function CreateCharacterPage() {
                   </label>
                 </div>
 
-                {remainingAfterDeduction < 0 && (
+                {!balanceLoading && remainingAfterDeduction < 0 && (
                   <div className="flex items-start gap-2 p-3 rounded-xl bg-warning/5 border border-warning/10">
                     <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
                     <p className="text-[11px] text-warning">Your balance may not cover this budget. Add more credits or reduce images/videos.</p>
@@ -764,7 +801,6 @@ export default function CreateCharacterPage() {
         {/* Step 6: Autonomy */}
         {step === 5 && (
           <div className="space-y-5 animate-slide-up">
-            {/* Location */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                 <MapPin size={12} /> Location
@@ -778,11 +814,9 @@ export default function CreateCharacterPage() {
               <p className="text-[10px] text-text-muted mt-1">Only a coarse city-level location. Never shared precisely.</p>
             </div>
 
-            {/* Autonomy toggles */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3 block">Autonomy Settings</label>
               <div className="space-y-3">
-                {/* Can post */}
                 <button
                   onClick={() => setCanPost(!canPost)}
                   className="w-full glass rounded-2xl p-4 flex items-center justify-between hover:bg-white/5 transition-all"
@@ -801,7 +835,6 @@ export default function CreateCharacterPage() {
                   </div>
                 </button>
 
-                {/* Can story */}
                 <button
                   onClick={() => setCanStory(!canStory)}
                   className="w-full glass rounded-2xl p-4 flex items-center justify-between hover:bg-white/5 transition-all"
@@ -822,7 +855,6 @@ export default function CreateCharacterPage() {
               </div>
             </div>
 
-            {/* Post Frequency */}
             {canPost && (
               <div>
                 <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Post Frequency</label>
@@ -847,7 +879,6 @@ export default function CreateCharacterPage() {
               </div>
             )}
 
-            {/* Interest Tags */}
             <div>
               <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 block">Interests</label>
               <div className="flex flex-wrap gap-1.5">
@@ -947,7 +978,11 @@ export default function CreateCharacterPage() {
                 </div>
               )}
               <div className="border-t border-white/5 pt-2">
-                <p className="text-[10px] text-text-muted">You have {mockCurrentUser.score.toLocaleString()} credits available</p>
+                {balanceLoading ? (
+                  <div className="h-4 w-40 animate-pulse rounded bg-white/10" />
+                ) : (
+                  <p className="text-[10px] text-text-muted">You have {userBalance.toLocaleString()} credits available</p>
+                )}
               </div>
             </div>
           </div>

@@ -2,17 +2,14 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Bot, Pencil, Plus, Sparkles, Star, Users, Wand2,
+  Bot, Pencil, Plus, Sparkles, Star, Users,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import type { Character } from '@/app/store';
+import { useAppDispatch, fetchMine } from '@/app/store';
 import { Badge, Tabs } from '@itchats/ui';
-import {
-  fetchMyCharacters,
-} from '@/lib/api';
-import { mockCharacters, type MockCharacter, genId } from '@/lib/mockData';
 
-function CharacterCard({ char, index, onEdit }: { char: MockCharacter; index: number; onEdit: (id: string) => void }) {
+function CharacterCard({ char, index, onEdit }: { char: Character; index: number; onEdit: (id: string) => void }) {
   const nav = useNavigate();
 
   return (
@@ -24,7 +21,7 @@ function CharacterCard({ char, index, onEdit }: { char: MockCharacter; index: nu
       {/* Avatar */}
       <div className="relative w-full aspect-square overflow-hidden">
         <img
-          src={char.avatarUrl}
+          src={char.avatarUrl ?? ''}
           alt={char.name}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
@@ -45,7 +42,7 @@ function CharacterCard({ char, index, onEdit }: { char: MockCharacter; index: nu
         {/* Score badge */}
         <div className="absolute bottom-3 left-3 glass rounded-full px-2 py-0.5 flex items-center gap-1">
           <Star size={10} className="text-social-warm fill-current" />
-          <span className="text-[9px] font-bold text-text-primary">{char.score}</span>
+          <span className="text-[9px] font-bold text-text-primary">{char.score ?? '—'}</span>
         </div>
       </div>
 
@@ -60,7 +57,7 @@ function CharacterCard({ char, index, onEdit }: { char: MockCharacter; index: nu
         </p>
         <div className="flex items-center gap-1 text-[10px] text-text-muted">
           <Users size={11} />
-          <span>{char.city || 'Unknown'} {char.followersCount > 0 ? `· ${char.followersCount} followers` : ''}</span>
+          <span>{char.city || 'Unknown'} {char.followersCount ? `· ${char.followersCount} followers` : ''}</span>
         </div>
       </div>
     </button>
@@ -68,27 +65,28 @@ function CharacterCard({ char, index, onEdit }: { char: MockCharacter; index: nu
 }
 
 export default function MyCharactersPage() {
+  const dispatch = useAppDispatch();
   const nav = useNavigate();
   const { user } = useSelector((s: RootState) => s.auth);
-  const storeChars = useSelector((s: RootState) => s.characters.myCharacters) as MockCharacter[];
-  const [chars, setChars] = useState<MockCharacter[]>([]);
+  const chars = useSelector((s: RootState) => s.characters.myCharacters);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState('public');
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (!user) { setLoading(false); return; }
     loadData();
-  }, []);
+  }, [user]);
 
   async function loadData() {
     setLoading(true);
-    const data = await fetchMyCharacters().catch(() => []);
-    const all = data.length > 0 ? data : [
-      ...mockCharacters.filter(c => c.visibility === 'private'),
-      mockCharacters.find(c => c.visibility === 'public' && c.id === 'char-1')!,
-      mockCharacters.find(c => c.visibility === 'public' && c.id === 'char-3')!,
-    ];
-    setChars(all);
+    setError(null);
+    try {
+      await dispatch(fetchMine()).unwrap();
+    } catch (e: any) {
+      setError(e.message || 'Failed to load characters');
+    }
     setLoading(false);
   }
 
@@ -158,6 +156,15 @@ export default function MyCharactersPage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
+              <Bot size={28} className="text-text-muted opacity-50" />
+            </div>
+            <p className="text-text-muted text-sm">Failed to load characters</p>
+            <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
+            <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">Retry</button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">

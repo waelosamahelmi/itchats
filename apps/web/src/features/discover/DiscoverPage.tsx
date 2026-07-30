@@ -1,20 +1,23 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Compass, Search, Star, Heart, Users, Sparkles, UserPlus } from 'lucide-react';
+import { Compass, Search, Star, Heart, Users, Sparkles } from 'lucide-react';
 import type { RootState } from '@/app/store';
-import { useAppDispatch } from '@/app/store';
+import type { Character } from '@/app/store';
+import { useAppDispatch, fetchDiscover, followChar, unfollowChar } from '@/app/store';
 import { Badge } from '@itchats/ui';
-import {
-  fetchDiscoverCharacters,
-  followCharacter,
-  unfollowCharacter,
-} from '@/lib/api';
-import { mockCharacters, type MockCharacter } from '@/lib/mockData';
 
-function CharacterCard({ char, index }: { char: MockCharacter; index: number }) {
+function CharacterCard({ char, index }: { char: Character; index: number }) {
+  const dispatch = useAppDispatch();
   const nav = useNavigate();
   const [following, setFollowing] = useState(false);
+
+  const handleFollow = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFollowing(!following);
+    if (following) dispatch(unfollowChar(char.id));
+    else dispatch(followChar(char.id));
+  };
 
   return (
     <button
@@ -25,7 +28,7 @@ function CharacterCard({ char, index }: { char: MockCharacter; index: number }) 
       {/* Avatar */}
       <div className="relative w-full aspect-square overflow-hidden">
         <img
-          src={char.avatarUrl}
+          src={char.avatarUrl ?? ''}
           alt={char.name}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
@@ -40,7 +43,7 @@ function CharacterCard({ char, index }: { char: MockCharacter; index: number }) 
         {/* Score badge */}
         <div className="absolute top-3 left-3 glass rounded-full px-2 py-0.5 flex items-center gap-1">
           <Star size={10} className="text-social-warm fill-current" />
-          <span className="text-[9px] font-bold text-text-primary">{char.score}</span>
+          <span className="text-[9px] font-bold text-text-primary">{char.score ?? '—'}</span>
         </div>
       </div>
 
@@ -56,15 +59,10 @@ function CharacterCard({ char, index }: { char: MockCharacter; index: number }) 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 text-[10px] text-text-muted">
             <Users size={11} />
-            <span>{formatCount(char.followersCount)} followers</span>
+            <span>{formatCount(char.followersCount ?? 0)} followers</span>
           </div>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setFollowing(!following);
-              if (following) unfollowCharacter(char.id);
-              else followCharacter(char.id);
-            }}
+            onClick={handleFollow}
             className={`rounded-full px-3 py-1 text-[10px] font-medium transition-all ${
               following
                 ? 'glass text-brand-primary border border-brand-primary/20'
@@ -86,23 +84,28 @@ function formatCount(n: number): string {
 }
 
 export default function DiscoverPage() {
+  const dispatch = useAppDispatch();
   const nav = useNavigate();
   const { user } = useSelector((s: RootState) => s.auth);
-  const [chars, setChars] = useState<MockCharacter[]>([]);
+  const chars = useSelector((s: RootState) => s.characters.discoverCharacters);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (!user) { setLoading(false); return; }
     loadData();
-  }, []);
+  }, [user]);
 
   async function loadData() {
     setLoading(true);
-    const data = await fetchDiscoverCharacters().catch(() =>
-      mockCharacters.filter(c => c.visibility === 'public')
-    );
-    setChars(data);
+    setError(null);
+    try {
+      await dispatch(fetchDiscover()).unwrap();
+    } catch (e: any) {
+      setError(e.message || 'Failed to load characters');
+    }
     setLoading(false);
   }
 
@@ -184,6 +187,15 @@ export default function DiscoverPage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
+              <Compass size={28} className="text-text-muted opacity-50" />
+            </div>
+            <p className="text-text-muted text-sm">Failed to load characters</p>
+            <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
+            <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">Retry</button>
           </div>
         ) : filteredChars.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
