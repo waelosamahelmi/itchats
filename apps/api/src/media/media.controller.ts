@@ -1,7 +1,9 @@
-import { Controller, Post, Body, Req, UseGuards, Param, Get } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, Param, Get, Res, HttpCode, HttpStatus } from '@nestjs/common';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { z } from 'zod';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const UploadUrlSchema = z.object({
   fileName: z.string().min(1).max(255),
@@ -13,6 +15,11 @@ const UploadUrlSchema = z.object({
 const ConfirmUploadSchema = z.object({
   mediaAssetId: z.string().uuid(),
   sha256: z.string().optional(),
+});
+
+const LocalUploadSchema = z.object({
+  mediaAssetId: z.string().uuid(),
+  base64Content: z.string().min(1),
 });
 
 @Controller('v1/media')
@@ -47,8 +54,39 @@ export class MediaController {
     return this.media.confirmUpload(input.mediaAssetId, input.sha256);
   }
 
+  /**
+   * Store a file locally when S3 is not configured.
+   */
+  @Post('upload-local')
+  @HttpCode(HttpStatus.OK)
+  async uploadLocal(@Body() body: unknown) {
+    const input = LocalUploadSchema.parse(body);
+    return this.media.storeLocalFile(input.mediaAssetId, input.base64Content);
+  }
+
   @Get(':mediaAssetId/download-url')
   async getDownloadUrl(@Param('mediaAssetId') mediaAssetId: string) {
     return this.media.getDownloadUrl(mediaAssetId);
+  }
+
+  /**
+   * Serve a locally stored media file by its asset ID.
+   */
+  @Get(':mediaAssetId')
+  async serveLocal(@Param('mediaAssetId') mediaAssetId: string, @Res({ passthrough: true }) res: any) {
+    const localPath = join('/opt', 'itchats', 'uploads', mediaAssetId);
+    if (!existsSync(localPath)) {
+      res.status(404);
+      return { error: 'Media not found' };
+    }
+    const buffer = readFileSync(localPath);
+    const { getDb } = await import('@itchats/database');
+    const { mediaAssets } = await import('@itchats/database/schema');
+    const { eq } = await import('drizzle-orm');
+    const db = getDb();
+    const [asset] = await db.select({ mimeType: mediaAssets.mimeType }).from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
+    res.header('Content-Type', asset?.mimeType ?? 'application/octet-stream');
+    res.header('Cache-Control', 'public, max-age=86400');
+    return buffer;
   }
 }

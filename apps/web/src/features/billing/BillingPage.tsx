@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { CreditCard, Wallet, Zap, ArrowLeft, Sparkles, Check, Crown, Star, Shield, Image, Mic, MessageCircle, Bot, TrendingUp, Key, BarChart3, Video, Heart, ThumbsUp, Phone } from 'lucide-react';
+import { CreditCard, Wallet, Zap, ArrowLeft, Sparkles, Check, Crown, Star, Shield, Image, Mic, MessageCircle, Bot, TrendingUp, Key, BarChart3, Video, Heart, ThumbsUp, Phone, AlertCircle } from 'lucide-react';
 import type { RootState } from '@/app/store';
 
 const API = (import.meta as any).env?.VITE_API_URL || '/v1';
@@ -55,18 +55,22 @@ export default function BillingPage() {
   const [sub, setSub] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [stripeConfigured, setStripeConfigured] = useState(true);
+  const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token) return;
     try {
-      const [w, p, s] = await Promise.all([
+      const [w, p, s, billingConfig] = await Promise.all([
         fetchJson('/billing/wallet', token),
         fetchJson('/billing/plans', token),
         fetchJson('/billing/subscription', token).catch(() => null),
+        fetchJson('/billing/config', token).catch(() => ({ stripeConfigured: true, mode: 'full' })),
       ]);
       setWallet(w);
       setPlans(Array.isArray(p) ? p : []);
       setSub(s);
+      setStripeConfigured(billingConfig?.stripeConfigured !== false);
     } catch {} finally { setLoading(false); }
   }, [token]);
 
@@ -79,13 +83,21 @@ export default function BillingPage() {
       return;
     }
     setCheckingOut(planId);
+    setCheckoutMessage(null);
     try {
       const result = await fetchJson('/billing/checkout', token, {
         method: 'POST',
         body: JSON.stringify({ planId }),
       });
-      if (result.url) window.location.href = result.url;
-      else { alert('Subscribed!'); loadData(); }
+      if (result.url) {
+        window.location.href = result.url;
+      } else if (result.mode === 'credits-only') {
+        setCheckoutMessage(result.message || 'Stripe not configured — credits only');
+        setTimeout(() => setCheckoutMessage(null), 5000);
+      } else {
+        alert('Subscribed!');
+        loadData();
+      }
     } catch (e: any) { alert(e.message || 'Checkout failed'); }
     finally { setCheckingOut(null); }
   };
@@ -113,6 +125,19 @@ export default function BillingPage() {
           </button>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Billing & Plans</h1>
         </div>
+        {/* Credits-only mode badge */}
+        {!stripeConfigured && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-2">
+            <AlertCircle size={14} />
+            Credits-only mode — Stripe payments not configured. Contact support to enable payments.
+          </div>
+        )}
+        {checkoutMessage && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-primary/10 border border-brand-primary/20 text-brand-primary text-xs font-medium mb-2">
+            <AlertCircle size={14} />
+            {checkoutMessage}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-6">
@@ -250,6 +275,13 @@ export default function BillingPage() {
                         className="w-full rounded-xl py-2.5 text-sm font-semibold bg-white/5 text-text-muted cursor-not-allowed"
                       >
                         Included by Default
+                      </button>
+                    ) : !stripeConfigured ? (
+                      <button
+                        disabled
+                        className="w-full rounded-xl py-2.5 text-sm font-semibold bg-white/5 text-text-muted cursor-not-allowed"
+                      >
+                        Contact support to enable payments
                       </button>
                     ) : (
                       <button

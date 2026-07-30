@@ -4,6 +4,8 @@ import { getDb } from '@itchats/database';
 import { mediaAssets } from '@itchats/database/schema';
 import { eq } from 'drizzle-orm';
 import { randomUUID, createHash } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg', 'image/png', 'image/webp', 'image/gif',
@@ -24,6 +26,25 @@ function getMediaType(mimeType: string): string {
   return 'other';
 }
 
+/**
+ * Check if S3 is actually configured (all required keys present).
+ */
+function isS3Configured(): boolean {
+  const config = getConfig();
+  return !!(config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY && config.S3_BUCKET);
+}
+
+/**
+ * Get the local uploads directory, creating it if needed.
+ */
+function getLocalUploadsDir(): string {
+  const dir = join('/opt', 'itchats', 'uploads');
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
@@ -31,8 +52,8 @@ export class MediaService {
   /**
    * Create a signed upload URL for direct-to-S3 uploads.
    *
-   * In development, returns a local placeholder URL.
-   * In production, generates a presigned PUT URL via the S3 SDK.
+   * When S3 is not configured, falls back to storing base64 data URLs
+   * or local filesystem storage in /opt/itchats/uploads/.
    */
   async createUploadUrl(
     userId: string,
@@ -51,26 +72,28 @@ export class MediaService {
     }
 
     const config = getConfig();
+    const usesS3 = isS3Configured();
     const objectKey = `uploads/${userId}/${randomUUID()}-${fileName}`;
-    const bucket = config.S3_BUCKET ?? 'itchats-dev';
+    const bucket = usesS3 ? config.S3_BUCKET! : 'local';
+    const storageProvider = usesS3 ? 's3' : 'local';
 
     // Create media asset record
     const db = getDb();
     const [asset] = await db.insert(mediaAssets).values({
       ownerUserId: userId,
       visibility,
-      storageProvider: 's3',
+      storageProvider: storageProvider as any,
       bucket,
       objectKey,
       mimeType,
       mediaType,
       bytes: fileSize,
-      metadata: { originalName: fileName, uploadStatus: 'pending' },
+      metadata: { originalName: fileName, uploadStatus: 'pending', storage: storageProvider },
     }).returning();
 
     let uploadUrl: string;
 
-    if (config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY) {
+    if (usesS3) {
       try {
         const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
         const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
@@ -99,16 +122,43 @@ export class MediaService {
         uploadUrl = `${config.S3_ENDPOINT}/${bucket}/${objectKey}?signature=dev-fallback`;
       }
     } else {
-      uploadUrl = `${config.S3_ENDPOINT ?? 'http://localhost:9000'}/${bucket}/${objectKey}?signature=dev-placeholder`;
+      // No S3 configured — return a local API endpoint for upload
+      const apiBase = config.API_BASE_URL || `http://localhost:${config.PORT}`;
+      uploadUrl = `${apiBase}/v1/media/upload-local?key=${encodeURIComponent(objectKey)}`;
+      this.logger.log(`S3 not configured — using local storage for upload: ${objectKey}`);
     }
 
     return {
       uploadUrl,
       objectKey,
       bucket,
-      storageProvider: 's3',
+      storageProvider,
       mediaAssetId: asset!.id,
+      s3Configured: usesS3,
     };
+  }
+
+  /**
+   * Store a file locally (base64 content).
+   */
+  async storeLocalFile(mediaAssetId: string, base64Content: string) {
+    const db = getDb();
+    const [asset] = await db.select().from(mediaAssets)
+      .where(eq(mediaAssets.id, mediaAssetId))
+      .limit(1);
+
+    if (!asset) throw new Error('Media asset not found');
+
+    const localDir = getLocalUploadsDir();
+    const filePath = join(localDir, asset.id);
+    const buffer = Buffer.from(base64Content, 'base64');
+    writeFileSync(filePath, buffer);
+
+    await db.update(mediaAssets).set({
+      metadata: { ...((asset.metadata as any) ?? {}), uploadStatus: 'completed', storageSource: 'uploaded', localPath: filePath },
+    } as any).where(eq(mediaAssets.id, mediaAssetId));
+
+    return { stored: true, mediaAssetId };
   }
 
   /**
@@ -143,6 +193,7 @@ export class MediaService {
 
   /**
    * Get a download/presigned URL for a media asset.
+   * Falls back to local file serving when S3 is not configured.
    */
   async getDownloadUrl(mediaAssetId: string) {
     const db = getDb();
@@ -153,8 +204,9 @@ export class MediaService {
     if (!asset) throw new Error('Media asset not found');
 
     const config = getConfig();
+    const meta = (asset.metadata as any) ?? {};
 
-    if (config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY) {
+    if (isS3Configured() && asset.storageProvider === 's3') {
       try {
         const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
         const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
@@ -174,16 +226,36 @@ export class MediaService {
           new GetObjectCommand({ Bucket: asset.bucket, Key: asset.objectKey }),
           { expiresIn: 3600 },
         );
-        return { url, mediaAssetId: asset.id, mimeType: asset.mimeType };
+        return { url, mediaAssetId: asset.id, mimeType: asset.mimeType, source: 's3' };
       } catch {
-        // Fallback to direct URL
+        // Fallback to local or base64
       }
+    }
+
+    // Local storage fallback — check for local file path in metadata
+    if (meta.localPath && existsSync(meta.localPath)) {
+      const buffer = readFileSync(meta.localPath);
+      const base64 = buffer.toString('base64');
+      const dataUrl = `data:${asset.mimeType};base64,${base64}`;
+      return { url: dataUrl, mediaAssetId: asset.id, mimeType: asset.mimeType, source: 'local' };
+    }
+
+    // Last resort — direct URL (may be stale)
+    if (meta.storageSource === 'uploaded') {
+      const apiBase = config.API_BASE_URL || `http://localhost:${config.PORT}`;
+      return {
+        url: `${apiBase}/v1/media/${mediaAssetId}`,
+        mediaAssetId: asset.id,
+        mimeType: asset.mimeType,
+        source: 'local-api',
+      };
     }
 
     return {
       url: `${config.S3_ENDPOINT ?? 'http://localhost:9000'}/${asset.bucket}/${asset.objectKey}`,
       mediaAssetId: asset.id,
       mimeType: asset.mimeType,
+      source: 'fallback',
     };
   }
 

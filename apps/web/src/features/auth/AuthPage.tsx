@@ -21,8 +21,17 @@ export default function AuthPage() {
   const [forgotToken, setForgotToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [localError, setLocalError] = useState('');
+  const [googleAvailable, setGoogleAvailable] = useState(false);
 
   useEffect(() => { if (token && user) nav('/', { replace: true }); }, [token, user, nav]);
+
+  // Check if Google OAuth is configured
+  useEffect(() => {
+    fetch(`${API}/auth/google-status`)
+      .then(r => r.json())
+      .then(data => setGoogleAvailable(data?.available === true))
+      .catch(() => setGoogleAvailable(false));
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setLocalError('');
@@ -102,6 +111,7 @@ export default function AuthPage() {
           <h1 className="text-3xl font-bold text-text-primary tracking-tight -mt-2">ItChats AI</h1>
           <p className="text-text-muted text-sm mt-2">{isLogin ? 'Welcome back to your AI world' : 'Start building your AI universe'}</p>
           {/* Google SSO */}
+          {googleAvailable && (
           <div className="mt-5">
             <button onClick={() => { window.location.href = window.location.origin + '/v1/auth/google'; }}
                className="flex items-center justify-center gap-2.5 w-full rounded-xl border border-border-subtle bg-white/5 hover:bg-white/10 py-2.5 text-sm font-medium text-text-primary transition-colors">
@@ -109,6 +119,7 @@ export default function AuthPage() {
               Continue with Google
             </button>
           </div>
+          )}
           <div className="flex items-center gap-3 mt-5">
             <div className="flex-1 h-px bg-border-subtle" /><span className="text-xs text-text-muted">or</span><div className="flex-1 h-px bg-border-subtle" />
           </div>

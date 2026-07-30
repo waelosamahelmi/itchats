@@ -6,6 +6,11 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 export class BillingController {
   constructor(@Inject(BillingService) private readonly billingService: BillingService) {}
 
+  @Get('config')
+  async getConfig() {
+    return { stripeConfigured: this.billingService.isStripeConfigured(), mode: this.billingService.isStripeConfigured() ? 'full' : 'credits-only' };
+  }
+
   @Get('plans')
   async getPlans() {
     return this.billingService.getPlans();
@@ -20,7 +25,19 @@ export class BillingController {
   @Get('subscription')
   @UseGuards(JwtAuthGuard)
   async getSubscription(@Req() req: any) {
-    return this.billingService.getUserSubscription(req.user.userId);
+    const sub = await this.billingService.getUserSubscription(req.user.userId);
+    // Return a mock free-tier subscription if no Stripe and no subscription exists
+    if (!sub && !this.billingService.isStripeConfigured()) {
+      return {
+        planId: 'free',
+        status: 'active',
+        provider: 'credits-only',
+        currentPeriodStart: new Date(0),
+        currentPeriodEnd: new Date(Date.now() + 365 * 86400000),
+        message: 'Credits-only mode',
+      };
+    }
+    return sub;
   }
 
   @Post('checkout')

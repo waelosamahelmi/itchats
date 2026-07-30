@@ -18,6 +18,14 @@ function getStripe(): Stripe | null {
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
 
+  /**
+   * Returns true if Stripe is properly configured (has a real secret key).
+   * When Stripe is not configured, the app runs in credit-only mode.
+   */
+  isStripeConfigured(): boolean {
+    return getStripe() !== null;
+  }
+
   async getPlans() {
     const db = getDb();
     return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.active, true as any)).orderBy(subscriptionPlans.sortOrder ?? desc(subscriptionPlans.createdAt));
@@ -287,16 +295,9 @@ export class BillingService {
     const [plan] = await db.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, planId)).limit(1);
     if (!plan) throw new Error('Plan not found');
     if (!stripe) {
-      // Development fallback — simulate checkout
-      this.logger.warn(`Stripe not configured — simulating checkout for plan ${planId}`);
-      const fakeSessionId = `cs_dev_${Date.now()}`;
-      await db.insert(userSubscriptions).values({
-        userId, planId, provider: 'stripe', providerSubscriptionId: fakeSessionId,
-        status: 'active', currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 30 * 86400000),
-      } as any);
-      await this.creditWallet(userId, Number(plan.monthlyCredits), `Monthly credits: ${plan.name}`, 'subscription');
-      return { url: null, sessionId: fakeSessionId, message: 'Dev mode — subscription activated immediately' };
+      // Credits-only mode — Stripe not configured
+      this.logger.warn(`Stripe not configured — credit-only mode, checkout for plan ${planId} skipped`);
+      return { url: null, sessionId: null, message: 'Stripe not configured — credits only', mode: 'credits-only' };
     }
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',

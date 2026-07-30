@@ -49,6 +49,13 @@ export class AuthController {
 
   // ── SSO / OAuth ──
 
+  @Get('google-status')
+  googleStatus() {
+    const config = getConfig();
+    const available = !!(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET);
+    return { available, provider: 'google' };
+  }
+
   @Get('google')
   @UseGuards(AuthGuard('google'))
   googleAuth() {
