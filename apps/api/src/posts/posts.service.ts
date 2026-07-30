@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { getDb } from '@itchats/database';
 import {
   posts, postReactions, postComments, characterFollows, characters,
-  userFriends, users,
+  userFriends, users, reports,
 } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -17,6 +17,7 @@ export class PostsService {
       mediaType?: string;
       visibility?: 'public' | 'friends' | 'private';
       nsfw?: boolean;
+      repostOfPostId?: string;
     },
   ) {
     const db = getDb();
@@ -29,6 +30,7 @@ export class PostsService {
         mediaType: data.mediaType ?? null,
         visibility: data.visibility ?? 'public',
         nsfw: data.nsfw ?? false,
+        repostOfPostId: data.repostOfPostId ?? null,
       })
       .returning();
     if (!post) throw new Error('Failed to create post');
@@ -222,6 +224,60 @@ export class PostsService {
     return { deleted: true, id: postId };
   }
 
+  async updatePost(
+    userId: string,
+    postId: string,
+    data: { content?: string; mediaUrl?: string; visibility?: 'public' | 'friends' | 'private' },
+  ) {
+    const db = getDb();
+    const [post] = await db
+      .select()
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+    if (!post) throw new NotFoundException('Post not found');
+
+    // Allow edit if user owns the post OR owns the character that authored it
+    if (post.authorUserId !== userId) {
+      if (post.authorCharacterId) {
+        const [character] = await db
+          .select()
+          .from(characters)
+          .where(eq(characters.id, post.authorCharacterId))
+          .limit(1);
+        if (!character || character.ownerUserId !== userId) {
+          throw new BadRequestException('Not your post');
+        }
+      } else {
+        throw new BadRequestException('Not your post');
+      }
+    }
+
+    const updateData: any = { updatedAt: new Date() };
+    if (data.content !== undefined) updateData.content = data.content;
+    if (data.mediaUrl !== undefined) updateData.mediaUrl = data.mediaUrl;
+    if (data.visibility !== undefined) updateData.visibility = data.visibility;
+
+    const [updated] = await db
+      .update(posts)
+      .set(updateData)
+      .where(eq(posts.id, postId))
+      .returning();
+
+    return updated;
+  }
+
+  async reportPost(userId: string, postId: string, reason: string) {
+    const db = getDb();
+    await db.insert(reports).values({
+      reporterUserId: userId,
+      entityType: 'post',
+      entityId: postId,
+      reason,
+    } as any);
+    return { reported: true, postId };
+  }
+
   async likePost(userId: string, postId: string, reactionType: string) {
     const db = getDb();
 
@@ -380,10 +436,27 @@ export class PostsService {
   async getPostComments(postId: string, page = 1, limit = 20) {
     const db = getDb();
 
-    // Get top-level comments
+    // Get top-level comments including AI-to-AI ones
     const comments = await db
-      .select()
+      .select({
+        id: postComments.id,
+        postId: postComments.postId,
+        userId: postComments.userId,
+        characterId: postComments.characterId,
+        parentCommentId: postComments.parentCommentId,
+        content: postComments.content,
+        isAiGenerated: postComments.isAiGenerated,
+        likeCount: postComments.likeCount,
+        createdAt: postComments.createdAt,
+        updatedAt: postComments.updatedAt,
+        deletedAt: postComments.deletedAt,
+        authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+        authorAvatar: characters.avatarUrl,
+        authorIsAI: sql<boolean>`CASE WHEN ${postComments.characterId} IS NOT NULL THEN true ELSE false END`,
+      })
       .from(postComments)
+      .leftJoin(users, eq(postComments.userId, users.id))
+      .leftJoin(characters, eq(postComments.characterId, characters.id))
       .where(
         and(
           eq(postComments.postId, postId),
@@ -395,12 +468,27 @@ export class PostsService {
       .limit(Math.min(limit, 50))
       .offset((page - 1) * limit);
 
-    // For each top-level comment, get replies
+    // For each top-level comment, get replies (including AI-to-AI)
     const result = await Promise.all(
       comments.map(async (comment) => {
         const replies = await db
-          .select()
+          .select({
+            id: postComments.id,
+            postId: postComments.postId,
+            userId: postComments.userId,
+            characterId: postComments.characterId,
+            parentCommentId: postComments.parentCommentId,
+            content: postComments.content,
+            isAiGenerated: postComments.isAiGenerated,
+            likeCount: postComments.likeCount,
+            createdAt: postComments.createdAt,
+            authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+            authorAvatar: characters.avatarUrl,
+            authorIsAI: sql<boolean>`CASE WHEN ${postComments.characterId} IS NOT NULL THEN true ELSE false END`,
+          })
           .from(postComments)
+          .leftJoin(users, eq(postComments.userId, users.id))
+          .leftJoin(characters, eq(postComments.characterId, characters.id))
           .where(
             and(
               eq(postComments.postId, postId),

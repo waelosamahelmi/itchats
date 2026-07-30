@@ -41,15 +41,23 @@ export class MediaController {
   }
 
   @Post('voice-note-upload-url')
-  async getVoiceNoteUploadUrl(@Body() body: { fileName?: string; fileSize: number }, @Req() req: any) {
+  async getVoiceNoteUploadUrl(@Body() body: any, @Req() req: any) {
     try {
-      if (!body.fileSize || body.fileSize <= 0) {
+      // Validate input manually for robustness
+      const fileSize = typeof body?.fileSize === 'number' ? body.fileSize : Number(body?.fileSize);
+      if (!fileSize || fileSize <= 0 || isNaN(fileSize)) {
         throw new BadRequestException('fileSize must be a positive number');
       }
+      const fileName = typeof body?.fileName === 'string' && body.fileName.length > 0
+        ? body.fileName
+        : `voice-note-${Date.now()}.webm`;
+
+      this.logger.log(`Voice note upload requested: userId=${req.user?.userId}, size=${fileSize}, fileName=${fileName}`);
+
       return await this.media.createVoiceNoteUploadUrl(
         req.user.userId,
-        body.fileName ?? `voice-${Date.now()}.webm`,
-        body.fileSize,
+        fileName,
+        fileSize,
       );
     } catch (err: any) {
       this.logger.error(`Voice note upload URL failed: ${err.message}`, err.stack);

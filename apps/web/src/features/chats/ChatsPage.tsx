@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, ChevronRight, Sparkles, Trash2, AlertCircle, X } from 'lucide-react';
+import { MessageCircle, ChevronRight, Sparkles, Trash2, AlertCircle, X, MoreHorizontal, Bell, BellOff } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { fetchConvs, deleteConv, useAppDispatch } from '@/app/store';
+import { timeAgo } from '@/lib/timeAgo';
 
 /** Touch-swipe delete handler state */
 interface SwipeState {
@@ -18,6 +19,10 @@ export default function ChatsPage() {
   const { convs, error: chatError } = useSelector((s: RootState) => s.chat);
   const { user } = useSelector((s: RootState) => s.auth);
   const [swipe, setSwipe] = useState<SwipeState>({ swipingId: null, offset: 0, confirmedId: null });
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [mutedConvs, setMutedConvs] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('mutedConversations') || '[]')); } catch { return new Set(); }
+  });
   const startXRef = useRef(0);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -58,6 +63,24 @@ export default function ChatsPage() {
 
   const confirmDelete = (cid: string) => {
     setSwipe(s => ({ ...s, confirmedId: cid }));
+  };
+
+  const toggleMute = (cid: string) => {
+    setMutedConvs(prev => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid);
+      else next.add(cid);
+      localStorage.setItem('mutedConversations', JSON.stringify([...next]));
+      return next;
+    });
+    setMenuOpenId(null);
+  };
+
+  const handleMenuDelete = (cid: string) => {
+    setMenuOpenId(null);
+    confirmDelete(cid);
+    // Auto-trigger delete after brief delay
+    setTimeout(() => handleDelete(cid), 100);
   };
 
   if (!user) {
@@ -167,12 +190,43 @@ export default function ChatsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium text-text-primary truncate">{c.characterName || c.title || 'Conversation'}</p>
-                        <span className="text-[10px] text-text-muted shrink-0">{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'New'}</span>
+                        <span className="text-[10px] text-text-muted shrink-0">{c.lastMessageAt ? timeAgo(c.lastMessageAt) : 'New'}</span>
                       </div>
                       <p className="text-xs text-text-muted truncate mt-0.5">{c.characterName ? `Chat with ${c.characterName}` : 'Conversation'}</p>
                     </div>
                     <ChevronRight size={14} className="text-text-muted shrink-0" />
                   </button>
+                  {/* Three-dots menu */}
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setMenuOpenId(menuOpenId === c.id ? null : c.id)}
+                      className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                      aria-label="Conversation options"
+                    >
+                      <MoreHorizontal size={16} className="text-text-muted" />
+                    </button>
+                    {menuOpenId === c.id && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setMenuOpenId(null)} />
+                        <div className="absolute right-0 top-8 z-40 glass rounded-xl p-1.5 min-w-[180px] shadow-xl border border-border-subtle">
+                          <button
+                            onClick={() => toggleMute(c.id)}
+                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
+                          >
+                            {mutedConvs.has(c.id) ? <Bell size={14} /> : <BellOff size={14} />}
+                            {mutedConvs.has(c.id) ? 'Unmute notifications' : 'Mute notifications'}
+                          </button>
+                          <button
+                            onClick={() => handleMenuDelete(c.id)}
+                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={14} />
+                            Delete conversation
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );

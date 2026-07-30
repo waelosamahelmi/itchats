@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, MoreHorizontal, Phone, Sparkles } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal, Phone, Sparkles, MessageCircle, Trash2 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@/app/store';
+import { deleteConv, useAppDispatch } from '@/app/store';
 import { ChatComposer } from './ChatComposer';
 import { MessageBubble } from './MessageBubble';
 import {
   normalizeHistoryMessage,
   parseAssistantResponse,
   responsePartsToMessages,
+  stripJsonContent,
   type ChatMessage,
   type ConversationMode,
 } from './chatModel';
@@ -57,6 +59,7 @@ export default function AIChatPage() {
   const { characterId = '' } = useParams<{ characterId: string }>();
   const navigate = useNavigate();
   const auth = useSelector((state: RootState) => state.auth);
+  const dispatch = useAppDispatch();
   const characters = useSelector((state: RootState) => [...state.characters.mine, ...state.characters.discover]);
   const character = characters.find((item) => item.id === characterId);
   const name = character?.name || 'Character';
@@ -87,6 +90,7 @@ export default function AIChatPage() {
   const [detectedLang, setDetectedLang] = useState<string>('en');
   const [cooldownUntil, setCooldownUntil] = useState<Date | null>(null);
   const [cooldownMessage, setCooldownMessage] = useState<string | null>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
@@ -143,7 +147,14 @@ export default function AIChatPage() {
       if (!active) return;
       const normalized = (history.messages ?? []).flatMap((item: any): ChatMessage[] => {
         const base = normalizeHistoryMessage(item);
-        if (base.sender !== 'character' || base.kind !== 'text') return [base];
+        if (base.sender !== 'character' || base.kind !== 'text') {
+          // Strip JSON from non-character or non-text messages as a safety net
+          if (base.kind === 'text' && base.text) {
+            const stripped = stripJsonContent(base.text);
+            if (stripped !== base.text) return [{ ...base, text: stripped }];
+          }
+          return [base];
+        }
         const parts = parseAssistantResponse(base.text);
         return responsePartsToMessages(parts, history.mode ?? 'chat', characterId)
           .map((part, index) => ({ ...part, id: index === 0 ? base.id : `${base.id}-${index}`, createdAt: base.createdAt }));
@@ -621,8 +632,52 @@ export default function AIChatPage() {
             <small><i aria-hidden="true" /> {relationship?.label || 'Getting to know you'}</small>
           </span>
         </Link>
-        <button type="button" className="chat-header-button hidden" aria-label={`Call ${name}`}><Phone size={19} /></button>
-        <button type="button" className="chat-header-button hidden" aria-label="Conversation options"><MoreHorizontal size={20} /></button>
+        <div className="relative">
+          <button type="button" className="chat-header-button" aria-label={`Call ${name}`}
+            onClick={() => setError('Voice & video calls coming soon')}
+          >
+            <Phone size={19} />
+          </button>
+        </div>
+        <div className="relative">
+          <button type="button" className="chat-header-button" aria-label="Conversation options"
+            onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          {headerMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
+              <div className="absolute right-0 top-12 z-20 glass rounded-xl p-1.5 min-w-[180px] shadow-xl border border-border-subtle">
+                <button
+                  onClick={() => { setHeaderMenuOpen(false); void updateMode('chat'); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <MessageCircle size={14} />
+                  Switch to chat mode
+                </button>
+                <button
+                  onClick={() => { setHeaderMenuOpen(false); void updateMode('roleplay'); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <Sparkles size={14} />
+                  Switch to roleplay
+                </button>
+                <button
+                  onClick={() => {
+                    setHeaderMenuOpen(false);
+                    if (conversationId) dispatch(deleteConv(conversationId) as any);
+                    navigate('/chats');
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <Trash2 size={14} />
+                  Delete conversation
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       <nav className="conversation-mode" aria-label="Conversation mode">
@@ -650,6 +705,7 @@ export default function AIChatPage() {
             onApproveMedia={handleApproveMedia}
             onDenyMedia={handleDenyMedia}
             characterName={name}
+            characterId={characterId || undefined}
             creditBalance={creditBalance}
           />
         ))}

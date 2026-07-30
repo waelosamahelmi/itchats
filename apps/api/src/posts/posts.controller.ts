@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Delete,
+  Patch,
   Param,
   Body,
   Query,
@@ -29,6 +30,7 @@ export class PostsController {
       mediaType?: string;
       visibility?: 'public' | 'friends' | 'private';
       nsfw?: boolean;
+      repostOfPostId?: string;
     },
     @Req() req: any,
   ) {
@@ -69,6 +71,26 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   async deletePost(@Param('id') id: string, @Req() req: any) {
     return this.postsService.deletePost(req.user.userId, id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  async updatePost(
+    @Param('id') id: string,
+    @Body() body: { content?: string; mediaUrl?: string; visibility?: 'public' | 'friends' | 'private' },
+    @Req() req: any,
+  ) {
+    return this.postsService.updatePost(req.user.userId, id, body);
+  }
+
+  @Post(':id/report')
+  @UseGuards(JwtAuthGuard)
+  async reportPost(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Req() req: any,
+  ) {
+    return this.postsService.reportPost(req.user.userId, id, body.reason);
   }
 
   @Post(':id/react')

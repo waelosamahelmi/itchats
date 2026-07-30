@@ -6,6 +6,7 @@ import {
 } from '@itchats/database/schema';
 import { eq, and, sql, isNull, ne } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { alibabaTextToImageWithFallback, buildImagePrompt } from '@itchats/ai-core';
 
 // ── Character Definitions ──
 interface CharacterDef {
@@ -823,16 +824,54 @@ export class SeedService {
         .sort(() => Math.random() - 0.5)
         .slice(0, commentCount);
 
+      const insertedCommentIds: string[] = [];
       for (const commenter of commenters) {
         const commentText = commentTemplates[Math.floor(Math.random() * commentTemplates.length)]!;
-        await db.insert(postComments).values({
+        const [inserted] = await db.insert(postComments).values({
           postId: post.id,
           characterId: commenter.id,
           content: commentText,
           isAiGenerated: true,
           createdAt: new Date((post.createdAt?.getTime() ?? Date.now()) + Math.random() * 172800000),
-        } as any);
+        } as any).returning();
+        if (inserted) insertedCommentIds.push(inserted.id);
         summary.comments++;
+      }
+
+      // Add threaded replies: some other characters reply to the first comment
+      if (insertedCommentIds.length > 0 && Math.random() < 0.4) {
+        const parentId = insertedCommentIds[0]!;
+        const replyCount = 1 + Math.floor(Math.random() * 2);
+        const repliers = allCharacters
+          .filter(c => c.id !== post.authorCharacterId)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, replyCount);
+
+        const replyTemplates = [
+          'Exactly what I was thinking!',
+          'Right? 👏',
+          'I see what you did there 😏',
+          'You make a good point actually',
+          'Haha I was gonna say the same thing',
+          'Took the words right out of my mouth',
+          'Love that perspective',
+          'Say it louder! 🙌',
+          'Nailed it',
+          '100% agree with this take',
+        ];
+
+        for (const replier of repliers) {
+          const replyText = replyTemplates[Math.floor(Math.random() * replyTemplates.length)]!;
+          await db.insert(postComments).values({
+            postId: post.id,
+            characterId: replier.id,
+            parentCommentId: parentId,
+            content: replyText,
+            isAiGenerated: true,
+            createdAt: new Date((post.createdAt?.getTime() ?? Date.now()) + Math.random() * 259200000),
+          } as any);
+          summary.comments++;
+        }
       }
     }
 
@@ -850,6 +889,94 @@ export class SeedService {
     }
 
     this.logger.log(`Seeded interactions: ${summary.follows} relationships, ${summary.reactions} reactions, ${summary.comments} comments`);
+    return summary;
+  }
+
+  /**
+   * Generate AI images for posts that don't have mediaUrl.
+   * Uses character personality to determine image style.
+   */
+  async generatePostImages(batchSize = 10) {
+    const db = getDb();
+    const summary = { generated: 0, skipped: 0, failed: 0 };
+
+    // Find posts without mediaUrl that have a character author
+    const postsWithoutImages = await db
+      .select({
+        post: posts,
+        character: {
+          id: characters.id,
+          name: characters.name,
+          gender: characters.gender,
+          ageDisplay: characters.ageDisplay,
+          description: characters.description,
+          personality: characters.personality,
+          occupation: characters.occupation,
+          photographyStyle: characters.photographyStyle,
+        },
+      })
+      .from(posts)
+      .innerJoin(characters, eq(posts.authorCharacterId, characters.id))
+      .where(
+        and(
+          sql`${posts.mediaUrl} IS NULL`,
+          sql`${posts.content} IS NOT NULL`,
+          sql`${posts.content} != ''`,
+          isNull(posts.deletedAt),
+          eq(characters.status, 'published'),
+        ),
+      )
+      .orderBy(sql`${posts.createdAt} DESC`)
+      .limit(batchSize);
+
+    if (postsWithoutImages.length === 0) {
+      this.logger.log('No posts without images found');
+      return summary;
+    }
+
+    this.logger.log(`Generating images for ${postsWithoutImages.length} posts`);
+
+    for (const { post, character } of postsWithoutImages) {
+      try {
+        // Determine image context from post content
+        const contentWords = (post.content ?? '').split(' ').slice(0, 5).join(' ');
+        const imageContext = contentWords || character.name;
+
+        // Build prompt using character's personality and occupation for style
+        const style = character.photographyStyle || 'cinematic editorial photography';
+        const prompt = buildImagePrompt({
+          characterName: character.name,
+          gender: character.gender ?? undefined,
+          ageDisplay: character.ageDisplay ?? undefined,
+          description: character.description ?? undefined,
+          personality: character.personality ?? undefined,
+          occupation: character.occupation ?? undefined,
+          photographyStyle: style,
+        }, `engaged in an activity related to: ${imageContext}. Cohesive color palette, atmospheric, candid moment, natural expression.`);
+
+        // Generate image via AI
+        const result = await alibabaTextToImageWithFallback({
+          prompt,
+          size: '1024*1024',
+        });
+
+        if (result.url) {
+          // Update the post with the generated image URL
+          await db
+            .update(posts)
+            .set({ mediaUrl: result.url, mediaType: 'image', updatedAt: new Date() } as any)
+            .where(eq(posts.id, post.id));
+
+          summary.generated++;
+          this.logger.log(`Generated image for post by ${character.name}: ${result.url.slice(0, 60)}...`);
+        }
+      } catch (err: any) {
+        summary.failed++;
+        this.logger.error(`Failed to generate image for post ${post.id} by ${character.name}: ${err.message}`);
+      }
+    }
+
+    this.logger.log(`Post images: ${summary.generated} generated, ${summary.failed} failed`);
     return summary;
   }
 }

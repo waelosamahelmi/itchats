@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiGet, apiPost } from '@/lib/api';
+import { timeAgo } from '@/lib/timeAgo';
 
 // ── Types ──
 interface ApiNotification {
@@ -102,20 +103,6 @@ function groupNotifications(notifs: ApiNotification[]): GroupedNotifications[] {
   return groups.filter(g => g.items.length > 0);
 }
 
-function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHrs = Math.floor(diffMs / 3600000);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
 // ── Skeleton ──
 function NotificationSkeleton() {
   return (
@@ -173,7 +160,7 @@ function NotificationItem({
           {notification.body}
         </p>
         <span className="text-xs text-text-disabled mt-1 inline-block">
-          {formatTime(notification.createdAt)}
+          {timeAgo(notification.createdAt)}
         </span>
       </div>
     </motion.button>

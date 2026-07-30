@@ -14,6 +14,7 @@ export function MessageBubble({
   onApproveMedia,
   onDenyMedia,
   characterName = 'Character',
+  characterId,
   creditBalance = 0,
 }: {
   message: ChatMessage;
@@ -23,6 +24,7 @@ export function MessageBubble({
   onApproveMedia?: (message: ChatMessage) => void;
   onDenyMedia?: (message: ChatMessage) => void;
   characterName?: string;
+  characterId?: string;
   creditBalance?: number;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -74,8 +76,8 @@ export function MessageBubble({
 
     const handleGenerate = () => {
       setMediaLoading(true);
-      if (dontAsk) {
-        const key = `media_auto_approve_${message.sender}`;
+      if (dontAsk && characterId) {
+        const key = `media_auto_approve_${characterId}`;
         localStorage.setItem(key, 'true');
       }
       onApproveMedia?.(message);

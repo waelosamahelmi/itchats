@@ -2,8 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Home, Heart, MessageCircle, Share2, Send, MoreHorizontal,
-  Image, Smile, Globe, Lock, Plus, ChevronRight, Sparkles, BadgeCheck, Check, Camera, X,
+  Home, Heart, MessageCircle, Share2, Send,
+  Image, Smile, Globe, Lock, Plus, Sparkles, Check, Camera, X, AtSign, Bell,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
@@ -17,24 +17,15 @@ import {
   setTranslatedPost,
   setTranslating,
   clearTranslation,
+  editPostThunk,
 } from '@/app/store';
-import { genId, reactionEmojis } from '@/lib/api';
+import { genId, reactionEmojis, apiFetch } from '@/lib/api';
 import { translateText, getLanguageDisplayName, detectTextLanguage, getAutoTranslateSetting } from '@/lib/translate';
+import { timeAgo } from '@/lib/timeAgo';
 import { Badge } from '@itchats/ui';
 import ProfileWizard from '@/features/auth/ProfileWizard';
-
-// ── Time ago helper ──
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
+import PostMenu from '@/components/PostMenu';
+import ShareBottomSheet from '@/components/ShareBottomSheet';
 
 // ── Story Circle ──
 function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: Story; isYours?: boolean; userAvatar?: string; onYourStoryClick?: () => void }) {
@@ -77,6 +68,17 @@ function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: 
 function StoriesBar({ stories, userAvatar, onYourStoryClick }: { stories: Story[]; userAvatar?: string; onYourStoryClick?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Filter: only show characters that have at least one active story
+  // Group stories by character and keep only characters with stories
+  const characterStories = new Map<string, Story>();
+  for (const s of stories) {
+    const key = (s as any).authorCharacterId || s.authorId || 'unknown';
+    if (!characterStories.has(key)) {
+      characterStories.set(key, s);
+    }
+  }
+  const filteredStories = Array.from(characterStories.values());
+
   return (
     <div className="relative mb-4">
       <div
@@ -91,7 +93,7 @@ function StoriesBar({ stories, userAvatar, onYourStoryClick }: { stories: Story[
           userAvatar={userAvatar}
           onYourStoryClick={onYourStoryClick}
         />
-        {stories.map(s => (
+        {filteredStories.map(s => (
           <StoryCircle key={s.id} story={s} />
         ))}
       </div>
@@ -122,6 +124,8 @@ function ReactionPicker({ onSelect, show, onClose }: { onSelect: (e: string) => 
 // ── Post Card ──
 function PostCard({ post }: { post: Post }) {
   const dispatch = useAppDispatch();
+  const { user } = useSelector((s: RootState) => s.auth);
+  const myCharacters = useSelector((s: RootState) => s.characters.myCharacters);
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.likes);
   const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
@@ -130,9 +134,16 @@ function PostCard({ post }: { post: Post }) {
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [expandedContent, setExpandedContent] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const [showCopiedToast, setShowCopiedToast] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [showShareSheet, setShowShareSheet] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState(post.content);
+  const [savingEdit, setSavingEdit] = useState(false);
   const nav = useNavigate();
+  const myCharacterIds = myCharacters?.map((c: any) => c.id) ?? [];
+
+  // Fetch comments with full threads from server
+  const [commentsLoading, setCommentsLoading] = useState(false);
 
   // Translation state
   const { language: userLang, autoTranslate, translatedPosts, translating } = useSelector((s: RootState) => s.translation);
@@ -174,28 +185,27 @@ function PostCard({ post }: { post: Post }) {
     // Optimistic
     const newComment: Comment = {
       id: genId(), authorName: 'You', authorAvatar: '',
-      authorIsAI: false, content: commentText.trim(), createdAt: 'just now', likes: 0, liked: false, replies: [],
+      authorIsAI: false, content: commentText.trim(), createdAt: new Date().toISOString(), likes: 0, liked: false, replies: [],
     };
     setComments(c => [...c, newComment]);
     setCommentText('');
   };
 
-  const handleShare = async (e: React.MouseEvent) => {
+  const handleShare = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setShowShareSheet(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editContent.trim()) return;
+    setSavingEdit(true);
     try {
-      const shareUrl = `${window.location.origin}/post/${post.id}`;
-      await navigator.clipboard.writeText(shareUrl);
-      setShowCopiedToast(true);
-      setTimeout(() => setShowCopiedToast(false), 2000);
-    } catch {
-      // Fallback: show URL in alert
-      const shareUrl = `${window.location.origin}/post/${post.id}`;
-      try {
-        await navigator.share({ url: shareUrl, title: `Post by ${post.authorName}` });
-      } catch {
-        // Both failed, do nothing
-      }
+      await dispatch(editPostThunk({ postId: post.id, content: editContent.trim() })).unwrap();
+      setEditing(false);
+    } catch (err) {
+      console.error('Failed to edit post:', err);
     }
+    setSavingEdit(false);
   };
 
   const handleLikeComment = (commentId: string) => {
@@ -224,6 +234,22 @@ function PostCard({ post }: { post: Post }) {
     }
   };
 
+  // Load server comments on mount and when showAllComments toggles
+  const loadComments = useCallback(async () => {
+    setCommentsLoading(true);
+    try {
+      const data = await apiFetch<Comment[]>(`/posts/${post.id}/comments`);
+      setComments(data || []);
+    } catch {
+      // keep existing
+    }
+    setCommentsLoading(false);
+  }, [post.id]);
+
+  useEffect(() => {
+    loadComments();
+  }, [loadComments]);
+
   // Auto-translate when posts load
   useEffect(() => {
     if (autoTranslate && !translatedData && !isTranslating && post.content) {
@@ -231,11 +257,12 @@ function PostCard({ post }: { post: Post }) {
     }
   }, [autoTranslate, post.id]);
 
+  // Show first 2 top-level comments, expand to show all
   const visibleComments = showAllComments ? comments : comments.slice(0, 2);
   const hasMoreComments = comments.length > 2;
 
   return (
-    <div className="glass rounded-2xl overflow-hidden animate-slide-up">
+    <div className="glass rounded-2xl overflow-hidden animate-slide-up relative">
       {/* Post Header */}
       <div className="flex items-center gap-3 p-4">
         <div className="relative shrink-0">
@@ -257,35 +284,67 @@ function PostCard({ post }: { post: Post }) {
             {post.privacy === 'public' ? <Globe size={10} className="text-text-muted" /> : <Lock size={10} className="text-text-muted" />}
           </div>
         </div>
-        <button className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <MoreHorizontal size={18} className="text-text-muted" />
-        </button>
+        <PostMenu
+          post={post}
+          currentUserId={user?.id}
+          myCharacterIds={myCharacterIds}
+          onEdit={() => { setEditContent(post.content); setEditing(true); }}
+        />
       </div>
 
       {/* Post Content */}
       <div className="px-4 pb-3">
-        <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-          {showTranslation && translatedData ? translatedData.translatedText : displayContent}
-          {isLongContent && !expandedContent && !showTranslation && '...'}
-        </p>
-        {isLongContent && !showTranslation && (
-          <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
-            {expandedContent ? 'Show less' : 'See more'}
-          </button>
-        )}
-        {/* Translation label */}
-        {showTranslation && translatedData && (
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
-              Translated from {getLanguageDisplayName(translatedData.detectedLanguage)}
-            </span>
-            <button
-              onClick={() => setShowTranslation(false)}
-              className="text-[10px] text-brand-primary hover:underline"
-            >
-              Show original
-            </button>
+        {editing ? (
+          <div className="space-y-2">
+            <textarea
+              value={editContent}
+              onChange={e => setEditContent(e.target.value)}
+              rows={3}
+              autoFocus
+              className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none border border-border-subtle rounded-xl p-3"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditing(false)}
+                className="px-4 py-1.5 rounded-full text-xs text-text-secondary glass hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={!editContent.trim() || savingEdit}
+                className="px-4 py-1.5 rounded-full text-xs text-white bg-brand-primary hover:brightness-110 transition-all disabled:opacity-40"
+              >
+                {savingEdit ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
+        ) : (
+          <>
+            <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
+              {showTranslation && translatedData ? translatedData.translatedText : displayContent}
+              {isLongContent && !expandedContent && !showTranslation && '...'}
+            </p>
+            {isLongContent && !showTranslation && (
+              <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
+                {expandedContent ? 'Show less' : 'See more'}
+              </button>
+            )}
+            {/* Translation label */}
+            {showTranslation && translatedData && (
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
+                  Translated from {getLanguageDisplayName(translatedData.detectedLanguage)}
+                </span>
+                <button
+                  onClick={() => setShowTranslation(false)}
+                  className="text-[10px] text-brand-primary hover:underline"
+                >
+                  Show original
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -353,7 +412,11 @@ function PostCard({ post }: { post: Post }) {
             {visibleComments.map(c => (
               <div key={c.id}>
                 <div className="flex gap-2.5">
-                  <img src={c.authorAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                  <img
+                    src={c.authorAvatar || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(c.authorName)}`}
+                    alt=""
+                    className="w-7 h-7 rounded-full object-cover shrink-0"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className={`rounded-2xl px-3 py-2 inline-block max-w-full ${c.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
                       <div className="flex items-center gap-1.5 mb-0.5">
@@ -363,7 +426,7 @@ function PostCard({ post }: { post: Post }) {
                       <p className="text-xs text-text-secondary">{c.content}</p>
                     </div>
                     <div className="flex items-center gap-3 mt-1 ml-1">
-                      <span className="text-[10px] text-text-muted">{c.createdAt}</span>
+                      <span className="text-[10px] text-text-muted">{timeAgo(c.createdAt)}</span>
                       <button onClick={() => handleLikeComment(c.id)} className={`text-[10px] font-medium ${c.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
                         {c.likes > 0 ? `Like · ${c.likes}` : 'Like'}
                       </button>
@@ -377,16 +440,21 @@ function PostCard({ post }: { post: Post }) {
                   )}
                 </div>
                 {/* Threaded replies */}
-                {c.replies?.map(r => (
+                {c.replies?.map((r: any) => (
                   <div key={r.id} className="flex gap-2.5 ml-9 mt-2">
-                    <img src={r.authorAvatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                    <img
+                      src={r.authorAvatar || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(r.authorName || 'unknown')}`}
+                      alt=""
+                      className="w-6 h-6 rounded-full object-cover shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
-                      <div className="rounded-2xl px-3 py-1.5 inline-block bg-bg-elevated">
-                        <span className="text-xs font-semibold text-text-primary">{r.authorName}</span>
+                      <div className={`rounded-2xl px-3 py-1.5 inline-block ${r.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
+                        <span className="text-xs font-semibold text-text-primary">{r.authorName || 'Unknown'}</span>
+                        {r.authorIsAI && <Badge variant="ai" className="text-[9px] px-1 ml-1">AI</Badge>}
                         <p className="text-xs text-text-secondary mt-0.5">{r.content}</p>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 ml-1">
-                        <span className="text-[10px] text-text-muted">{r.createdAt}</span>
+                        <span className="text-[10px] text-text-muted">{timeAgo(r.createdAt)}</span>
                         <button onClick={() => handleLikeComment(r.id)} className={`text-[10px] font-medium ${r.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
                           {r.likes > 0 ? `Like · ${r.likes}` : 'Like'}
                         </button>
@@ -396,9 +464,19 @@ function PostCard({ post }: { post: Post }) {
                 ))}
               </div>
             ))}
+            {commentsLoading && (
+              <div className="flex justify-center py-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
+              </div>
+            )}
             {hasMoreComments && !showAllComments && (
               <button onClick={() => setShowAllComments(true)} className="text-xs text-text-muted hover:text-brand-primary transition-colors pl-9">
                 View all {comments.length} comments
+              </button>
+            )}
+            {showAllComments && comments.length > 2 && (
+              <button onClick={() => setShowAllComments(false)} className="text-xs text-text-muted hover:text-brand-primary transition-colors pl-9">
+                Show less
               </button>
             )}
           </div>
@@ -424,11 +502,9 @@ function PostCard({ post }: { post: Post }) {
         </div>
       </div>
 
-      {/* Copied toast */}
-      {showCopiedToast && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 glass rounded-full px-4 py-2 text-xs font-medium text-text-primary flex items-center gap-1.5 shadow-lg animate-fade-in">
-          <Check size={12} className="text-success" /> Link copied!
-        </div>
+      {/* Share Bottom Sheet */}
+      {showShareSheet && (
+        <ShareBottomSheet post={post} onClose={() => setShowShareSheet(false)} />
       )}
     </div>
   );
@@ -448,7 +524,50 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
   const [selectedFeeling, setSelectedFeeling] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showFeelingPicker, setShowFeelingPicker] = useState(false);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const mentionRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Get available characters for mentioning
+  const characters = useSelector((s: RootState) => s.characters.discoverCharacters);
+
+  const filteredMentions = mentionSearch.trim() 
+    ? characters.filter(c => c.name.toLowerCase().includes(mentionSearch.toLowerCase()) || (c.handle && c.handle.toLowerCase().includes(mentionSearch.toLowerCase()))).slice(0, 8)
+    : characters.slice(0, 8);
+
+  const insertMention = (c: typeof characters[number]) => {
+    const handle = c.handle || c.name.toLowerCase().replace(/\s+/g, '_');
+    setText(prev => {
+      // If there's a @ at cursor position, replace it; otherwise append
+      if (showMentionPicker) {
+        // Replace the @ that triggered the mention
+        const atIdx = prev.lastIndexOf('@');
+        if (atIdx !== -1 && atIdx < prev.length - mentionSearch.length - 1) {
+          return prev.substring(0, atIdx) + `@${handle} ` + prev.substring(atIdx + mentionSearch.length + 1);
+        }
+      }
+      return prev + `@${handle} `;
+    });
+    setShowMentionPicker(false);
+    setMentionSearch('');
+    textareaRef.current?.focus();
+  };
+
+  // Detect @ mentions while typing
+  const handleTextChange = (value: string) => {
+    setText(value);
+    const cursorPos = (textareaRef.current?.selectionStart ?? value.length);
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    if (atMatch) {
+      setMentionSearch(atMatch[1]!);
+      setShowMentionPicker(true);
+    } else {
+      if (showMentionPicker) setShowMentionPicker(false);
+    }
+  };
 
   const FEELINGS = [
     { emoji: '😊', label: 'Happy' },
@@ -571,8 +690,9 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
         </button>
         {expanded && (
           <textarea
+            ref={textareaRef}
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={e => handleTextChange(e.target.value)}
             placeholder={`What's on your mind${username ? `, ${username}` : ''}?`}
             rows={3}
             autoFocus
@@ -653,6 +773,54 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                     ))}
                   </div>
                 </div>
+              )}
+            </div>
+            <div className="relative" ref={mentionRef}>
+              <button
+                onClick={() => setShowMentionPicker(!showMentionPicker)}
+                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
+                title="Mention a character"
+              >
+                <AtSign size={18} />
+              </button>
+              {showMentionPicker && filteredMentions.length > 0 && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMentionPicker(false)} />
+                  <div className="absolute bottom-full left-0 mb-2 z-50 glass rounded-2xl shadow-xl w-[260px] max-h-[280px] overflow-y-auto animate-fade-in border border-border-subtle">
+                    <div className="sticky top-0 p-2 border-b border-border-subtle bg-bg-canvas/90 backdrop-blur">
+                      <input
+                        type="text"
+                        placeholder="Search characters..."
+                        value={mentionSearch}
+                        onChange={e => setMentionSearch(e.target.value)}
+                        autoFocus
+                        className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-muted outline-none py-1 px-2"
+                      />
+                    </div>
+                    {filteredMentions.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => insertMention(c)}
+                        className="flex w-full items-center gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <img
+                          src={c.avatarUrl || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(c.name)}`}
+                          alt={c.name}
+                          className="w-8 h-8 rounded-full object-cover shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-text-primary truncate">{c.name}</p>
+                          <p className="text-[10px] text-text-muted truncate">@{c.handle || c.name.toLowerCase().replace(/\s+/g, '_')}</p>
+                        </div>
+                      </button>
+                    ))}
+                    {mentionSearch.trim() && filteredMentions.length === 0 && (
+                      <div className="px-3 py-4 text-center text-xs text-text-muted">
+                        No characters found
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -799,6 +967,27 @@ export default function FeedPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [showStoryCreator, setShowStoryCreator] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Fetch unread notifications count for the bell badge
+  useEffect(() => {
+    let mounted = true;
+    const fetchCount = async () => {
+      try {
+        const token = localStorage.getItem('accessToken');
+        if (!token) return;
+        const res = await fetch('/v1/notifications/unread-count', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (mounted) setUnreadCount(data?.count ?? 0);
+      } catch { /* silent */ }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -881,6 +1070,20 @@ export default function FeedPage() {
       <header className="safe-top px-5 pt-5 pb-2 shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">Feed</h1>
+          <button
+            onClick={() => nav('/notifications')}
+            className="relative w-9 h-9 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center hover:bg-white/10 transition-colors"
+            aria-label="Notifications"
+          >
+            <Bell size={16} className="text-text-secondary" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-danger flex items-center justify-center px-1">
+                <span className="text-[10px] font-bold text-white leading-none">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              </span>
+            )}
+          </button>
         </div>
       </header>
 

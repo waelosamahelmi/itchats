@@ -11,21 +11,9 @@ import { useAppDispatch } from '@/app/store';
 import { reactToPostThunk, addCommentThunk } from '@/app/store';
 import { Badge } from '@itchats/ui';
 import { apiFetch, genId } from '@/lib/api';
+import { timeAgo } from '@/lib/timeAgo';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
-
-// ── Time ago helper ──
-function timeAgoStr(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
 
 // ── Character Post Card (interactive, like feed) ──
 function CharacterPostCard({ post, characterName, characterAvatar }: { post: any; characterName: string; characterAvatar?: string }) {
@@ -93,7 +81,7 @@ function CharacterPostCard({ post, characterName, characterAvatar }: { post: any
             <span className="text-sm font-semibold text-text-primary truncate">{characterName}</span>
             <Badge variant="ai" className="text-[9px] px-1.5">AI</Badge>
           </div>
-          <span className="text-[11px] text-text-muted">{post.createdAt ? timeAgoStr(post.createdAt) : ''}</span>
+          <span className="text-[11px] text-text-muted">{post.createdAt ? timeAgo(post.createdAt) : ''}</span>
         </div>
         <button className="p-1.5 rounded-full hover:bg-white/5">
           <MoreHorizontal size={16} className="text-text-muted" />
@@ -161,7 +149,7 @@ function CharacterPostCard({ post, characterName, characterAvatar }: { post: any
                     <span className="text-xs font-semibold text-text-primary">{c.authorName || 'User'}</span>
                     <p className="text-xs text-text-secondary">{c.content || c.text}</p>
                   </div>
-                  <span className="text-[10px] text-text-muted ml-1">{c.createdAt ? timeAgoStr(c.createdAt) : ''}</span>
+                  <span className="text-[10px] text-text-muted ml-1">{c.createdAt ? timeAgo(c.createdAt) : ''}</span>
                 </div>
               </div>
             ))}

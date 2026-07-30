@@ -76,20 +76,74 @@ const messageKinds = new Set<MessageKind>([
 ]);
 const deliveryStates = new Set<DeliveryState>(['sending', 'sent', 'delivered', 'seen', 'failed']);
 
+/** Strip raw JSON artifacts from message text for cleaner display */
+export function stripJsonContent(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+  try {
+    const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const value = JSON.parse(cleaned);
+    if (Array.isArray(value)) {
+      const parts: string[] = [];
+      for (const p of value) {
+        if (!p || typeof p !== 'object') continue;
+        if ((p.type === 'speech' || p.type === 'action' || p.type === 'thought') && typeof p.content === 'string') {
+          if (p.type === 'action') parts.push(`*${p.content}*`);
+          else if (p.type === 'thought') parts.push(`_${p.content}_`);
+          else parts.push(p.content);
+        }
+      }
+      return parts.length > 0 ? parts.join('\n') : text;
+    }
+    if (value && typeof value === 'object' && typeof value.content === 'string') {
+      return value.content;
+    }
+  } catch {
+    // Partial JSON — try to extract speech content
+    const speechMatch = trimmed.match(/\{"type":"speech","content":"([^"]*(?:\\.[^"]*)*)"/);
+    if (speechMatch) {
+      try { return JSON.parse(`"${speechMatch[1]}"`); } catch { /* fall through */ }
+    }
+  }
+  return text;
+}
+
 export function normalizeHistoryMessage(message: HistoryMessage): ChatMessage {
-  const kind = messageKinds.has(message.type as MessageKind) ? message.type as MessageKind : 'text';
+  const rawKind = message.type as MessageKind;
+  const kind = messageKinds.has(rawKind) ? rawKind : 'text';
   const delivery = deliveryStates.has(message.metadata?.status as DeliveryState)
     ? message.metadata!.status as DeliveryState
     : 'delivered';
+
+  // For image/video messages, the content field holds the media URL; use it as mediaUrl
+  let mediaUrl: string | undefined;
+  let displayText = message.content ?? '';
+
+  if (kind === 'image' || kind === 'video') {
+    // Content is the media URL for image/video messages
+    mediaUrl = message.metadata?.mediaUrl ?? (message.content || undefined);
+    displayText = kind === 'image' ? '📸 Image' : '🎬 Video';
+  } else if (message.metadata?.audioUrl) {
+    mediaUrl = message.metadata.audioUrl;
+  } else if (message.metadata?.mediaUrl) {
+    mediaUrl = message.metadata.mediaUrl;
+  }
+
+  // Strip JSON artifacts from text content for non-character messages
+  // (Character text messages are handled by parseAssistantResponse / responsePartsToMessages)
+  if (kind === 'text' && message.senderType !== 'character' && typeof displayText === 'string') {
+    const t = displayText.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      displayText = stripJsonContent(displayText);
+    }
+  }
 
   return {
     id: message.id,
     sender: message.senderType,
     kind,
-    text: message.content ?? '',
-    ...(message.metadata?.audioUrl || message.metadata?.mediaUrl
-      ? { mediaUrl: message.metadata.audioUrl ?? message.metadata.mediaUrl }
-      : {}),
+    text: displayText,
+    ...(mediaUrl ? { mediaUrl } : {}),
     createdAt: message.createdAt instanceof Date
       ? message.createdAt.toISOString()
       : message.createdAt ?? new Date().toISOString(),

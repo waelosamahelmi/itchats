@@ -153,6 +153,16 @@ export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId
 export const deletePostThunk = createAsyncThunk('posts/delete', async (postId: string) => {
   await apiFetch(`/posts/${postId}`, { method: 'DELETE' }); return postId;
 });
+export const editPostThunk = createAsyncThunk('posts/edit', async ({ postId, content }: { postId: string; content: string }) => {
+  return (await apiFetch(`/posts/${postId}`, { method: 'PATCH', body: JSON.stringify({ content }) })) as Post;
+});
+export const reportPostThunk = createAsyncThunk('posts/report', async ({ postId, reason }: { postId: string; reason: string }) => {
+  await apiFetch(`/posts/${postId}/report`, { method: 'POST', body: JSON.stringify({ reason }) });
+  return postId;
+});
+export const shareToFeedThunk = createAsyncThunk('posts/share', async ({ content, repostOfPostId }: { content: string; repostOfPostId: string }) => {
+  return (await apiFetch('/posts', { method: 'POST', body: JSON.stringify({ content, repostOfPostId }) })) as Post;
+});
 const posts = createSlice({
   name: 'posts',
   initialState: {
@@ -175,6 +185,7 @@ const posts = createSlice({
     b.addCase(fetchFeed.rejected, (s, a) => { s.loading = false; s.error = a.error.message || 'Failed to load feed'; });
     b.addCase(createNewPost.fulfilled, (s, a) => { s.feedPosts.unshift(a.payload); });
     b.addCase(reactToPostThunk.fulfilled, (s, a) => {
+      if (!Array.isArray(s.feedPosts)) s.feedPosts = [];
       const post = s.feedPosts.find(p => p.id === a.payload.postId);
       if (post) {
         post.liked = true;
@@ -185,6 +196,7 @@ const posts = createSlice({
       }
     });
     b.addCase(addCommentThunk.fulfilled, (s, a) => {
+      if (!Array.isArray(s.feedPosts)) s.feedPosts = [];
       const post = s.feedPosts.find(p => p.id === a.payload.postId);
       if (post) {
         post.comments = post.comments || [];
