@@ -19,14 +19,17 @@ describe('ChatComposer', () => {
       characterName="Mara"
       value=""
       disabled={false}
+      recording={false}
+      recordingDuration={0}
       error="Voice notes need microphone access."
       onChange={() => undefined}
       onSend={() => undefined}
-      onVoice={() => undefined}
+      onVoicePressStart={() => undefined}
+      onVoicePressEnd={() => undefined}
       onImage={() => undefined}
     />);
     expect(html).toContain('aria-label="Attach a photo"');
-    expect(html).toContain('aria-label="Record a voice note"');
+    expect(html).toContain('aria-label="Hold to record voice note"');
     expect(html).toContain('role="alert"');
   });
 });

@@ -7,10 +7,9 @@ export const MessageSenderType = z.enum(['user', 'character', 'system']);
 export type MessageSenderType = z.infer<typeof MessageSenderType>;
 
 export const SendMessageSchema = z.object({
-  conversationId: z.string().uuid(),
   content: z.string().min(1).max(10000),
   type: MessageType.default('text'),
-  clientIdempotencyKey: z.string().uuid(),
+  clientIdempotencyKey: z.string().uuid().optional(),
   replyToMessageId: z.string().uuid().optional(),
 });
 

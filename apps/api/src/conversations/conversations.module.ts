@@ -11,10 +11,10 @@ import {
   controllers: [ConversationsController],
   providers: [
     ChatGateway,
-    MessageReactionsService,
     DrizzleMessageReactionsRepository,
-    { provide: MESSAGE_REACTIONS_REPOSITORY, useExisting: DrizzleMessageReactionsRepository },
+    MessageReactionsService,
+    { provide: MESSAGE_REACTIONS_REPOSITORY, useClass: DrizzleMessageReactionsRepository },
   ],
-  exports: [ChatGateway],
+  exports: [ChatGateway, MessageReactionsService],
 })
 export class ConversationsModule {}

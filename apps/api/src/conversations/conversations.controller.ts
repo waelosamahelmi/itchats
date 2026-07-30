@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException, Inject } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters } from '@itchats/database/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
@@ -8,7 +8,7 @@ import { MessageReactionsService } from './message-reactions.service';
 
 @Controller('v1/conversations')
 export class ConversationsController {
-  constructor(private readonly messageReactions: MessageReactionsService) {}
+  constructor(@Inject(MessageReactionsService) private readonly messageReactions: MessageReactionsService) {}
 
   @Get()
   @UseGuards(JwtAuthGuard)

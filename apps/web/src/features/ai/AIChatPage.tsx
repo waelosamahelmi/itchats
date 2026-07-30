@@ -40,6 +40,12 @@ export default function AIChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [recording, setRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
   const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
@@ -92,15 +98,174 @@ export default function AIChatPage() {
     }
   }
 
+  async function startVoiceRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Microphone access is not supported in this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4';
+
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        if (blob.size > 0) sendVoiceNote(blob);
+      };
+
+      recorder.onerror = () => {
+        setError('Recording failed. Please try again.');
+        stopVoiceRecording();
+      };
+
+      recorder.start(100); // collect data every 100ms
+      setRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => {
+          if (prev >= 120) {
+            stopVoiceRecording();
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError') {
+        setError('Microphone access was denied. Please allow it in your browser settings.');
+      } else {
+        setError('Could not access microphone.');
+      }
+    }
+  }
+
+  function stopVoiceRecording() {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setRecording(false);
+    setRecordingDuration(0);
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+  }
+
+  async function sendVoiceNote(audioBlob: Blob) {
+    if (!auth.token || !audioBlob || audioBlob.size === 0) return;
+    const optimisticId = crypto.randomUUID();
+    const blobUrl = URL.createObjectURL(audioBlob);
+
+    setMessages((current) => [...current, {
+      id: optimisticId, sender: 'user', kind: 'voice_note',
+      text: 'Voice note', mediaUrl: blobUrl,
+      createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
+    }]);
+
+    try {
+      // 1. Get upload URL
+      const uploadRes = await fetch(`${API}/media/voice-note-upload-url`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileSize: audioBlob.size }),
+      });
+      if (!uploadRes.ok) throw new Error('Failed to prepare voice upload.');
+      const { uploadUrl, mediaAssetId } = await uploadRes.json();
+
+      // 2. Upload audio blob
+      const uploadBlob = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': audioBlob.type },
+        body: audioBlob,
+      });
+      if (!uploadBlob.ok && uploadBlob.status !== 200) {
+        // If S3 upload fails in dev mode, use data URL directly
+        throw new Error('Voice upload failed.');
+      }
+
+      // 3. Confirm upload
+      await fetch(`${API}/media/confirm-upload`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaAssetId }),
+      }).catch(() => {});
+
+      // 4. Transcribe via ASR
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = (reader.result as string).split(',')[1];
+          if (result) resolve(result);
+          else reject(new Error('Empty audio data'));
+        };
+        reader.onerror = () => reject(new Error('Failed to read audio'));
+      });
+      reader.readAsDataURL(audioBlob);
+      const audioBase64 = await base64Promise;
+
+      const asrRes = await fetch(`${API}/ai/asr`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64 }),
+      });
+
+      let transcription = '';
+      if (asrRes.ok) {
+        const asrData = await asrRes.json();
+        transcription = asrData.text || '';
+      }
+
+      // 5. Update message with transcription and server URL
+      setMessages((current) => current.map((message) =>
+        message.id === optimisticId
+          ? { ...message, text: transcription || 'Voice note', delivery: 'delivered' as const }
+          : message,
+      ));
+
+      // 6. If transcribed, trigger AI response
+      if (transcription && characterId) {
+        await sendWithContent(transcription, optimisticId);
+      }
+    } catch (err: any) {
+      setMessages((current) => current.map((message) =>
+        message.id === optimisticId
+          ? { ...message, delivery: 'failed' as const }
+          : message,
+      ));
+      setError(err.message || 'Voice note could not be sent.');
+    }
+  }
+
   async function send() {
     const content = input.trim();
     if (!content || !auth.token || busy) return;
-    const optimisticId = crypto.randomUUID();
-    setMessages((current) => [...current, {
-      id: optimisticId, sender: 'user', kind: 'text', text: content,
-      createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
-    }]);
     setInput('');
+    await sendWithContent(content);
+  }
+
+  async function sendWithContent(content: string, existingOptimisticId?: string) {
+    if (!auth.token || busy) return;
+    const optimisticId = existingOptimisticId ?? crypto.randomUUID();
+
+    if (!existingOptimisticId) {
+      setMessages((current) => [...current, {
+        id: optimisticId, sender: 'user', kind: 'text', text: content,
+        createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
+      }]);
+    }
+
     setBusy(true);
     setError(undefined);
     setStreaming('');
@@ -260,9 +425,12 @@ export default function AIChatPage() {
         value={input}
         disabled={busy}
         error={error}
+        recording={recording}
+        recordingDuration={recordingDuration}
         onChange={setInput}
         onSend={() => void send()}
-        onVoice={() => setError('Voice-note recording is being connected to persistent uploads.')}
+        onVoicePressStart={() => void startVoiceRecording()}
+        onVoicePressEnd={stopVoiceRecording}
         onImage={() => uploadRef.current?.click()}
       />
     </main>
