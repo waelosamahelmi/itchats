@@ -15,6 +15,62 @@ import { timeAgo } from '@/lib/timeAgo';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
 
+// ── Character cache for mention rendering ──
+let _charCacheForProfile: Map<string, { id: string; name: string }> | null = null;
+
+async function getCharCache(): Promise<Map<string, { id: string; name: string }>> {
+  if (_charCacheForProfile) return _charCacheForProfile;
+  try {
+    const chars = await apiFetch<any[]>('/characters/discover?page=1&limit=200');
+    _charCacheForProfile = new Map();
+    for (const c of chars) {
+      const handle = (c.handle || c.name.toLowerCase().replace(/\s+/g, '_')).toLowerCase();
+      _charCacheForProfile.set(handle, { id: c.id, name: c.name });
+      const nameKey = c.name.toLowerCase();
+      if (!_charCacheForProfile.has(nameKey)) {
+        _charCacheForProfile.set(nameKey, { id: c.id, name: c.name });
+      }
+    }
+  } catch {
+    _charCacheForProfile = new Map();
+  }
+  return _charCacheForProfile;
+}
+
+function MentionText({ text, className = '' }: { text: string; className?: string }) {
+  const nav = useNavigate();
+  const [cache, setCache] = useState<Map<string, { id: string; name: string }> | null>(null);
+
+  useEffect(() => {
+    getCharCache().then(setCache);
+  }, []);
+
+  const parts = text.split(/(@[\w]+)/g);
+
+  return (
+    <span className={className}>
+      {parts.map((part, i) => {
+        if (part.startsWith('@') && part.length > 1) {
+          const handle = part.slice(1).toLowerCase();
+          const char = cache?.get(handle);
+          if (char) {
+            return (
+              <button
+                key={i}
+                onClick={(e) => { e.stopPropagation(); nav(`/ai/profile/${char.id}`); }}
+                className="text-brand-primary hover:underline cursor-pointer"
+              >
+                @{char.name}
+              </button>
+            );
+          }
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </span>
+  );
+}
+
 // ── Character Post Card (interactive, like feed) ──
 function CharacterPostCard({ post, characterName, characterAvatar }: { post: any; characterName: string; characterAvatar?: string }) {
   const dispatch = useAppDispatch();
@@ -92,7 +148,7 @@ function CharacterPostCard({ post, characterName, characterAvatar }: { post: any
       {post.content && (
         <div className="px-4 pb-3">
           <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-            {displayContent}
+            <MentionText text={displayContent} />
             {isLongContent && !expandedContent && '...'}
           </p>
           {isLongContent && (
@@ -147,7 +203,7 @@ function CharacterPostCard({ post, characterName, characterAvatar }: { post: any
                 <div className="flex-1 min-w-0">
                   <div className="rounded-2xl px-3 py-2 bg-bg-elevated inline-block max-w-full">
                     <span className="text-xs font-semibold text-text-primary">{c.authorName || 'User'}</span>
-                    <p className="text-xs text-text-secondary">{c.content || c.text}</p>
+                    <p className="text-xs text-text-secondary"><MentionText text={c.content || c.text} /></p>
                   </div>
                   <span className="text-[10px] text-text-muted ml-1">{c.createdAt ? timeAgo(c.createdAt) : ''}</span>
                 </div>

@@ -13,11 +13,13 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
 import { PostsService } from './posts.service';
+import { AiReactionsService } from '../ai/ai-reactions.service';
 
 @Controller('v1/posts')
 export class PostsController {
   constructor(
     @Inject(PostsService) private readonly postsService: PostsService,
+    @Inject(AiReactionsService) private readonly aiReactions: AiReactionsService,
   ) {}
 
   @Post()
@@ -34,7 +36,12 @@ export class PostsController {
     },
     @Req() req: any,
   ) {
-    return this.postsService.createPost(req.user.userId, body);
+    const post = await this.postsService.createPost(req.user.userId, body);
+
+    // Schedule AI character reactions for user posts
+    void this.aiReactions.scheduleReactions(post.id, req.user.userId);
+
+    return post;
   }
 
   @Get('feed')
@@ -116,7 +123,12 @@ export class PostsController {
     @Body() body: { content: string; parentCommentId?: string },
     @Req() req: any,
   ) {
-    return this.postsService.addComment(req.user.userId, id, body.content, body.parentCommentId);
+    const comment = await this.postsService.addComment(req.user.userId, id, body.content, body.parentCommentId);
+
+    // If user comments on a character's post, schedule character reply
+    void this.aiReactions.scheduleCommentReply(id, comment.id, req.user.userId, body.content).catch(() => {});
+
+    return comment;
   }
 
   @Delete(':id/comments/:commentId')

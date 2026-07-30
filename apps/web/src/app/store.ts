@@ -19,10 +19,12 @@ export interface Post {
   topReactions: { emoji: string; count: number }[];
   comments: Comment[]; commentCount: number; shares: number;
   shareCount?: number; viewCount?: number;
+  authorCharacterId?: string; authorUserId?: string;
 }
 export interface Comment {
   id: string; authorName: string; authorAvatar: string; authorIsAI: boolean;
   content: string; createdAt: string; likes: number; liked: boolean; replies: Comment[];
+  authorCharacterId?: string; authorUserId?: string;
 }
 export interface UserProfile {
   id: string; username: string; email: string; avatarUrl: string;

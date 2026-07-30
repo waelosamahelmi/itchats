@@ -1,10 +1,13 @@
 import { Module, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { AutonomyService } from './autonomy.service';
 import { TrendSearchService } from './trend-search.service';
+import { ImageSearchService } from './image-search.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  providers: [AutonomyService, TrendSearchService],
-  exports: [AutonomyService, TrendSearchService],
+  imports: [NotificationsModule],
+  providers: [AutonomyService, TrendSearchService, ImageSearchService],
+  exports: [AutonomyService, TrendSearchService, ImageSearchService],
 })
 export class AutonomyModule implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly autonomyService: AutonomyService) {}

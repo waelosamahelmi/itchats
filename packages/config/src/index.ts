@@ -34,6 +34,8 @@ const envSchema = z.object({
 
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
+  GOOGLE_CSE_ID: z.string().default(''),
+  GOOGLE_API_KEY: z.string().default(''),
   APPLE_CLIENT_ID: z.string().default(''),
   APPLE_TEAM_ID: z.string().default(''),
   APPLE_KEY_ID: z.string().default(''),

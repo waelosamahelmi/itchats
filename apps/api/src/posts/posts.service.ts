@@ -6,9 +6,63 @@ import {
 } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { NotificationsService } from '../notifications/notifications.service';
+
+/**
+ * Parse @handle mentions from post content.
+ * Returns array of { handle } objects for each mention found.
+ */
+export function parseMentions(content: string): string[] {
+  if (!content) return [];
+  // Match @word patterns (word = alphanumeric + underscore)
+  const regex = /@([\w]+)/g;
+  const handles = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    handles.add(match[1]!);
+  }
+  return [...handles];
+}
+
+/**
+ * Find character by handle (case-insensitive).
+ * Falls back to name matching.
+ */
+export async function findCharacterByHandle(
+  handle: string,
+): Promise<{ id: string; name: string; ownerUserId: string | null } | null> {
+  const db = getDb();
+  const chars = await db
+    .select({
+      id: characters.id,
+      name: characters.name,
+      ownerUserId: characters.ownerUserId,
+      handle: characters.handle,
+    })
+    .from(characters)
+    .where(isNull(characters.deletedAt))
+    .limit(200);
+
+  const lowerHandle = handle.toLowerCase();
+  // Try exact handle match first
+  let found = chars.find(
+    (c: any) => c.handle?.toLowerCase() === lowerHandle,
+  );
+  // Fallback to name match (underscore → space)
+  if (!found) {
+    const nameLike = lowerHandle.replace(/_/g, ' ');
+    found = chars.find(
+      (c: any) => c.name?.toLowerCase().replace(/\s+/g, '_') === lowerHandle ||
+                 c.name?.toLowerCase() === nameLike,
+    );
+  }
+  return found ?? null;
+}
 
 @Injectable()
 export class PostsService {
+  constructor(private readonly notifications: NotificationsService) {}
+
   async createPost(
     userId: string,
     data: {
@@ -34,7 +88,45 @@ export class PostsService {
       })
       .returning();
     if (!post) throw new Error('Failed to create post');
+
+    // Parse mentions and notify mentioned characters
+    this.notifyMentions(post.id, data.content, userId).catch(() => {});
+
     return post;
+  }
+
+  /**
+   * Parse mentions in post content and create notifications for mentioned characters.
+   */
+  private async notifyMentions(postId: string, content: string, authorUserId: string) {
+    const handles = parseMentions(content);
+    if (handles.length === 0) return;
+
+    const [author] = await getDb()
+      .select({ username: users.username })
+      .from(users)
+      .where(eq(users.id, authorUserId))
+      .limit(1);
+
+    const authorName = author?.username ?? 'Someone';
+
+    for (const handle of handles) {
+      const char = await findCharacterByHandle(handle);
+      if (!char || !char.ownerUserId) continue;
+      if (char.ownerUserId === authorUserId) continue; // Don't notify self
+
+      try {
+        await this.notifications.create(
+          char.ownerUserId,
+          'mention',
+          `@${char.name} was mentioned`,
+          `${authorName} mentioned @${char.name} in a post`,
+          { postId, characterId: char.id, type: 'mention' },
+        );
+      } catch {
+        // Silent — notification failure shouldn't block post creation
+      }
+    }
   }
 
   async getFeed(userId: string, page = 1, limit = 20) {
@@ -373,6 +465,9 @@ export class PostsService {
 
     const comment = result[0];
     if (!comment) throw new BadRequestException('Failed to create comment');
+
+    // Parse mentions and notify
+    this.notifyMentions(postId, content, userId).catch(() => {});
 
     // Update comment count
     const [r3] = await db

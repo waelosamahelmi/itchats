@@ -13,13 +13,23 @@ import {
 import { eq, and, sql, isNull, lt, gte, ne } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
 import { TrendSearchService } from './trend-search.service';
+import { ImageSearchService } from './image-search.service';
+
+// Helper: generate a random timestamp between minHours ago and maxHours ago
+function randomPastTime(minHours: number, maxHours: number): Date {
+  const ms = (minHours + Math.random() * (maxHours - minHours)) * 60 * 60 * 1000;
+  return new Date(Date.now() - ms);
+}
 
 @Injectable()
 export class AutonomyService {
   private readonly logger = new Logger(AutonomyService.name);
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly trendSearch: TrendSearchService) {}
+  constructor(
+    private readonly trendSearch: TrendSearchService,
+    private readonly imageSearch: ImageSearchService,
+  ) {}
 
   /**
    * Start the autonomous actions cron job (runs every 15 minutes).
@@ -225,11 +235,25 @@ Return ONLY JSON:
         typeof json.content === 'string' ? json.content.slice(0, 280) : '';
 
       if (content) {
+        // Always search for a relevant image
+        const interests: string[] = Array.isArray(character.interests) ? character.interests : [];
+        const searchTerm: string = interests.length > 0
+          ? (interests[Math.floor(Math.random() * interests.length)] ?? characterName ?? 'social')
+          : (characterName ?? 'social');
+        const mediaUrl = await this.imageSearch.searchImage(searchTerm);
+
+        // Random published time: 1-24 hours ago
+        const publishedAt = randomPastTime(1, 24);
+
         await db.insert(posts).values({
           authorCharacterId: characterId,
           content,
+          mediaUrl: mediaUrl ?? undefined,
+          mediaType: mediaUrl ? 'image' : undefined,
           visibility: 'public',
           isAiGenerated: true,
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
         });
 
         // Update lastPostAt on character
@@ -238,7 +262,7 @@ Return ONLY JSON:
           .set({ lastPostAt: new Date() })
           .where(eq(characters.id, characterId));
 
-        this.logger.log(`Autonomous post created for ${characterName}`);
+        this.logger.log(`Autonomous post created for ${characterName}${mediaUrl ? ' with image' : ' (no image found)'}`);
       }
     } catch (err: any) {
       this.logger.error(
@@ -390,15 +414,27 @@ Return ONLY JSON:
       if (result.characterReaction) {
         const topStory = result.newsResults[0];
 
+        // Get image: prefer trend service's found image, else search
+        let imageUrl = result.selectedImageUrl;
+        if (!imageUrl) {
+          const topic = allTopics[Math.floor(Math.random() * allTopics.length)] ?? characterName ?? 'news';
+          imageUrl = await this.imageSearch.searchImage(topic);
+        }
+
+        // Random published time: 2-48 hours ago (trend posts can be spread further)
+        const publishedAt = randomPastTime(2, 48);
+
         await db.insert(posts).values({
           authorCharacterId: characterId,
           content: result.characterReaction,
-          mediaUrl: result.selectedImageUrl ?? undefined,
-          mediaType: result.selectedImageUrl ? 'image' : undefined,
+          mediaUrl: imageUrl ?? undefined,
+          mediaType: imageUrl ? 'image' : undefined,
           visibility: 'public',
           isAiGenerated: true,
           sourceNewsUrl: topStory?.url ?? undefined,
           sourceNewsTitle: topStory?.title ?? undefined,
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
         });
 
         // Update lastPostAt on character
@@ -545,14 +581,27 @@ Return ONLY a JSON object (no markdown, no code fences):
             ? decision.commentary.slice(0, 280)
             : '';
 
+        // Search for a relevant image
+        const searchTerm: string = charInterests.length > 0
+          ? (charInterests[Math.floor(Math.random() * charInterests.length)] ?? character.name ?? 'social')
+          : (character.name ?? 'social');
+        const imageUrl = await this.imageSearch.searchImage(searchTerm);
+
+        // Random published time: 1-12 hours ago
+        const publishedAt = randomPastTime(1, 12);
+
         // Create a repost — a new post with the character's commentary
         // and a reference to the original post
         await db.insert(posts).values({
           authorCharacterId: characterId,
           content: commentary,
           repostOfPostId: candidatePick.post.id,
+          mediaUrl: imageUrl ?? undefined,
+          mediaType: imageUrl ? 'image' : undefined,
           visibility: 'public',
           isAiGenerated: true,
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
         });
 
         // Update lastPostAt on character

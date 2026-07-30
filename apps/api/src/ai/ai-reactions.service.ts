@@ -7,9 +7,11 @@ import {
   characterFollows,
   characters,
   characterRelationships,
+  users,
 } from '@itchats/database/schema';
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, sql, isNull, or, inArray } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
+import { parseMentions, findCharacterByHandle } from '../posts/posts.service';
 
 interface ReactionDecision {
   shouldReact: boolean;
@@ -26,8 +28,9 @@ export class AiReactionsService {
   /**
    * Called after a user creates a post. Schedules AI character reactions
    * with staggered delays to simulate natural timing.
+   * Characters the user follows will react; characters with relationship >= 5 will also comment.
    */
-  async scheduleReactions(postId: string) {
+  async scheduleReactions(postId: string, userId?: string) {
     const db = getDb();
 
     const [post] = await db
@@ -35,65 +38,75 @@ export class AiReactionsService {
       .from(posts)
       .where(eq(posts.id, postId))
       .limit(1);
-    if (!post || !post.authorUserId) return;
+    if (!post) return;
 
-    // Get all active public characters that have followers
-    const allCharacters = await db
+    // If post has authorCharacterId, it's from a character, not a user
+    // If post is from a user (authorUserId exists), schedule friend reactions
+    const authorUserId = post.authorUserId || userId;
+    if (!authorUserId) return;
+
+    // Get characters the user follows
+    const follows = await db
+      .select({
+        characterId: characterFollows.characterId,
+      })
+      .from(characterFollows)
+      .where(eq(characterFollows.userId, authorUserId));
+
+    const followedCharIds = follows.map((f) => f.characterId);
+    if (followedCharIds.length === 0) return;
+
+    // Get those characters
+    const followedChars = await db
       .select()
       .from(characters)
       .where(
         and(
+          inArray(characters.id, followedCharIds),
           eq(characters.status, 'published'),
-          eq(characters.visibility, 'public'),
           sql`${characters.deletedAt} IS NULL`,
         ),
       );
 
-    if (allCharacters.length === 0) return;
+    if (followedChars.length === 0) return;
 
-    // For each character, decide whether and when to react
-    for (const character of allCharacters) {
-      // Check relationship between post author and character
+    // For each character the user follows, decide reaction
+    for (const character of followedChars) {
+      // Check relationship level (friend threshold = 5)
       const [rel] = await db
         .select()
         .from(characterRelationships)
         .where(
           and(
             eq(characterRelationships.characterId, character.id),
-            eq(characterRelationships.userId, post.authorUserId),
+            eq(characterRelationships.userId, authorUserId),
           ),
         )
         .limit(1);
 
       const relationshipLevel = rel ? Number(rel.visibleLevel) || 0 : 0;
-      const warmth = rel ? Number(rel.warmth) || 0 : 0;
+      const isFriend = relationshipLevel >= 5;
 
-      // Probability calculation
+      // Base probability based on relationship level
+      const prob = Math.min(0.85, (relationshipLevel / 10) * 0.6 + 0.15);
+
+      // Mood modifier
       const mood = character.mood || 'neutral';
       const moodMultiplier =
-        mood === 'happy' ? 1.5 :
-        mood === 'excited' ? 1.3 :
-        mood === 'depressed' ? 0.2 :
-        mood === 'sad' ? 0.3 :
-        mood === 'angry' ? 0.4 :
-        1.0;
+        mood === 'happy' ? 1.3 : mood === 'excited' ? 1.5 :
+        mood === 'depressed' ? 0.2 : mood === 'sad' ? 0.3 :
+        mood === 'angry' ? 0.3 : 1.0;
 
-      // Base probability: higher relationship = more likely
-      const baseProb = Math.min(0.7, (relationshipLevel / 10) * 0.5 + warmth * 0.2);
-      const finalProb = baseProb * moodMultiplier;
+      if (Math.random() > prob * moodMultiplier) continue;
 
-      // Random check
-      if (Math.random() > finalProb) continue;
-
-      // Schedule with staggered delay (1-60 minutes)
-      const delayMinutes = 1 + Math.floor(Math.random() * 60);
+      // Random delay 1-30 minutes
+      const delayMinutes = 1 + Math.floor(Math.random() * 30);
       const delayMs = delayMinutes * 60 * 1000;
 
       this.logger.log(
-        `Scheduling reaction from ${character.name} to post ${postId} in ${delayMinutes}min`,
+        `Scheduling ${isFriend ? 'friend' : 'follower'} reaction from ${character.name} to post ${postId} in ${delayMinutes}min`,
       );
 
-      // Use setTimeout for simple scheduling (BullMQ would be used in production)
       setTimeout(() => {
         this.processCharacterReaction(postId, character.id).catch((err) => {
           this.logger.error(
@@ -102,10 +115,193 @@ export class AiReactionsService {
         });
       }, delayMs);
     }
+
+    // Schedule mention replies (if post mentions any characters)
+    this.scheduleMentionReplies(postId, post.content ?? '').catch(() => {});
+  }
+
+  /**
+   * When a post contains @handle mentions, the mentioned characters reply.
+   * Max 2 AI-to-AI replies per thread to prevent infinite loops.
+   */
+  async scheduleMentionReplies(postId: string, content: string) {
+    const db = getDb();
+    const handles = parseMentions(content);
+    if (handles.length === 0) return;
+
+    // Get the post to check if it's already an AI post (for depth tracking)
+    const [post] = await db
+      .select()
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+    if (!post) return;
+
+    // Count existing AI comments on this post to limit AI-to-AI loops
+    const aiCommentCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(postComments)
+      .where(
+        and(
+          eq(postComments.postId, postId),
+          eq(postComments.isAiGenerated, true),
+          isNull(postComments.deletedAt),
+        ),
+      );
+
+    let currentAiCount = Number(aiCommentCount[0]?.count ?? 0);
+    const maxAllowed = 2; // Max AI-to-AI per thread
+
+    for (const handle of handles) {
+      if (currentAiCount >= maxAllowed) break;
+
+      const char = await findCharacterByHandle(handle);
+      if (!char) continue;
+
+      // Don't let a character reply to their own post
+      if (post.authorCharacterId === char.id) continue;
+
+      // Check if this character already replied
+      const [existing] = await db
+        .select({ id: postComments.id })
+        .from(postComments)
+        .where(
+          and(
+            eq(postComments.postId, postId),
+            eq(postComments.characterId, char.id),
+            isNull(postComments.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (existing) continue;
+
+      try {
+        const [fullChar] = await db
+          .select()
+          .from(characters)
+          .where(eq(characters.id, char.id))
+          .limit(1);
+
+        const replyContent = await this.generateMentionReply(
+          fullChar ?? char,
+          content,
+        );
+
+        if (replyContent) {
+          await db.insert(postComments).values({
+            postId,
+            characterId: char.id,
+            content: replyContent.slice(0, 500),
+            isAiGenerated: true,
+          });
+
+          // Update comment count on the post
+          const [cResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(postComments)
+            .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
+          await db
+            .update(posts)
+            .set({ commentCount: Number(cResult?.count ?? 0) })
+            .where(eq(posts.id, postId));
+
+          // Count this reply toward AI-to-AI limit
+          currentAiCount++;
+
+          this.logger.log(
+            `Character ${char.name} replied to mention in post ${postId}`,
+          );
+        }
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to generate mention reply from ${char.name}: ${err.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * When a user comments on a character's post, the character replies.
+   * Called from the posts endpoint after comment creation.
+   * One reply only per comment pair.
+   */
+  async scheduleCommentReply(
+    postId: string,
+    commentId: string,
+    userId: string,
+    commentContent: string,
+  ) {
+    const db = getDb();
+
+    // Get the post to check if it's from a character
+    const [post] = await db
+      .select()
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+    if (!post || !post.authorCharacterId) return; // Only reply if post is from a character
+
+    const [character] = await db
+      .select()
+      .from(characters)
+      .where(eq(characters.id, post.authorCharacterId))
+      .limit(1);
+    if (!character) return;
+
+    // Check if this character already replied to this comment
+    const [existingReply] = await db
+      .select({ id: postComments.id })
+      .from(postComments)
+      .where(
+        and(
+          eq(postComments.postId, postId),
+          eq(postComments.parentCommentId, commentId),
+          eq(postComments.characterId, character.id),
+          isNull(postComments.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (existingReply) return; // One reply per comment pair
+
+    try {
+      const replyContent = await this.generateCommentReply(
+        character,
+        commentContent,
+      );
+
+      if (replyContent) {
+        await db.insert(postComments).values({
+          postId,
+          characterId: character.id,
+          parentCommentId: commentId,
+          content: replyContent.slice(0, 500),
+          isAiGenerated: true,
+        });
+
+        // Update comment count on the post
+        const [cResult] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(postComments)
+          .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
+        await db
+          .update(posts)
+          .set({ commentCount: Number(cResult?.count ?? 0) })
+          .where(eq(posts.id, postId));
+
+        this.logger.log(
+          `Character ${character.name} replied to user comment on their post ${postId}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to generate comment reply from ${character.name}: ${err.message}`,
+      );
+    }
   }
 
   /**
    * Individual character decides whether and how to react to a post.
+   * Friends (level >= 5) always leave a comment.
    */
   async processCharacterReaction(postId: string, characterId: string) {
     const db = getDb();
@@ -138,6 +334,7 @@ export class AiReactionsService {
 
     const relationshipLevel = rel ? Number(rel.visibleLevel) || 1 : 1;
     const relationshipLabel = this.getRelationshipLabel(relationshipLevel);
+    const isFriend = relationshipLevel >= 5;
 
     // Use LLM to decide reaction
     const decision = await this.askCharacterToReact(char, post.content || '', relationshipLabel);
@@ -169,12 +366,16 @@ export class AiReactionsService {
         .set({ likeCount })
         .where(eq(posts.id, postId));
 
-      // Add comment if character decided to
-      if (decision.comment) {
+      // Add comment: always for friends, per LLM decision for others
+      const commentText = isFriend
+        ? (decision.comment || await this.generateFriendComment(char, post.content || ''))
+        : decision.comment;
+
+      if (commentText) {
         await db.insert(postComments).values({
           postId,
           characterId,
-          content: decision.comment.slice(0, 500),
+          content: commentText.slice(0, 500),
           isAiGenerated: true,
         });
 
@@ -189,7 +390,7 @@ export class AiReactionsService {
       }
 
       this.logger.log(
-        `Character ${char.name} reacted to post ${postId} with ${decision.reactionType}`,
+        `Character ${char.name} reacted to post ${postId} with ${decision.reactionType}${commentText ? ' + comment' : ''}`,
       );
     } catch (err: any) {
       this.logger.error(`Failed to save reaction: ${err.message}`);
@@ -258,5 +459,128 @@ Return ONLY JSON (no markdown, no explanation):
     if (level >= 3) return 'Familiar Face';
     if (level >= 2) return 'New Connection';
     return 'Stranger';
+  }
+
+  /**
+   * Generate an in-character reply when the character is @mentioned.
+   */
+  private async generateMentionReply(
+    character: any,
+    postContent: string,
+  ): Promise<string | null> {
+    const prompt = `You are ${character.name}, a ${character.gender || 'person'} in your ${character.ageDisplay || 'prime'}.
+Personality: ${character.personality || ''}
+Description: ${character.description || ''}
+Current mood: ${character.mood || 'neutral'}
+
+Someone mentioned you (@${character.name}) in a post:
+"${postContent.slice(0, 400)}"
+
+Write a natural reply in 1-2 sentences. Sound like yourself — not generic, not robotic. Don't use hashtags.
+
+Return ONLY JSON:
+{
+  "content": "your reply (max 200 chars)"
+}`;
+
+    try {
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'qwen-flash',
+        temperature: 0.9,
+        maxTokens: 250,
+      });
+
+      const cleaned = result.content
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const json = JSON.parse(cleaned);
+      return typeof json.content === 'string' ? json.content.slice(0, 200) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Generate an in-character reply when a user comments on the character's post.
+   */
+  private async generateCommentReply(
+    character: any,
+    userComment: string,
+  ): Promise<string | null> {
+    const prompt = `You are ${character.name}, a ${character.gender || 'person'} in your ${character.ageDisplay || 'prime'}.
+Personality: ${character.personality || ''}
+Description: ${character.description || ''}
+Current mood: ${character.mood || 'neutral'}
+
+Someone commented on your post. They said:
+"${userComment.slice(0, 300)}"
+
+Write a natural reply in 1-2 sentences. Sound like yourself — warm, casual, in-character. Don't use hashtags.
+
+Return ONLY JSON:
+{
+  "content": "your reply (max 200 chars)"
+}`;
+
+    try {
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'qwen-flash',
+        temperature: 0.9,
+        maxTokens: 250,
+      });
+
+      const cleaned = result.content
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const json = JSON.parse(cleaned);
+      return typeof json.content === 'string' ? json.content.slice(0, 200) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Generate a friend's comment on a user's post (always called for level >= 5).
+   */
+  private async generateFriendComment(
+    character: any,
+    postContent: string,
+  ): Promise<string | null> {
+    const prompt = `You are ${character.name}, a ${character.gender || 'person'} in your ${character.ageDisplay || 'prime'}.
+Personality: ${character.personality || ''}
+Description: ${character.description || ''}
+Current mood: ${character.mood || 'neutral'}
+
+Your friend posted this on social media:
+"${postContent.slice(0, 300)}"
+
+Write a short, natural comment as yourself. Be supportive, casual, and in-character. 1-2 sentences max. No hashtags.
+
+Return ONLY JSON:
+{
+  "content": "your comment (max 150 chars)"
+}`;
+
+    try {
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'qwen-flash',
+        temperature: 0.9,
+        maxTokens: 200,
+      });
+
+      const cleaned = result.content
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const json = JSON.parse(cleaned);
+      return typeof json.content === 'string' ? json.content.slice(0, 150) : null;
+    } catch {
+      return null;
+    }
   }
 }

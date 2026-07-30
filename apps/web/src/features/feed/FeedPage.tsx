@@ -3,11 +3,11 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Home, Heart, MessageCircle, Share2, Send,
-  Image, Smile, Globe, Lock, Plus, Sparkles, Check, Camera, X, AtSign, Bell,
+  Smile, Globe, Lock, Plus, Sparkles, Check, Camera, X, AtSign, Bell,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
-import type { Post, Comment, Story } from '@/app/store';
+import type { Post, Comment, Story, Character } from '@/app/store';
 import {
   fetchFeed,
   fetchStoriesThunk,
@@ -27,6 +27,65 @@ import { Badge } from '@itchats/ui';
 import ProfileWizard from '@/features/auth/ProfileWizard';
 import PostMenu from '@/components/PostMenu';
 import ShareBottomSheet from '@/components/ShareBottomSheet';
+
+// ── Character cache (handle → id, name) ──
+let characterCache: Map<string, { id: string; name: string; handle: string }> | null = null;
+
+async function getCharacterCache(): Promise<Map<string, { id: string; name: string; handle: string }>> {
+  if (characterCache) return characterCache;
+  try {
+    const chars = await apiFetch<Character[]>('/characters/discover?page=1&limit=200');
+    characterCache = new Map();
+    for (const c of chars) {
+      const handle = (c.handle || c.name.toLowerCase().replace(/\s+/g, '_')).toLowerCase();
+      characterCache.set(handle, { id: c.id, name: c.name, handle: c.handle || '' });
+      // Also map by name
+      const nameKey = c.name.toLowerCase();
+      if (!characterCache.has(nameKey)) {
+        characterCache.set(nameKey, { id: c.id, name: c.name, handle: c.handle || '' });
+      }
+    }
+  } catch {
+    characterCache = new Map();
+  }
+  return characterCache;
+}
+
+// ── Mention Text Renderer ──
+function MentionText({ text, className = '' }: { text: string; className?: string }) {
+  const nav = useNavigate();
+  const [cache, setCache] = useState<Map<string, { id: string; name: string; handle: string }> | null>(null);
+
+  useEffect(() => {
+    getCharacterCache().then(setCache);
+  }, []);
+
+  // Parse @handle patterns
+  const parts = text.split(/(@[\w]+)/g);
+
+  return (
+    <span className={className}>
+      {parts.map((part, i) => {
+        if (part.startsWith('@') && part.length > 1) {
+          const handle = part.slice(1).toLowerCase();
+          const char = cache?.get(handle);
+          if (char) {
+            return (
+              <button
+                key={i}
+                onClick={(e) => { e.stopPropagation(); nav(`/ai/profile/${char.id}`); }}
+                className="text-brand-primary hover:underline cursor-pointer"
+              >
+                @{char.name}
+              </button>
+            );
+          }
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </span>
+  );
+}
 
 // ── Story Circle ──
 function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: Story; isYours?: boolean; userAvatar?: string; onYourStoryClick?: () => void }) {
@@ -276,7 +335,23 @@ function PostCard({ post }: { post: Post }) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-text-primary truncate">{post.authorName}</span>
+            {post.authorIsAI && (post as any).authorCharacterId ? (
+              <button
+                onClick={() => nav(`/ai/profile/${(post as any).authorCharacterId}`)}
+                className="text-sm font-semibold text-text-primary truncate hover:text-brand-primary hover:underline transition-colors"
+              >
+                {post.authorName}
+              </button>
+            ) : (post as any).authorUserId ? (
+              <button
+                onClick={() => nav(`/profile/${(post as any).authorUserId}`)}
+                className="text-sm font-semibold text-text-primary truncate hover:text-brand-primary hover:underline transition-colors"
+              >
+                {post.authorName}
+              </button>
+            ) : (
+              <span className="text-sm font-semibold text-text-primary truncate">{post.authorName}</span>
+            )}
             {post.authorIsAI && <Badge variant="ai" className="text-[9px] px-1.5">AI</Badge>}
           </div>
           <div className="flex items-center gap-1">
@@ -323,7 +398,7 @@ function PostCard({ post }: { post: Post }) {
         ) : (
           <>
             <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-              {showTranslation && translatedData ? translatedData.translatedText : displayContent}
+              <MentionText text={showTranslation && translatedData ? translatedData.translatedText : displayContent} />
               {isLongContent && !expandedContent && !showTranslation && '...'}
             </p>
             {isLongContent && !showTranslation && (
@@ -424,7 +499,7 @@ function PostCard({ post }: { post: Post }) {
                         <span className="text-xs font-semibold text-text-primary">{c.authorName}</span>
                         {c.authorIsAI && <Badge variant="ai" className="text-[9px] px-1">AI</Badge>}
                       </div>
-                      <p className="text-xs text-text-secondary">{c.content}</p>
+                      <p className="text-xs text-text-secondary"><MentionText text={c.content} /></p>
                     </div>
                     <div className="flex items-center gap-3 mt-1 ml-1">
                       <span className="text-[10px] text-text-muted">{timeAgo(c.createdAt)}</span>
@@ -452,7 +527,7 @@ function PostCard({ post }: { post: Post }) {
                       <div className={`rounded-2xl px-3 py-1.5 inline-block ${r.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
                         <span className="text-xs font-semibold text-text-primary">{r.authorName || 'Unknown'}</span>
                         {r.authorIsAI && <Badge variant="ai" className="text-[9px] px-1 ml-1">AI</Badge>}
-                        <p className="text-xs text-text-secondary mt-0.5">{r.content}</p>
+                        <p className="text-xs text-text-secondary mt-0.5"><MentionText text={r.content} /></p>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 ml-1">
                         <span className="text-[10px] text-text-muted">{timeAgo(r.createdAt)}</span>
@@ -728,7 +803,8 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
 
       {expanded && (
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle">
-          <div className="flex items-center gap-1">
+          {/* Action buttons — evenly spaced left group */}
+          <div className="flex items-center gap-3">
             <input
               ref={fileRef}
               type="file"
@@ -741,44 +817,11 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
               title={t('feed.addPhoto')}
             >
-              <Image size={18} />
-            </button>
-            <button
-              onClick={() => onStoryCreate?.()}
-              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-social-warm transition-all"
-              title={t('feed.createStory')}
-            >
               <Camera size={18} />
             </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowFeelingPicker(!showFeelingPicker)}
-                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
-                title={t('feed.addFeeling')}
-              >
-                <Smile size={18} />
-              </button>
-              {showFeelingPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-30 p-3 glass rounded-2xl shadow-xl max-w-[300px] animate-fade-in">
-                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">{t('feed.howAreYouFeeling')}</p>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {FEELINGS.map(f => (
-                      <button
-                        key={f.label}
-                        onClick={() => { setSelectedFeeling(`${f.emoji} ${f.label}`); setShowFeelingPicker(false); }}
-                        className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-white/10 transition-colors"
-                      >
-                        <span className="text-xl">{f.emoji}</span>
-                        <span className="text-[9px] text-text-muted">{f.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
             <div className="relative" ref={mentionRef}>
               <button
-                onClick={() => setShowMentionPicker(!showMentionPicker)}
+                onClick={() => { setShowMentionPicker(!showMentionPicker); setShowFeelingPicker(false); }}
                 className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
                 title={t('feed.mentionCharacter')}
               >
@@ -822,6 +865,32 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                     )}
                   </div>
                 </>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                onClick={() => { setShowFeelingPicker(!showFeelingPicker); setShowMentionPicker(false); }}
+                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
+                title={t('feed.addFeeling')}
+              >
+                <Smile size={18} />
+              </button>
+              {showFeelingPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-30 p-3 glass rounded-2xl shadow-xl max-w-[300px] animate-fade-in">
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">{t('feed.howAreYouFeeling')}</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {FEELINGS.map(f => (
+                      <button
+                        key={f.label}
+                        onClick={() => { setSelectedFeeling(`${f.emoji} ${f.label}`); setShowFeelingPicker(false); }}
+                        className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-white/10 transition-colors"
+                      >
+                        <span className="text-xl">{f.emoji}</span>
+                        <span className="text-[9px] text-text-muted">{f.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
