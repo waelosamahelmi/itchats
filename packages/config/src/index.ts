@@ -30,6 +30,7 @@ const envSchema = z.object({
   S3_SECRET_KEY: z.string().default(''),
   S3_BUCKET: z.string().default(''),
   S3_REGION: z.string().default(''),
+  S3_PUBLIC_URL: z.string().default(''),
 
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
