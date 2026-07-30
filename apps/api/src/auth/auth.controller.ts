@@ -56,6 +56,17 @@ export class AuthController {
     return { available, provider: 'google' };
   }
 
+  @Get('google-url')
+  googleUrl() {
+    const config = getConfig();
+    const clientId = config.GOOGLE_CLIENT_ID;
+    if (!clientId) return { url: null, error: 'not_configured' };
+    const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
+    const scope = 'email profile';
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+    return { url };
+  }
+
   @Get('google')
   async googleAuth(@Res({ passthrough: false }) res: FastifyReply): Promise<void> {
     const config = getConfig();
