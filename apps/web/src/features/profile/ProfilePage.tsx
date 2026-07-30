@@ -262,15 +262,15 @@ export default function ProfilePage() {
               {Array.from({ length: 2 }).map((_, i) => (
                 <div key={i} className="glass rounded-2xl p-4 animate-pulse">
                   <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-surface-elevated" />
+                    <div className="w-10 h-10 rounded-full bg-bg-elevated" />
                     <div className="space-y-1.5">
-                      <div className="h-3 w-20 bg-surface-elevated rounded-full" />
-                      <div className="h-2 w-12 bg-surface-elevated rounded-full" />
+                      <div className="h-3 w-20 bg-bg-elevated rounded-full" />
+                      <div className="h-2 w-12 bg-bg-elevated rounded-full" />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <div className="h-3 bg-surface-elevated rounded-full w-3/4" />
-                    <div className="h-3 bg-surface-elevated rounded-full w-1/2" />
+                    <div className="h-3 bg-bg-elevated rounded-full w-3/4" />
+                    <div className="h-3 bg-bg-elevated rounded-full w-1/2" />
                   </div>
                 </div>
               ))}

@@ -1,6 +1,10 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { MessageCircle, Compass, Home, Radio, User } from 'lucide-react';
+import { MessageCircle, Compass, Home, Radio, User, Sun, Moon } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from 'react';
 import CookieBanner from '@/components/CookieBanner';
+import { getStoredTheme, toggleAndNotify } from './theme';
+import type { Theme } from './theme';
 
 const tabs = [
   { to: '/chats', icon: MessageCircle, label: 'Chats' },
@@ -10,8 +14,31 @@ const tabs = [
   { to: '/profile', icon: User, label: 'Profile' },
 ];
 
+/** Compute which tab index is active based on the current path */
+function activeTabIndex(pathname: string): number {
+  if (pathname === '/' || pathname === '') return 2; // Feed
+  if (pathname.startsWith('/chats')) return 0;
+  if (pathname.startsWith('/discover')) return 1;
+  if (pathname.startsWith('/live')) return 3;
+  if (pathname.startsWith('/profile')) return 4;
+  return -1;
+}
+
 export default function AppShell() {
   const loc = useLocation();
+  const [theme, setTheme] = useState<Theme>(getStoredTheme());
+  const activeIdx = activeTabIndex(loc.pathname);
+
+  // Listen for external theme changes (e.g. from Settings page)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<Theme>;
+      setTheme(custom.detail);
+    };
+    window.addEventListener('themechange', handler);
+    return () => window.removeEventListener('themechange', handler);
+  }, []);
+
   const hideNav =
     loc.pathname.startsWith('/chat/') ||
     loc.pathname.startsWith('/ai/chat/') ||
@@ -23,51 +50,114 @@ export default function AppShell() {
     loc.pathname.startsWith('/admin') ||
     loc.pathname.startsWith('/legal');
 
+  const handleToggleTheme = () => {
+    const next = toggleAndNotify();
+    setTheme(next);
+  };
+
   return (
     <div className="flex flex-col bg-bg-canvas overflow-hidden relative" style={{ height: '100dvh' }}>
-      <main className="flex-1 overflow-hidden">
-        <Outlet />
+      {/* ── Main content area with page transitions ── */}
+      <main className="flex-1 overflow-hidden relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={loc.pathname}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="h-full"
+          >
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
       </main>
+
+      {/* ── Floating theme toggle above the nav ── */}
       {!hideNav && (
-        <nav className="safe-bottom shrink-0 px-2 pb-3 pt-1">
-          <div className="glass-strong rounded-[22px] flex items-center justify-around h-[66px] px-1 mx-auto max-w-lg relative">
+        <motion.button
+          onClick={handleToggleTheme}
+          className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
+          whileTap={{ scale: 0.88 }}
+          whileHover={{ scale: 1.06 }}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          <motion.div
+            initial={false}
+            animate={{ rotate: theme === 'dark' ? 0 : 180 }}
+            transition={{ duration: 0.45, ease: 'easeInOut' }}
+          >
+            {theme === 'dark' ? (
+              <Moon size={16} className="text-text-secondary" />
+            ) : (
+              <Sun size={16} className="text-accent-amber" />
+            )}
+          </motion.div>
+        </motion.button>
+      )}
+
+      {/* ── Bottom tab navigation ── */}
+      {!hideNav && (
+        <nav className="safe-bottom shrink-0 px-2 pb-3 pt-1 relative">
+          <div className="bg-bg-glass-strong backdrop-blur-xl rounded-[22px] flex items-center h-[66px] px-1 mx-auto max-w-lg relative border border-border-subtle overflow-hidden">
+            {/* Sliding pill indicator */}
+            {activeIdx >= 0 && (
+              <motion.div
+                className="absolute top-1.5 h-[calc(100%-12px)] rounded-2xl bg-gradient-to-r from-brand-500/18 via-brand-500/12 to-brand-500/8 shadow-[0_0_24px_rgba(236,72,153,0.12)]"
+                animate={{
+                  left: `calc(${activeIdx * 20}% + 4px)`,
+                  width: `calc(${100 / tabs.length}% - 8px)`,
+                }}
+                transition={{ type: 'spring', stiffness: 480, damping: 32, mass: 0.8 }}
+              />
+            )}
+
             {tabs.map(({ to, icon: Icon, label, isMain }) => {
               const isActive = to === '/'
                 ? loc.pathname === '/' || loc.pathname === ''
                 : loc.pathname.startsWith(to);
+
               return (
                 <NavLink
                   key={to}
                   to={to}
                   end={to === '/'}
-                  className={({ isActive: active }) =>
-                    `relative flex flex-col items-center gap-0.5 px-3 py-1.5 text-[10px] font-semibold transition-all duration-200 rounded-2xl ${
-                      isMain
-                        ? 'scale-110'
-                        : ''
-                    } ${
-                      active
-                        ? 'text-brand-primary'
-                        : 'text-text-muted hover:text-text-secondary'
-                    }`
-                  }
+                  className={`relative flex flex-col items-center justify-center gap-0.5 z-10 transition-colors duration-200 ${
+                    isActive ? 'text-brand-500' : 'text-text-muted hover:text-text-secondary'
+                  }`}
+                  style={{ flex: 1, height: '100%' }}
                 >
-                  <div className={`relative ${isMain ? '-mt-5' : ''}`}>
-                    {/* Glow indicator for active tab */}
-                    {isActive && !isMain && (
-                      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-brand-primary shadow-[0_0_10px_rgba(255,72,210,0.4)]" />
-                    )}
-                    {/* Main tab highlight */}
-                    {isMain && (
-                      <div className="absolute inset-0 rounded-full bg-brand-primary/20 blur-xl animate-pulse" />
+                  {/* Icon with bounce animation on active */}
+                  <motion.div
+                    animate={isActive ? { scale: [0.85, 1.1, 1] } : { scale: 1 }}
+                    transition={isActive ? { duration: 0.45, ease: [0.34, 1.56, 0.64, 1] } : { duration: 0.2 }}
+                    className={`relative flex items-center justify-center ${isMain && isActive ? '-mt-0.5' : ''}`}
+                  >
+                    {/* Elevated center tab glow */}
+                    {isMain && isActive && (
+                      <div className="absolute inset-0 rounded-full bg-brand-500/25 blur-xl animate-glow-pulse scale-150" />
                     )}
                     <Icon
                       size={isMain ? 26 : 22}
                       strokeWidth={isActive ? 2.5 : 1.8}
-                      className="relative z-10"
+                      className="relative z-10 transition-all duration-200"
                     />
-                  </div>
-                  <span>{label}</span>
+                  </motion.div>
+
+                  {/* Label — only visible on active tab */}
+                  <AnimatePresence>
+                    {isActive && (
+                      <motion.span
+                        initial={{ opacity: 0, y: 4, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: 'auto' }}
+                        exit={{ opacity: 0, y: 2, height: 0 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className="text-[10px] font-semibold leading-none overflow-hidden"
+                      >
+                        {label}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </NavLink>
               );
             })}
@@ -75,7 +165,7 @@ export default function AppShell() {
         </nav>
       )}
 
-      {/* Cookie consent banner — renders above bottom nav */}
+      {/* ── Cookie consent banner ── */}
       <CookieBanner />
     </div>
   );

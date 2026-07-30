@@ -47,7 +47,7 @@ const API = (import.meta as any).env?.VITE_API_URL || '/v1';
 function ProgressBar({ step, total }: { step: number; total: number }) {
   const pct = ((step + 1) / total) * 100;
   return (
-    <div className="w-full h-1.5 bg-surface-elevated rounded-full overflow-hidden">
+    <div className="w-full h-1.5 bg-bg-elevated rounded-full overflow-hidden">
       <div
         className="h-full rounded-full bg-gradient-to-r from-brand-primary to-brand-secondary transition-all duration-500 ease-out"
         style={{ width: `${pct}%` }}
@@ -98,7 +98,7 @@ function VoiceCard({ voice, selected, onSelect, playing, onPlay }: {
       }`}
     >
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-        selected ? 'bg-brand-primary' : 'bg-surface-elevated'
+        selected ? 'bg-brand-primary' : 'bg-bg-elevated'
       }`}>
         <Mic size={18} className={selected ? 'text-white' : 'text-text-secondary'} />
       </div>
@@ -410,7 +410,7 @@ export default function CreateCharacterPage() {
                       vis === o.id ? 'ring-2 ring-brand-primary bg-brand-glow/10' : 'hover:bg-white/5'
                     }`}
                   >
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${vis === o.id ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${vis === o.id ? 'bg-brand-primary' : 'bg-bg-elevated'}`}>
                       <o.icon size={16} className={vis === o.id ? 'text-white' : 'text-text-secondary'} />
                     </div>
                     <div className="flex-1">
@@ -501,7 +501,7 @@ export default function CreateCharacterPage() {
                 max="10"
                 value={energyLevel}
                 onChange={e => setEnergyLevel(Number(e.target.value))}
-                className="w-full h-2 rounded-full appearance-none bg-surface-elevated accent-brand-primary"
+                className="w-full h-2 rounded-full appearance-none bg-bg-elevated accent-brand-primary"
               />
               <div className="flex justify-between text-[10px] text-text-muted mt-1">
                 <span>Chill</span>
@@ -624,7 +624,7 @@ export default function CreateCharacterPage() {
                   voiceId === 'text-only' ? 'ring-2 ring-brand-primary bg-brand-glow/10' : 'hover:bg-white/5'
                 }`}
               >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${voiceId === 'text-only' ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${voiceId === 'text-only' ? 'bg-brand-primary' : 'bg-bg-elevated'}`}>
                   <MessageSquare size={18} className={voiceId === 'text-only' ? 'text-white' : 'text-text-secondary'} />
                 </div>
                 <div className="flex-1">
@@ -675,7 +675,7 @@ export default function CreateCharacterPage() {
                 step="1"
                 value={maxImages}
                 onChange={e => { setMaxImages(Number(e.target.value)); setAgreeToDeductions(false); }}
-                className="w-full h-2 rounded-full appearance-none bg-surface-elevated accent-brand-primary"
+                className="w-full h-2 rounded-full appearance-none bg-bg-elevated accent-brand-primary"
                 style={{ background: `linear-gradient(to right, var(--brand-primary) ${(maxImages / 50) * 100}%, var(--surface-elevated) ${(maxImages / 50) * 100}%)` }}
               />
               <div className="flex justify-between text-[10px] text-text-muted mt-1">
@@ -699,7 +699,7 @@ export default function CreateCharacterPage() {
                 step="1"
                 value={maxVideos}
                 onChange={e => { setMaxVideos(Number(e.target.value)); setAgreeToDeductions(false); }}
-                className="w-full h-2 rounded-full appearance-none bg-surface-elevated accent-brand-primary"
+                className="w-full h-2 rounded-full appearance-none bg-bg-elevated accent-brand-primary"
                 style={{ background: `linear-gradient(to right, var(--brand-primary) ${(maxVideos / 10) * 100}%, var(--surface-elevated) ${(maxVideos / 10) * 100}%)` }}
               />
               <div className="flex justify-between text-[10px] text-text-muted mt-1">
@@ -788,7 +788,7 @@ export default function CreateCharacterPage() {
                   className="w-full glass rounded-2xl p-4 flex items-center justify-between hover:bg-white/5 transition-all"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${canPost ? 'bg-brand-primary/20' : 'bg-surface-elevated'}`}>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${canPost ? 'bg-brand-primary/20' : 'bg-bg-elevated'}`}>
                       <Sparkles size={16} className={canPost ? 'text-brand-primary' : 'text-text-muted'} />
                     </div>
                     <div className="text-left">
@@ -796,7 +796,7 @@ export default function CreateCharacterPage() {
                       <p className="text-[10px] text-text-muted">Character can create posts independently</p>
                     </div>
                   </div>
-                  <div className={`w-10 h-6 rounded-full transition-colors ${canPost ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
+                  <div className={`w-10 h-6 rounded-full transition-colors ${canPost ? 'bg-brand-primary' : 'bg-bg-elevated'}`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform mt-0.5 ${canPost ? 'translate-x-4 ml-0.5' : 'translate-x-0.5'}`} />
                   </div>
                 </button>
@@ -807,7 +807,7 @@ export default function CreateCharacterPage() {
                   className="w-full glass rounded-2xl p-4 flex items-center justify-between hover:bg-white/5 transition-all"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${canStory ? 'bg-brand-primary/20' : 'bg-surface-elevated'}`}>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${canStory ? 'bg-brand-primary/20' : 'bg-bg-elevated'}`}>
                       <Eye size={16} className={canStory ? 'text-brand-primary' : 'text-text-muted'} />
                     </div>
                     <div className="text-left">
@@ -815,7 +815,7 @@ export default function CreateCharacterPage() {
                       <p className="text-[10px] text-text-muted">Character can post 24-hour stories</p>
                     </div>
                   </div>
-                  <div className={`w-10 h-6 rounded-full transition-colors ${canStory ? 'bg-brand-primary' : 'bg-surface-elevated'}`}>
+                  <div className={`w-10 h-6 rounded-full transition-colors ${canStory ? 'bg-brand-primary' : 'bg-bg-elevated'}`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform mt-0.5 ${canStory ? 'translate-x-4 ml-0.5' : 'translate-x-0.5'}`} />
                   </div>
                 </button>

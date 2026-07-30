@@ -5,11 +5,12 @@ import {
   ArrowLeft, CreditCard, Bell, Lock, Shield, Globe, Smartphone,
   User, Mail, Camera, Mic, Info, Trash2, LogOut, ChevronRight,
   ToggleLeft, ToggleRight, Sparkles, ExternalLink, AlertTriangle,
-  Cookie, HelpCircle, FileText,
+  Cookie, HelpCircle, FileText, Sun, Moon,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch } from '@/app/store';
 import { mockCurrentUser, mockCredits } from '@/lib/mockData';
+import { getStoredTheme, toggleAndNotify, type Theme } from '@/app/theme';
 
 // ── Settings Row ──
 function SettingsRow({
@@ -81,6 +82,7 @@ export default function SettingsPage() {
   const [micPerm, setMicPerm] = useState(false);
   const [notifPerm, setNotifPerm] = useState(true);
 
+  const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // ── Credit display card ──
@@ -135,6 +137,14 @@ export default function SettingsPage() {
           <SettingsRow icon={Mail} label="Email" value={user?.email || mockCurrentUser.email} disabled />
           <SettingsRow icon={User} label="Username" value={user?.username || mockCurrentUser.username} />
           <SettingsRow icon={Lock} label="Change Password" onClick={() => {}} />
+          <SettingsRow
+            icon={theme === 'dark' ? Moon : Sun}
+            label="Appearance"
+            value={theme === 'dark' ? 'Dark mode' : 'Light mode'}
+            toggle
+            toggled={theme === 'dark'}
+            onToggle={() => setTheme(toggleAndNotify())}
+          />
         </div>
 
         {/* Billing */}

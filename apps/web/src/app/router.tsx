@@ -34,7 +34,7 @@ function Loading() {
     <div className="flex h-screen items-center justify-center bg-bg-canvas relative overflow-hidden">
       <div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[300px] rounded-full blur-[100px] opacity-20"
-        style={{ background: 'radial-gradient(circle, rgba(255,72,210,0.5), transparent)' }}
+        style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.5), transparent)' }}
       />
       <div className="relative z-10">
         <AnimatedLogo size={200} />

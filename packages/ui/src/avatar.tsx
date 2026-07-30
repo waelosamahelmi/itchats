@@ -39,7 +39,7 @@ export const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
       <div
         ref={ref}
         className={cn(
-          'rounded-full bg-surface-elevated flex items-center justify-center font-medium text-text-muted',
+          'rounded-full bg-bg-elevated flex items-center justify-center font-medium text-text-muted',
           sizeClasses[size],
           className,
         )}

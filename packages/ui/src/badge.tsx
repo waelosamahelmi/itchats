@@ -6,7 +6,7 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantClasses: Record<string, string> = {
-  default: 'bg-surface-elevated text-text-secondary',
+  default: 'bg-bg-elevated text-text-secondary',
   success: 'bg-success/20 text-success',
   warning: 'bg-warning/20 text-warning',
   danger: 'bg-danger/20 text-danger',

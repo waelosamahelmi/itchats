@@ -151,10 +151,10 @@ export default function MyCharactersPage() {
           <div className="grid grid-cols-2 gap-3 pb-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="glass rounded-2xl overflow-hidden animate-pulse">
-                <div className="w-full aspect-square bg-surface-elevated" />
+                <div className="w-full aspect-square bg-bg-elevated" />
                 <div className="p-3 space-y-2">
-                  <div className="h-3 bg-surface-elevated rounded-full w-3/4" />
-                  <div className="h-2 bg-surface-elevated rounded-full w-full" />
+                  <div className="h-3 bg-bg-elevated rounded-full w-3/4" />
+                  <div className="h-2 bg-bg-elevated rounded-full w-full" />
                 </div>
               </div>
             ))}

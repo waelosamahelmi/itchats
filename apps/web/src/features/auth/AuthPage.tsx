@@ -93,9 +93,9 @@ export default function AuthPage() {
     <div className="flex min-h-screen flex-col items-center justify-center px-6 relative overflow-hidden">
       <div className="absolute inset-0 bg-bg-canvas" />
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] rounded-full blur-[120px] opacity-20"
-        style={{ background: 'radial-gradient(circle, rgba(255,72,210,0.5), transparent)' }} />
+        style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.5), transparent)' }} />
       <div className="absolute bottom-0 left-0 w-[300px] h-[300px] rounded-full blur-[100px] opacity-15"
-        style={{ background: 'radial-gradient(circle, rgba(255,72,210,0.35), transparent)' }} />
+        style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.35), transparent)' }} />
       <div className="w-full max-w-sm relative z-10">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-0"><AnimatedLogo size={180} /></div>

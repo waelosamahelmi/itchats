@@ -32,7 +32,7 @@ function StoryCircle({ story, isYours }: { story: MockStory; isYours?: boolean }
       <div className={`relative p-[2px] rounded-full ${story.viewed ? '' : 'bg-gradient-to-br from-brand-primary via-social-warm to-brand-secondary'} ${story.isLive ? 'ring-2 ring-danger ring-offset-2 ring-offset-bg-canvas' : ''}`}>
         <div className="w-[60px] h-[60px] rounded-full overflow-hidden border-[3px] border-bg-canvas">
           {isYours ? (
-            <div className="w-full h-full bg-surface-elevated flex flex-col items-center justify-center gap-0.5 group-hover:bg-brand-glow/20 transition-colors">
+            <div className="w-full h-full bg-bg-elevated flex flex-col items-center justify-center gap-0.5 group-hover:bg-brand-glow/20 transition-colors">
               <Plus size={18} className="text-brand-primary" />
               <span className="text-[9px] text-brand-primary font-medium">Yours</span>
             </div>
@@ -255,7 +255,7 @@ function PostCard({ post }: { post: MockPost }) {
                 <div className="flex gap-2.5">
                   <img src={c.authorAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className={`rounded-2xl px-3 py-2 inline-block max-w-full ${c.authorIsAI ? 'bg-brand-glow/10' : 'bg-surface-elevated'}`}>
+                    <div className={`rounded-2xl px-3 py-2 inline-block max-w-full ${c.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="text-xs font-semibold text-text-primary">{c.authorName}</span>
                         {c.authorIsAI && <Badge variant="ai" className="text-[9px] px-1">AI</Badge>}
@@ -281,7 +281,7 @@ function PostCard({ post }: { post: MockPost }) {
                   <div key={r.id} className="flex gap-2.5 ml-9 mt-2">
                     <img src={r.authorAvatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="rounded-2xl px-3 py-1.5 inline-block bg-surface-elevated">
+                      <div className="rounded-2xl px-3 py-1.5 inline-block bg-bg-elevated">
                         <span className="text-xs font-semibold text-text-primary">{r.authorName}</span>
                         <p className="text-xs text-text-secondary mt-0.5">{r.content}</p>
                       </div>
@@ -486,17 +486,17 @@ export default function FeedPage() {
             Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="glass rounded-2xl p-4 space-y-3 animate-pulse">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-surface-elevated" />
+                  <div className="w-10 h-10 rounded-full bg-bg-elevated" />
                   <div className="space-y-1.5 flex-1">
-                    <div className="h-3 w-24 bg-surface-elevated rounded-full" />
-                    <div className="h-2 w-16 bg-surface-elevated rounded-full" />
+                    <div className="h-3 w-24 bg-bg-elevated rounded-full" />
+                    <div className="h-2 w-16 bg-bg-elevated rounded-full" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="h-3 bg-surface-elevated rounded-full w-3/4" />
-                  <div className="h-3 bg-surface-elevated rounded-full w-1/2" />
+                  <div className="h-3 bg-bg-elevated rounded-full w-3/4" />
+                  <div className="h-3 bg-bg-elevated rounded-full w-1/2" />
                 </div>
-                <div className="h-48 bg-surface-elevated rounded-xl" />
+                <div className="h-48 bg-bg-elevated rounded-xl" />
               </div>
             ))
           ) : posts.length === 0 ? (

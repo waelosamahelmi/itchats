@@ -11,7 +11,7 @@ export const Tabs = forwardRef<HTMLDivElement, TabsProps>(
   ({ className, value, onValueChange, items, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('flex gap-1 rounded-full bg-surface-elevated p-1', className)}
+      className={cn('flex gap-1 rounded-full bg-bg-elevated p-1', className)}
       {...props}
     >
       {items.map((item) => (
