@@ -52,23 +52,37 @@ export function MessageBubble({
 
   // ── Media generating placeholder ──
   if (message.kind === 'media_generating') {
+    const mediaLabel = message.text?.includes('selfie') ? 'a selfie' : message.text?.includes('video') ? 'a video' : 'an image';
+    // Try to extract specific description
+    const descMatch = message.text?.match(/"(.*?)"/);
+    const mediaDesc = descMatch ? descMatch[1] : mediaLabel;
     return (
       <article className="chat-message chat-message-character">
         {characterAvatarUrl && (
           <img src={characterAvatarUrl} alt={characterName} className="message-avatar" />
         )}
         <div className="message-stack">
-          <div className="media-request-card" role="status" aria-live="polite">
-            <div className="media-request-header">
-              <span className="media-request-emoji">🎨</span>
-              <span>{message.text}</span>
+          <div className="media-generating-card" role="status" aria-live="polite">
+            <div className="media-generating-phone">
+              <div className="media-generating-screen">
+                <div className="media-generating-wave">
+                  <div className="wave-bar" />
+                  <div className="wave-bar" />
+                  <div className="wave-bar" />
+                  <div className="wave-bar" />
+                  <div className="wave-bar" />
+                </div>
+              </div>
+              <div className="media-generating-phone-outline" />
             </div>
-            <div className="media-generating-loader">
-              <div className="generating-bar" />
-              <div className="generating-bar" />
-              <div className="generating-bar" />
+            <p className="media-generating-label">
+              <strong>{characterName}</strong> is sending you {mediaDesc}...
+            </p>
+            <div className="media-generating-dots">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
             </div>
-            <p className="media-request-cost">Generating your media...</p>
           </div>
         </div>
       </article>

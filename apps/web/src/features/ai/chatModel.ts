@@ -28,6 +28,9 @@ export interface ChatMessage {
   createdAt: string;
   delivery: DeliveryState;
   reactions: MessageReaction[];
+  /** The real DB message ID for this message (used for reactions). When a response has
+   * multiple parts, all parts share the same sourceMessageId pointing to the DB record. */
+  sourceMessageId?: string;
   /** Media request metadata (when kind === 'media_request') */
   mediaRequestId?: string;
   estimatedCredits?: number;
@@ -195,16 +198,18 @@ export function responsePartsToMessages(
   parts: ResponsePart[],
   mode: ConversationMode,
   characterId: string,
+  sourceMessageId?: string,
 ): ChatMessage[] {
   const visibleParts = mode === 'chat' ? parts.filter((part) => part.type === 'speech') : parts;
   const createdAt = new Date().toISOString();
 
   return visibleParts.map((part, index) => ({
-    id: `${characterId}-${createdAt}-${index}`,
-    sender: 'character',
+    id: sourceMessageId ? (index === 0 ? sourceMessageId : `${sourceMessageId}-${index}`) : `${characterId}-${createdAt}-${index}`,
+    sender: 'character' as const,
     ...decoratePart(part),
     createdAt,
-    delivery: 'delivered',
+    delivery: 'delivered' as const,
     reactions: [],
+    ...(sourceMessageId ? { sourceMessageId } : {}),
   }));
 }

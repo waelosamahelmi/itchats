@@ -196,7 +196,8 @@ const posts = createSlice({
       const post = s.feedPosts.find(p => p.id === a.payload.postId);
       if (post) {
         post.liked = true;
-        post.likes += 1;
+        post.likes = (post.likes || 0) + 1;
+        if (!Array.isArray(post.topReactions)) post.topReactions = [];
         const existing = post.topReactions.find(r => r.emoji === a.payload.emoji);
         if (existing) existing.count += 1;
         else post.topReactions.push({ emoji: a.payload.emoji, count: 1 });

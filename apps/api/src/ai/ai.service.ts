@@ -115,6 +115,7 @@ export class AiService {
     ];
 
     let fullResponse = '';
+    let aiMsgSaved = false;
     try {
       for await (const chunk of alibabaChatStream({
         messages: chatMessages,
@@ -122,63 +123,91 @@ export class AiService {
         maxTokens: 200,
       })) {
         fullResponse += chunk;
-        yield { type: 'chunk', content: chunk };
+        try {
+          yield { type: 'chunk', content: chunk };
+        } catch {
+          // Client disconnected mid-stream — continue accumulating for background save
+        }
       }
     } catch (err: any) {
+      // Provider error — only fail if we have NO response at all
+      if (fullResponse.length === 0) {
+        await db.update(generationJobs).set({
+          status: 'failed', errorCode: 'PROVIDER_ERROR',
+          errorMessageSafe: String(err.message).slice(0, 200), completedAt: new Date(),
+        }).where(eq(generationJobs.id, job!.id));
+        yield { type: 'error', message: 'AI generation failed. Please try again.' };
+        return;
+      }
+      // Otherwise, we got some response before the provider error — save what we have
+    }
+
+    // Always save the message to DB, even if client disconnected mid-stream
+    if (fullResponse.length > 0) {
+      // Strip media markers before storing the text message
+      const cleanContent = fullResponse.replace(/\[SELFIE\]|\[IMAGE:\s*.*?\]|\[VIDEO:\s*.*?\]/gi, '').trim();
+
+      const [aiMsg] = await db.insert(messages).values({
+        conversationId: convId, senderType: 'character', senderCharacterId: characterId,
+        type: 'text', content: cleanContent || fullResponse,
+      }).returning();
+
       await db.update(generationJobs).set({
-        status: 'failed', errorCode: 'PROVIDER_ERROR',
-        errorMessageSafe: String(err.message).slice(0, 200), completedAt: new Date(),
+        status: 'succeeded', responseJson: { content: fullResponse }, completedAt: new Date(),
       }).where(eq(generationJobs.id, job!.id));
-      yield { type: 'error', message: 'AI generation failed. Please try again.' };
-      return;
+
+      const outputTokens = Math.ceil(fullResponse.length / 4);
+      const actualCost = Math.max(getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: outputTokens }), 2);
+
+      await db.insert(usageEvents).values({
+        userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'llm_chat',
+        inputTokens: 3000, outputTokens, providerCostUsd: '0.0005', creditsDebited: actualCost,
+        pricingSnapshot: { model: 'qwen3.5-flash', credits: actualCost },
+      });
+
+      await db.update(creditWallets).set({
+        balance: sql`GREATEST(0, ${creditWallets.balance} - ${actualCost})`,
+        lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${actualCost}`,
+        updatedAt: new Date(),
+      }).where(eq(creditWallets.userId, userId));
+
+      await db.insert(creditLedger).values({
+        userId, delta: -actualCost, balanceAfter: Math.max(0, balance - actualCost),
+        reason: 'AI chat', referenceType: 'generation_job', referenceId: job!.id,
+      });
+
+      aiMsgSaved = true;
+
+      if (characterId) {
+        // Use the new Relationship Engine for multidimensional scoring
+        this.relationshipEngine.scoreAndUpdate(characterId, userId, message, fullResponse).catch(() => {});
+        // Still update the simple relationship as fallback
+        this.contextBuilder.updateRelationship(characterId, userId, 'positive');
+        this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
+        // AI sometimes reacts to the user's message
+        this.autoReact(convId, characterId, message).catch(() => {});
+      }
+
+      // Notify client if still connected
+      try {
+        yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost, conversationId: convId };
+      } catch {
+        // Client disconnected — message is already saved, that's fine
+      }
+
+      // ── Detect media markers: [SELFIE] / [IMAGE:...] yield media_request; [VIDEO:...] auto-generates ──
+      try {
+        yield* this.detectMediaMarkers(userId, characterId, convId, fullResponse);
+      } catch {
+        // Client disconnected during media marker yield — media generated in background if approved
+      }
+    } else if (!aiMsgSaved) {
+      // No response at all — mark job as failed
+      await db.update(generationJobs).set({
+        status: 'failed', errorCode: 'EMPTY_RESPONSE',
+        errorMessageSafe: 'AI returned an empty response', completedAt: new Date(),
+      }).where(eq(generationJobs.id, job!.id));
     }
-
-    // Strip media markers before storing the text message
-    const cleanContent = fullResponse.replace(/\[SELFIE\]|\[IMAGE:\s*.*?\]|\[VIDEO:\s*.*?\]/gi, '').trim();
-
-    const [aiMsg] = await db.insert(messages).values({
-      conversationId: convId, senderType: 'character', senderCharacterId: characterId,
-      type: 'text', content: cleanContent || fullResponse,
-    }).returning();
-
-    await db.update(generationJobs).set({
-      status: 'succeeded', responseJson: { content: fullResponse }, completedAt: new Date(),
-    }).where(eq(generationJobs.id, job!.id));
-
-    const outputTokens = Math.ceil(fullResponse.length / 4);
-    const actualCost = Math.max(getCreditCost('qwen3.5-flash', 'llm_chat', { inputTokens: 3000, outputTokens: outputTokens }), 2);
-
-    await db.insert(usageEvents).values({
-      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'llm_chat',
-      inputTokens: 3000, outputTokens, providerCostUsd: '0.0005', creditsDebited: actualCost,
-      pricingSnapshot: { model: 'qwen3.5-flash', credits: actualCost },
-    });
-
-    await db.update(creditWallets).set({
-      balance: sql`GREATEST(0, ${creditWallets.balance} - ${actualCost})`,
-      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${actualCost}`,
-      updatedAt: new Date(),
-    }).where(eq(creditWallets.userId, userId));
-
-    await db.insert(creditLedger).values({
-      userId, delta: -actualCost, balanceAfter: Math.max(0, balance - actualCost),
-      reason: 'AI chat', referenceType: 'generation_job', referenceId: job!.id,
-    });
-
-    if (characterId) {
-      // Use the new Relationship Engine for multidimensional scoring
-      this.relationshipEngine.scoreAndUpdate(characterId, userId, message, fullResponse).catch(() => {});
-      // Still update the simple relationship as fallback
-      this.contextBuilder.updateRelationship(characterId, userId, 'positive');
-      this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
-      // AI sometimes reacts to the user's message
-      this.autoReact(convId, characterId, message).catch(() => {});
-    }
-
-    yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost, conversationId: convId };
-
-    // ── Detect media markers: [SELFIE] / [IMAGE:...] yield media_request; [VIDEO:...] auto-generates ──
-    yield* this.detectMediaMarkers(userId, characterId, convId, fullResponse);
   }
 
   // In-memory storage for pending media requests awaiting user approval.
@@ -854,6 +883,119 @@ ${text}`;
       return { translatedText, detectedSourceLanguage };
     } catch {
       return { translatedText: text, detectedSourceLanguage: 'en' };
+    }
+  }
+
+  /**
+   * Check if the character should send a follow-up message to the user.
+   * Conditions: no user reply in 30+ minutes, relationship level >= 3, 
+   * character hasn't already sent a follow-up in this pause window.
+   */
+  async maybeSendFollowUp(userId: string, characterId: string, conversationId: string) {
+    try {
+      const db = getDb();
+
+      // Check relationship level
+      const [rel] = await db.select({
+        level: characterRelationships.visibleLevel,
+      }).from(characterRelationships)
+        .where(and(
+          eq(characterRelationships.characterId, characterId),
+          eq(characterRelationships.userId, userId),
+        )).limit(1);
+
+      const level = Number(rel?.level ?? 0);
+      if (level < 3) return { sent: false, reason: 'relationship too low' };
+
+      // Get the last message in this conversation
+      const [lastMsg] = await db.select({
+        id: messages.id,
+        senderType: messages.senderType,
+        createdAt: messages.createdAt,
+      }).from(messages)
+        .where(eq(messages.conversationId, conversationId))
+        .orderBy(desc(messages.createdAt))
+        .limit(1);
+
+      if (!lastMsg) return { sent: false, reason: 'no messages yet' };
+
+      // If the last message is from the character, they already said something
+      if (lastMsg.senderType === 'character') {
+        return { sent: false, reason: 'character already sent last message' };
+      }
+
+      // Check if 30 minutes have passed since the last user message
+      const lastMsgTime = new Date(lastMsg.createdAt!).getTime();
+      const thirtyMinMs = 30 * 60 * 1000;
+      if (Date.now() - lastMsgTime < thirtyMinMs) {
+        return { sent: false, reason: 'not enough time since last message' };
+      }
+
+      // Also check that the character hasn't already sent a follow-up AFTER the last user message
+      const followUpsAfter = await db.select({ id: messages.id }).from(messages)
+        .where(and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.senderType, 'character'),
+          sql`${messages.createdAt} > ${lastMsg.createdAt}`,
+        )).limit(1);
+      if (followUpsAfter.length > 0) {
+        return { sent: false, reason: 'follow-up already sent' };
+      }
+
+      // Build context and generate a casual follow-up message
+      const ctx = await this.contextBuilder.buildContext(characterId, userId, '', conversationId);
+      const followUpPrompt = `${ctx.systemPrompt}
+
+IMPORTANT: The user hasn't replied for a while (30+ minutes). As ${ctx.characterName}, send ONE short, casual follow-up message to check in. Keep it natural:
+- "hey, you still there?" 
+- "hope you're having a good day!" 
+- "just checking in 😊"
+- Something appropriate for your personality and relationship
+
+Return ONLY a JSON array: [{"type":"speech","content":"your message here"}]. Keep it under 15 words.`;
+
+      const result = await alibabaChat({
+        messages: [
+          { role: 'system', content: ctx.systemPrompt },
+          { role: 'user', content: followUpPrompt },
+        ],
+        temperature: 0.9,
+        maxTokens: 80,
+        model: 'qwen-flash',
+      });
+
+      const content = (result as any)?.content || '';
+      const cleanContent = content.replace(/```json\s*|```/g, '').trim();
+      let followUpText = cleanContent;
+
+      // Try to parse as JSON array
+      try {
+        const parsed = JSON.parse(cleanContent);
+        if (Array.isArray(parsed) && parsed[0]?.type === 'speech') {
+          followUpText = parsed[0].content || cleanContent;
+        }
+      } catch { /* use raw text */ }
+
+      if (!followUpText.trim()) return { sent: false, reason: 'empty response' };
+
+      // Save the follow-up message
+      await db.insert(messages).values({
+        conversationId,
+        senderType: 'character',
+        senderCharacterId: characterId,
+        type: 'text',
+        content: followUpText.trim(),
+      } as any);
+
+      // Update lastMessageAt
+      await db.update(conversations).set({
+        lastMessageAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(conversations.id, conversationId));
+
+      return { sent: true, message: followUpText.trim() };
+    } catch (err: any) {
+      return { sent: false, reason: String(err.message).slice(0, 100) };
     }
   }
 

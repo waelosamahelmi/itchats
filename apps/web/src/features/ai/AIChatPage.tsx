@@ -174,7 +174,7 @@ export default function AIChatPage() {
           return [base];
         }
         const parts = parseAssistantResponse(base.text);
-        return responsePartsToMessages(parts, history.mode ?? 'chat', characterId)
+        return responsePartsToMessages(parts, history.mode ?? 'chat', characterId, base.id)
           .map((part, index) => ({ ...part, id: index === 0 ? base.id : `${base.id}-${index}`, createdAt: base.createdAt }));
       });
       setMessages(normalized);
@@ -421,10 +421,11 @@ export default function AIChatPage() {
               conversationIdRef.current = payload.conversationId;
             }
             const parts = parseAssistantResponse(fullResponse);
+            const realMsgId = payload.messageId as string | undefined;
             setMessages((current) => [
               ...current.map((message) => message.id === optimisticId ? { ...message, delivery: 'delivered' as const } : message),
-              ...responsePartsToMessages(parts, mode, characterId).map((message, index) => ({
-                ...message, id: index === 0 && payload.messageId ? payload.messageId : message.id,
+              ...responsePartsToMessages(parts, mode, characterId, realMsgId).map((message, index) => ({
+                ...message, id: index === 0 && realMsgId ? realMsgId : message.id,
               })),
             ]);
             setStreaming('');
@@ -500,8 +501,11 @@ export default function AIChatPage() {
 
   async function react(messageId: string, emoji: string) {
     if (!conversationId) return;
+    // Find the real DB message ID: use sourceMessageId if available, otherwise the displayed ID
+    const msg = messages.find((m) => m.id === messageId);
+    const realMsgId = msg?.sourceMessageId || messageId;
     try {
-      const response = await fetch(`${API}/conversations/${conversationId}/messages/${messageId}/reactions`, {
+      const response = await fetch(`${API}/conversations/${conversationId}/messages/${realMsgId}/reactions`, {
         method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ emoji }),
       });
       if (!response.ok) throw new Error('Reaction could not be saved.');
@@ -555,9 +559,11 @@ export default function AIChatPage() {
       } else if (result.status === 'queued' && result.jobId) {
         // Async path: poll for job completion
         const placeholderId = crypto.randomUUID();
+        const mediaLabel = result.mediaType === 'selfie' ? 'a selfie' : result.mediaType === 'image' ? 'an image' : 'a video';
+        const mediaPrompt = result.mediaPrompt || '';
         setMessages((current) => [...current, {
-          id: placeholderId, sender: 'character', kind: 'system',
-          text: `🎨 ${name} is generating an image...`,
+          id: placeholderId, sender: 'character', kind: 'media_generating',
+          text: `${name} wants to send you ${mediaLabel}${mediaPrompt ? `: "${mediaPrompt}"` : ''}`,
           createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
         }]);
 
@@ -593,7 +599,7 @@ export default function AIChatPage() {
                 ...current.filter((m) => m.id !== placeholderId),
                 {
                   id: crypto.randomUUID(), sender: 'character', kind: 'system',
-                  text: `⚠️ Image generation failed${job.error ? `: ${job.error}` : ''}`,
+                  text: `⚠️ ${name} couldn't send that ${result.mediaType === 'selfie' ? 'selfie' : 'image'}${job.error ? `: ${job.error}` : ''}`,
                   createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
                 },
               ]);
@@ -607,7 +613,7 @@ export default function AIChatPage() {
             ...current.filter((m) => m.id !== placeholderId),
             {
               id: crypto.randomUUID(), sender: 'character', kind: 'system',
-              text: `⏰ Image generation is taking too long. It may appear shortly.`,
+              text: `⏰ ${name} is still working on that. It may appear shortly.`,
               createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
             },
           ]);
@@ -718,6 +724,7 @@ export default function AIChatPage() {
                 setConversationId(payload.conversationId);
               }
               const parts = parseAssistantResponse(fullResponse);
+              const realMsgId = payload.messageId as string | undefined;
               const speechText = parts.filter(p => p.type === 'speech').map(p => p.content).join('\n');
               // Add character response as chat message
               if (speechText.trim()) {

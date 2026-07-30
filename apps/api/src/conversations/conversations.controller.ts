@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException, Inject, Logger, InternalServerErrorException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { conversations, messages, characters } from '@itchats/database/schema';
-import { eq, and, desc, sql, isNull } from 'drizzle-orm';
+import { conversations, messages, characters, conversationParticipants } from '@itchats/database/schema';
+import { eq, and, desc, sql, isNull, gt } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { MessageReactionsService } from './message-reactions.service';
@@ -27,15 +27,49 @@ export class ConversationsController {
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
         characterName: characters.name,
+        lastReadMessageId: conversationParticipants.lastReadMessageId,
       }).from(conversations)
         .leftJoin(characters, eq(conversations.characterId, characters.id))
+        .leftJoin(conversationParticipants, and(
+          eq(conversationParticipants.conversationId, conversations.id),
+          eq(conversationParticipants.userId, req.user.userId),
+        ))
         .where(and(
           eq(conversations.createdByUserId, req.user.userId),
           isNull(conversations.deletedAt),
         ))
         .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
         .limit(50);
-      return rows;
+
+      // Compute unread counts for each conversation
+      const result = await Promise.all(rows.map(async (row) => {
+        let unreadCount = 0;
+        if (row.lastReadMessageId) {
+          // Count character messages after lastReadMessageId
+          const countRows = await db.select({
+            count: sql<number>`count(*)::int`,
+          }).from(messages)
+            .where(and(
+              eq(messages.conversationId, row.id),
+              eq(messages.senderType, 'character'),
+              gt(messages.createdAt, sql`(SELECT created_at FROM messages WHERE id = ${row.lastReadMessageId})`),
+            ));
+          unreadCount = Number(countRows[0]?.count) || 0;
+        } else {
+          // No last read message — count all character messages
+          const countRows = await db.select({
+            count: sql<number>`count(*)::int`,
+          }).from(messages)
+            .where(and(
+              eq(messages.conversationId, row.id),
+              eq(messages.senderType, 'character'),
+            ));
+          unreadCount = Number(countRows[0]?.count) || 0;
+        }
+        return { ...row, unreadCount, lastReadMessageId: undefined };
+      }));
+
+      return result;
     } catch (err: any) {
       this.logger.error('Failed to list conversations', err?.message || err);
       throw new InternalServerErrorException('Failed to load conversations');
@@ -129,10 +163,21 @@ export class ConversationsController {
   @UseGuards(JwtAuthGuard)
   async markRead(@Param('conversationId') id: string, @Req() req: any) {
     const db = getDb();
-    // Update last_message_at to mark as read up to this point
-    await db.execute(sql`
-      UPDATE conversations SET updated_at = NOW() WHERE id = ${id} AND created_by_user_id = ${req.user.userId}
-    `);
+    // Find the latest message in this conversation
+    const [latestMsg] = await db.select({ id: messages.id }).from(messages)
+      .where(eq(messages.conversationId, id))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+
+    if (latestMsg) {
+      // Upsert participant record using raw SQL (table lacks a primary key)
+      await db.execute(sql`
+        INSERT INTO conversation_participants (conversation_id, user_id, last_read_message_id, joined_at)
+        VALUES (${id}, ${req.user.userId}, ${latestMsg.id}, NOW())
+        ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_message_id = ${latestMsg.id}
+      `);
+    }
+
     return { read: true, conversationId: id };
   }
 

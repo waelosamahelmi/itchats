@@ -127,7 +127,22 @@ export class AiController {
   @Get('chat/history/:characterId')
   @UseGuards(JwtAuthGuard)
   async getChatHistory(@Param('characterId') characterId: string, @Req() req: any) {
-    return this.aiService.getChatHistory(characterId, req.user.userId);
+    const history = await this.aiService.getChatHistory(characterId, req.user.userId);
+    // Trigger follow-up check asynchronously (don't block the response)
+    if (history.conversationId) {
+      this.aiService.maybeSendFollowUp(req.user.userId, characterId, history.conversationId).catch(() => {});
+    }
+    return history;
+  }
+
+  @Post('chat/follow-up/:characterId')
+  @UseGuards(JwtAuthGuard)
+  async triggerFollowUp(@Param('characterId') characterId: string, @Body() body: { conversationId: string }, @Req() req: any) {
+    try {
+      return await this.aiService.maybeSendFollowUp(req.user.userId, characterId, body.conversationId);
+    } catch (err: any) {
+      return { sent: false, reason: err.message || 'Follow-up failed' };
+    }
   }
 
   @Post('image')
