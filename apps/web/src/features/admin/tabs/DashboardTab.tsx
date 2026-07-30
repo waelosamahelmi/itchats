@@ -170,7 +170,7 @@ export default function DashboardTab() {
   );
 }
 
-const PRESETS = ['stranger', 'acquaintance', 'friend', 'close_friend', 'best_friend', 'romantic', 'soulmate'] as const;
+const PRESETS = ['stranger', 'friend', 'close_friend', 'romantic', 'conflict'] as const;
 
 function RelationshipCheats({ token }: { token: string }) {
   const [chars, setChars] = useState<any[]>([]);
