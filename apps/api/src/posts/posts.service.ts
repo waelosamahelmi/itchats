@@ -58,7 +58,7 @@ export class PostsService {
       );
     const friendIds = friendRows.map((f) => f.friendId);
 
-    // Build feed: user's own posts + posts from followed characters + posts from friends
+    // Build feed: user's posts + followed characters + friends + public character posts
     const conditions: any[] = [];
     conditions.push(eq(posts.authorUserId, userId));
 
@@ -68,6 +68,13 @@ export class PostsService {
     if (friendIds.length > 0) {
       conditions.push(inArray(posts.authorUserId, friendIds));
     }
+    // Always include public posts from ALL characters (discover-style feed)
+    conditions.push(
+      and(
+        sql`${posts.authorCharacterId} IS NOT NULL`,
+        eq(posts.visibility, 'public'),
+      ),
+    );
 
     const feed = await db
       .select()
