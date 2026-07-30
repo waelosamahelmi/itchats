@@ -78,6 +78,9 @@ export default function SettingsPage() {
   // Privacy
   const [privateAccount, setPrivateAccount] = useState(false);
 
+  const [charVisibility, setCharVisibility] = useState(() => localStorage.getItem('itchats-char-visibility') ?? 'Everyone');
+  const [blockedCount, setBlockedCount] = useState(0);
+
   // Permissions
   const [cameraPerm, setCameraPerm] = useState(false);
   const [micPerm, setMicPerm] = useState(false);
@@ -328,8 +331,8 @@ export default function SettingsPage() {
             toggled={privateAccount}
             onToggle={() => setPrivateAccount(!privateAccount)}
           />
-          <SettingsRow icon={Globe} label="Who can see my characters" value="Everyone" onClick={() => {}} />
-          <SettingsRow icon={Lock} label="Blocked accounts" onClick={() => {}} />
+          <SettingsRow icon={Globe} label="Who can see my characters" value={charVisibility} onClick={() => { const opts: string[] = ['Everyone', 'Followers Only', 'Only Me']; const idx = Math.max(0, opts.indexOf(charVisibility)); const n = opts[(idx + 1) % 3]!; setCharVisibility(n); localStorage.setItem('itchats-char-visibility', n); }} />
+          <SettingsRow icon={Lock} label="Blocked accounts" value={blockedCount > 0 ? `${blockedCount} blocked` : 'None'} onClick={() => alert('Blocked users management coming soon.')} />
         </div>
 
         {/* About */}
