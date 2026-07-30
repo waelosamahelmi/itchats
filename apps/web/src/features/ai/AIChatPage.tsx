@@ -677,13 +677,13 @@ export default function AIChatPage() {
     if (!text.trim() || !characterId || !auth.token) return;
     setCallSpeaking(true);
     try {
-      const response = await fetch(`${API}/ai/chat/stream`, {
+      const res = await fetch(`${API}/ai/chat/stream`, {
         method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ characterId, conversationId, message: text, detectedLanguage: detectedLang }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ characterId, conversationId: conversationIdRef.current, message: text, detectedLanguage: detectedLang }),
       });
-      if (!response.ok || !response.body) throw new Error('Call failed');
-      const reader = response.body.getReader();
+      if (!res.ok || !res.body) throw new Error('Call failed');
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullResponse = '';
       let buffer = '';
@@ -696,42 +696,41 @@ export default function AIChatPage() {
         for (const event of events) {
           const dataLine = event.split('\n').find((line) => line.startsWith('data: '));
           if (!dataLine) continue;
-          const payload = JSON.parse(dataLine.slice(6));
-          if (payload.type === 'chunk') fullResponse += payload.content;
-          if (payload.type === 'done') {
-            if (payload.conversationId && !conversationId) {
-              setConversationId(payload.conversationId);
-              conversationIdRef.current = payload.conversationId;
+          try {
+            const payload = JSON.parse(dataLine.slice(6));
+            if (payload.type === 'chunk') fullResponse += payload.content;
+            if (payload.type === 'done') {
+              if (payload.conversationId && !conversationIdRef.current) {
+                conversationIdRef.current = payload.conversationId;
+                setConversationId(payload.conversationId);
+              }
+              const parts = parseAssistantResponse(fullResponse);
+              const speechText = parts.filter(p => p.type === 'speech').map(p => p.content).join('\n');
+              if (speechText && !callMuted) {
+                try {
+                  const ttsRes = await fetch(`${API}/ai/tts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
+                    body: JSON.stringify({ text: speechText, voice: (character as any)?.ttsVoice || 'longxiaochun' }),
+                  });
+                  if (ttsRes.ok) {
+                    const ttsData = await ttsRes.json() as any;
+                    if (ttsData.audioBase64) {
+                      const src = ttsData.audioBase64.startsWith('data:') ? ttsData.audioBase64 : `data:audio/mp3;base64,${ttsData.audioBase64}`;
+                      const audio = new Audio(src);
+                      ttsAudioRef.current = audio;
+                      await audio.play().catch(() => {});
+                    }
+                  }
+                } catch { /* TTS error */ }
+              }
             }
-            const parts = parseAssistantResponse(fullResponse);
-            const speechText = parts.filter(p => p.type === 'speech').map(p => p.content).join('\n');
-            // Speak the response via TTS
-            if (speechText && !callMuted) {
-              await speakTTS(speechText);
-            }
-          }
-          if (payload.type === 'error') throw new Error(payload.message);
+            if (payload.type === 'error') throw new Error(payload.message);
+          } catch { /* parse error */ }
         }
       }
     } catch (e) { console.error('Voice call error:', e); }
     setCallSpeaking(false);
-  }
-
-  async function speakTTS(text: string) {
-    try {
-      const res = await fetch(`${API}/ai/tts`, {
-        method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: (character as any)?.ttsVoice || character?.voiceId || 'longxiaochun' }),
-      });
-      if (!res.ok) return;
-      const data = await res.json() as any;
-      if (data.audioBase64) {
-        const audio = new Audio(data.audioBase64.startsWith('data:') ? data.audioBase64 : `data:audio/mp3;base64,${data.audioBase64}`);
-        ttsAudioRef.current = audio;
-        await audio.play();
-      }
-    } catch { /* TTS error */ }
   }
 
   function endVoiceCall() {
