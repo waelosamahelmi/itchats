@@ -52,7 +52,11 @@ export class ContextBuilderService {
 
     // Build recent message history
     const recentMessages: { role: string; content: string }[] = [];
+    let conversationMode: 'chat' | 'roleplay' = 'chat';
     if (conversationId) {
+      const [conversation] = await db.select({ mode: conversations.mode }).from(conversations)
+        .where(eq(conversations.id, conversationId)).limit(1);
+      conversationMode = conversation?.mode ?? 'chat';
       const history = await db.select({
         content: messages.content,
         senderType: messages.senderType,
@@ -105,6 +109,7 @@ export class ContextBuilderService {
       currentMood: (char.emotionState as any)?.mood || 'neutral',
       energyLevel: (char.emotionState as any)?.energy || 5,
       currentActivity: (char.emotionState as any)?.currentActivity,
+      conversationMode,
     };
 
     const personalityParams: PersonalityPromptParams = {

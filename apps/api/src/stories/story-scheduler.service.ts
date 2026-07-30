@@ -20,11 +20,20 @@ export class StorySchedulerService {
 
   start() {
     this.logger.log('Story scheduler started (every 15 minutes)');
-    this.interval = setInterval(() => this.tick(), 15 * 60 * 1000);
-    this.tick();
+    this.interval = setInterval(() => void this.runTickSafely(), 15 * 60 * 1000);
+    void this.runTickSafely();
   }
 
   stop() { if (this.interval) clearInterval(this.interval); }
+
+  private async runTickSafely() {
+    try {
+      await this.tick();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Story scheduler tick failed: ${message}`);
+    }
+  }
 
   private async tick() {
     const db = getDb();

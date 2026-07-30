@@ -10,12 +10,14 @@ import { users } from './users';
 import { characters } from './characters';
 
 export const conversationTypeEnum = pgEnum('conversation_type', ['human_human', 'human_character', 'group']);
+export const conversationModeEnum = pgEnum('conversation_mode', ['chat', 'roleplay']);
 
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   type: conversationTypeEnum('type').notNull(),
   createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
   characterId: uuid('character_id').references(() => characters.id, { onDelete: 'set null' }),
+  mode: conversationModeEnum('mode').notNull().default('chat'),
   title: text('title'),
   summary: text('summary'),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),

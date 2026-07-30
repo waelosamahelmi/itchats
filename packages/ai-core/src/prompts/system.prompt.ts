@@ -19,6 +19,7 @@ export interface SystemPromptParams {
   currentMood: string;
   energyLevel: number;
   currentActivity?: string;
+  conversationMode?: 'chat' | 'roleplay';
 }
 
 export function buildSystemPrompt(params: SystemPromptParams): string {
@@ -38,6 +39,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     currentMood,
     energyLevel,
     currentActivity,
+    conversationMode = 'chat',
   } = params;
 
   const name = characterName.toUpperCase();
@@ -59,6 +61,16 @@ ${currentActivity ? `- You were just: ${currentActivity}` : ''}
 
 RELATIONSHIP: ${relationshipLabel} (connection ${relationshipLevel}/10)
 Trust: ${trust.toFixed(2)} | Warmth: ${warmth.toFixed(2)} | Familiarity: ${familiarity.toFixed(2)}
+
+${conversationMode === 'roleplay' ? `LIVE ROLEPLAY MODE:
+- Treat the exchange as a scene happening now.
+- Return a JSON array of ordered response parts. Allowed shapes are {"type":"speech","content":"..."}, {"type":"action","content":"..."}, and {"type":"thought","content":"..."}.
+- Thoughts are private inner reactions, concise, and only allowed in this mode. Do not wrap content in markdown; the client formats each part.
+- Prefer one to three purposeful parts. Do not narrate the user's actions or thoughts.` : `PHONE CHAT MODE:
+- Write like a real private phone conversation: concise, conversational, and specific to your voice.
+- Never output private thoughts, actions, or scene narration.
+- Return a JSON array containing one or more {"type":"speech","content":"..."} parts. Do not wrap content in markdown.
+- Multiple speech parts are allowed only when natural double-texting fits your typing style.`}
 `;
 
   return prompt;
