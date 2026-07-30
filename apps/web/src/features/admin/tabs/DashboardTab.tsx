@@ -182,9 +182,9 @@ function RelationshipCheats({ token }: { token: string }) {
 
   useEffect(() => {
     fetch('/v1/admin/characters?limit=50', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => setChars(Array.isArray(d) ? d : [])).catch(() => {});
+      .then(r => r.json()).then(d => setChars(d?.characters || (Array.isArray(d) ? d : []))).catch(() => {});
     fetch('/v1/admin/users?limit=20', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+      .then(r => r.json()).then(d => setUsers(d?.users || (Array.isArray(d) ? d : []))).catch(() => {});
   }, [token]);
 
   const apply = async () => {
