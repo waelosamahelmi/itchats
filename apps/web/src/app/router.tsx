@@ -22,7 +22,7 @@ const NotificationsPage = lazy(() => import('@/features/notifications/Notificati
 const BillingPage = lazy(() => import('@/features/billing/BillingPage'));
 const AuthPage = lazy(() => import('@/features/auth/AuthPage'));
 const AuthCallbackPage = lazy(() => import('@/features/auth/AuthCallbackPage'));
-const AdminPanelPage = lazy(() => import('@/features/admin/AdminPanelPage'));
+import AdminPanelPage from '@/features/admin/AdminPanelPage';
 const LegalPage = lazy(() => import('@/features/legal/LegalPage'));
 const FAQPage = lazy(() => import('@/features/legal/FAQPage'));
 const TermsPage = lazy(() => import('@/features/legal/TermsPage'));
