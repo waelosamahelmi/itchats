@@ -12,8 +12,11 @@ const RequireAuth = () => {
     return <Navigate to="/auth" replace />;
   }
 
-  // Token exists but user not loaded yet — show loader while fetchMe runs
-  if (localToken && !user) {
+  if (!token && localToken) {
+    return <Outlet />;
+  }
+
+  if (!user && loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-bg-canvas">
         <div className="relative z-10 text-center">

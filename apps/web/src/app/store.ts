@@ -56,14 +56,16 @@ export const loginUser = createAsyncThunk('auth/login', async (d: { email: strin
   return data;
 });
 const auth = createSlice({
-  name: 'auth', initialState: { user: null as any, token: localStorage.getItem('accessToken'), loading: false, error: null as string | null },
+  name: 'auth', initialState: { user: (() => { try { const u = localStorage.getItem('itchats-user'); return u ? JSON.parse(u) : null; } catch { return null; } })(), token: localStorage.getItem('accessToken'), loading: false, error: null as string | null },
   reducers: { logout(s) { s.user = null; s.token = null; localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); } },
   extraReducers: (b) => {
     b.addCase(registerUser.fulfilled, (s, a) => { s.user = a.payload.user; s.token = a.payload.accessToken; s.error = null; });
     b.addCase(loginUser.fulfilled, (s, a) => { s.user = a.payload.user; s.token = a.payload.accessToken; s.error = null; });
     b.addCase(registerUser.rejected, (s, a) => { s.error = a.error.message || 'Register failed'; });
     b.addCase(loginUser.rejected, (s, a) => { s.error = a.error.message || 'Login failed'; });
-    b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; });
+    b.addCase(fetchMe.pending, (s) => { s.loading = true; });
+    b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; s.loading = false; });
+    b.addCase(fetchMe.rejected, (s) => { s.user = null; s.token = null; s.loading = false; localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); });
     b.addCase(saveWizard.fulfilled, (s, a) => {
       if (s.user) s.user = { ...s.user, wizardCompleted: (a.payload as any).wizardCompleted, firstLogin: false };
     });
