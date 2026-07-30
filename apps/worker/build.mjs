@@ -7,13 +7,15 @@ await esbuild.build({
   target: "node22",
   format: "esm",
   outfile: "dist/main.js",
-  external: ["bullmq", "ioredis", "@scarf/scarf"],
+  external: [
+    "bullmq", "ioredis", "sharp", "pg", "drizzle-orm",
+    "@nestjs/*", "@itchats/*", "jsonwebtoken", "stripe",
+  ],
   sourcemap: true,
   minify: false,
   banner: {
     js: `import { createRequire } from "module"; const require = createRequire(import.meta.url);`,
   },
-  packages: "external",
 });
 
 console.log("Worker build completed!");
