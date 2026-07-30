@@ -12,5 +12,6 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3091,
+    proxy: { '/v1': 'http://localhost:3092' },
   },
 });

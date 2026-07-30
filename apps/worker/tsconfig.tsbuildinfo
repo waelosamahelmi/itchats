@@ -1,1 +1,1 @@
-{"root":["./src/main.ts","./src/worker.service.ts"],"version":"5.9.3"}
+{"root":["./src/main.ts","./src/queues.ts","./src/worker.service.ts","./src/processors/cleanup-processor.ts","./src/processors/image-processor.ts","./src/processors/media-processor.ts","./src/processors/memory-processor.ts","./src/processors/notification-processor.ts","./src/processors/video-processor.ts","./src/types/web-push.d.ts"],"version":"5.9.3"}

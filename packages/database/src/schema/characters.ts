@@ -32,6 +32,7 @@ export const characters = pgTable('characters', {
   identityOrigin: identityOriginEnum('identity_origin').notNull(),
   identityVersion: integer('identity_version').notNull().default(1),
   avatarMediaId: uuid('avatar_media_id'),
+  avatarUrl: text('avatar_url'),
   description: text('description').notNull().default(''),
   personality: text('personality').notNull().default(''),
   backstory: text('backstory').notNull().default(''),

@@ -64,7 +64,7 @@ export class CharactersController {
       .where(eq(characterLocations.characterId, id)).limit(1);
     const [follows] = await db.select({ count: sql<number>`count(*)` })
       .from(characterFollows).where(eq(characterFollows.characterId, id));
-    return { ...char, location: location || null, followersCount: follows?.count ?? 0, avatarUrl: null };
+    return { ...char, location: location || null, followersCount: follows?.count ?? 0 };
   }
 
   @Patch(':characterId')

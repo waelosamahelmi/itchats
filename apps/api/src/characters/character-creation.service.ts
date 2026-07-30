@@ -266,11 +266,12 @@ Return ONLY valid JSON, nothing else:
 
       const result = await alibabaTextToImageWithFallback({ prompt: imagePrompt, size: '1024*1024' });
 
-      // Update character directly with the avatar URL (actual DB column is avatar_url)
-      await db.execute(sql`
-        UPDATE characters SET avatar_url = ${result.url}, status = 'ready', identity_version = identity_version + 1, updated_at = NOW()
-        WHERE id = ${characterId}
-      `);
+      await db.update(characters).set({
+        avatarUrl: result.url,
+        status: 'ready',
+        identityVersion: char.identityVersion + 1,
+        updatedAt: new Date(),
+      }).where(eq(characters.id, characterId));
 
       // Record usage
       await db.insert(usageEvents).values({
@@ -367,15 +368,13 @@ Return ONLY valid JSON, nothing else:
     const result = await alibabaTextToImageWithFallback({ prompt: visualPrompt, size: '1024*1024' });
 
     // Update character with regenerated public-safe identity
-    await db.execute(sql`
-      UPDATE characters 
-      SET avatar_url = ${result.url},
-          identity_origin = 'public_regenerated_from_private_metadata',
-          identity_version = identity_version + 1,
-          status = 'ready',
-          updated_at = NOW()
-      WHERE id = ${characterId}
-    `);
+    await db.update(characters).set({
+      avatarUrl: result.url,
+      identityOrigin: 'public_regenerated_from_private_metadata',
+      identityVersion: char.identityVersion + 1,
+      status: 'ready',
+      updatedAt: new Date(),
+    }).where(eq(characters.id, characterId));
 
     // Record usage
     await db.insert(usageEvents).values({

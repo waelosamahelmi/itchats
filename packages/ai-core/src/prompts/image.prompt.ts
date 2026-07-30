@@ -69,12 +69,22 @@ export function buildSelfiePrompt(params: ImagePromptParams, context?: string): 
   const { characterName, selfieStyle, wardrobe } = params;
   const genderLabel = params.gender || 'person';
 
+  const scenePresets: Record<string, string> = {
+    casual_front_camera: 'a natural front-camera selfie at arm length, direct eye contact, relaxed imperfect framing',
+    mirror_selfie: 'a realistic mirror selfie, phone visible in the reflection, natural reversed composition, no duplicate person',
+    activity_snapshot: 'a spontaneous front-camera snapshot during their current activity, candid expression, believable surroundings',
+    dressed_up: 'a dressed-up front-camera portrait before going out, flattering practical lighting, authentic phone-camera framing',
+    candid_low_light: 'a casual low-light phone selfie, mild sensor grain, ambient practical lights, natural skin texture',
+  };
+  const scene = context && scenePresets[context] ? scenePresets[context] : context;
+
   return [
-    `${characterName}, a ${genderLabel} taking a selfie`,
-    context || '',
+    params.canonicalPrompt || `${characterName}, a ${genderLabel}, ${params.description || ''}`,
+    scene || scenePresets.casual_front_camera,
     selfieStyle || 'casual, natural lighting, looking at camera, modern smartphone selfie quality',
     wardrobe ? `wearing ${wardrobe}` : '',
-    'selfie style, arm extended holding phone, 1 person only, photorealistic, consistent identity',
+    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age',
+    'one real person only, photorealistic, anatomically correct hands, natural skin texture, no beauty-filter plastic skin, no text, no watermark',
   ].filter(Boolean).join(', ');
 }
 

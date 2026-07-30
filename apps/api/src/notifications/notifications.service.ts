@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { notifications } from '@itchats/database/schema';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { notifications, pushSubscriptions } from '@itchats/database/schema';
+import { and, desc, eq, isNull, count, sql } from 'drizzle-orm';
 
 @Injectable()
 export class NotificationsService {
@@ -39,9 +39,46 @@ export class NotificationsService {
 
   async unreadCount(userId: string) {
     const db = getDb();
-    const result = await db.select({ c: notifications.id })
+    const [result] = await db.select({ count: count() })
       .from(notifications)
-      .where(eq(notifications.userId, userId));
-    return { count: result.length };
+      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+    return { count: result?.count ?? 0 };
+  }
+
+  // ── Push Subscriptions ──
+
+  async subscribePush(userId: string, endpoint: string, p256dh: string, auth: string) {
+    const db = getDb();
+
+    // Check if this endpoint already exists
+    const [existing] = await db.select().from(pushSubscriptions)
+      .where(eq(pushSubscriptions.endpoint, endpoint))
+      .limit(1);
+
+    if (existing) {
+      // Update the existing subscription
+      await db.update(pushSubscriptions).set({
+        userId, p256dh, auth, enabled: 'true',
+      } as any).where(eq(pushSubscriptions.id, existing.id));
+      return { subscriptionId: existing.id, updated: true };
+    }
+
+    const [sub] = await db.insert(pushSubscriptions).values({
+      userId, endpoint, p256dh, auth,
+    }).returning();
+
+    return { subscriptionId: sub!.id, created: true };
+  }
+
+  async unsubscribePush(subscriptionId: string) {
+    const db = getDb();
+    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, subscriptionId));
+    return { deleted: true };
+  }
+
+  async getUserPushSubscriptions(userId: string) {
+    const db = getDb();
+    return db.select().from(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.enabled, 'true' as any)));
   }
 }

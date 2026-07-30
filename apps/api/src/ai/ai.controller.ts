@@ -70,11 +70,21 @@ export class AiController {
 
   @Post('selfie')
   @UseGuards(JwtAuthGuard)
-  async selfie(@Body() body: { characterId: string; context?: string }, @Req() req: any) {
+  async selfie(@Body() body: { characterId: string; style?: string; context?: string }, @Req() req: any) {
     try {
-      return await this.aiService.generateSelfie(req.user.userId, body.characterId, body.context);
+      return await this.aiService.generateSelfie(req.user.userId, body.characterId, body.style || body.context);
     } catch {
       return safeAiError('Selfie generation failed. Please try again.');
+    }
+  }
+
+  @Post('character-video')
+  @UseGuards(JwtAuthGuard)
+  async characterVideo(@Body() body: { characterId: string; style?: string }, @Req() req: any) {
+    try {
+      return await this.aiService.generateCharacterVideo(req.user.userId, body.characterId, body.style);
+    } catch {
+      return safeAiError('Character video generation failed. Generate a profile picture first, then try again.');
     }
   }
 

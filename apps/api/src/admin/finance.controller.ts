@@ -4,9 +4,10 @@ import { UsageService } from '../usage/usage.service';
 import { MarginGuard } from '../usage/margin-guard.service';
 import { PricingService } from '../usage/pricing.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { AdminRoleGuard } from './admin-role.guard';
 
 @Controller('v1/admin/finance')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminRoleGuard)
 export class FinanceController {
   constructor(
     @Inject(TreasuryService) private readonly treasury: TreasuryService,

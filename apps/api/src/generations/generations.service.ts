@@ -1,8 +1,28 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { generationJobs, usageEvents } from '@itchats/database/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import type { Queue } from 'bullmq';
+
+/**
+ * Generation service — creates DB records and enqueues jobs to BullMQ.
+ *
+ * Pattern:
+ * 1. Create generation_jobs row (status: queued)
+ * 2. Enqueue to the appropriate BullMQ queue
+ * 3. Worker picks up the job, sets status → processing → succeeded/failed
+ * 4. Client polls GET /v1/generations/:jobId for status
+ */
+
+// Lazy-loaded queue references — set by the module
+let _imageQueue: Queue | null = null;
+let _videoQueue: Queue | null = null;
+
+export function setGenerationQueues(imageQueue: Queue, videoQueue: Queue) {
+  _imageQueue = imageQueue;
+  _videoQueue = videoQueue;
+}
 
 @Injectable()
 export class GenerationsService {
@@ -17,6 +37,18 @@ export class GenerationsService {
       requestJson: { prompt, model },
       status: 'queued',
     }).returning();
+
+    // Enqueue to worker
+    if (_imageQueue) {
+      await _imageQueue.add('text-to-image', {
+        jobId: job!.id,
+        generationType: 'text_to_image',
+        prompt,
+        model,
+        userId,
+      });
+    }
+
     return { jobId: job!.id, status: 'queued', idempotencyKey };
   }
 
@@ -31,21 +63,43 @@ export class GenerationsService {
       requestJson: { prompt, imageUrl },
       status: 'queued',
     }).returning();
+
+    if (_imageQueue) {
+      await _imageQueue.add('image-to-image', {
+        jobId: job!.id,
+        generationType: 'image_to_image',
+        prompt,
+        imageUrl,
+        userId,
+      });
+    }
+
     return { jobId: job!.id, status: 'queued', idempotencyKey };
   }
 
-  async requestVideo(userId: string, prompt: string) {
+  async requestVideo(userId: string, prompt: string, imageBase64?: string) {
     const db = getDb();
-    const idempotencyKey = randomUUID();
+    const generationType = imageBase64 ? 'image_to_video' : 'text_to_video';
     const [job] = await db.insert(generationJobs).values({
       userId,
-      generationType: 'text_to_video',
+      generationType,
       routeKey: 'video.standard',
-      idempotencyKey,
-      requestJson: { prompt },
+      idempotencyKey: randomUUID(),
+      requestJson: { prompt, imageBase64 },
       status: 'queued',
     }).returning();
-    return { jobId: job!.id, status: 'queued', idempotencyKey };
+
+    if (_videoQueue) {
+      await _videoQueue.add(generationType, {
+        jobId: job!.id,
+        generationType,
+        prompt,
+        imageBase64,
+        userId,
+      });
+    }
+
+    return { jobId: job!.id, status: 'queued' };
   }
 
   async requestTTS(userId: string, text: string, voice?: string) {

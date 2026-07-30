@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Delete, Param, Body, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters } from '@itchats/database/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { MessageReactionsService } from './message-reactions.service';
 
 @Controller('v1/conversations')
 export class ConversationsController {
+  constructor(private readonly messageReactions: MessageReactionsService) {}
+
   @Get()
   @UseGuards(JwtAuthGuard)
   async list(@Req() req: any) {
@@ -14,6 +17,7 @@ export class ConversationsController {
     return db.select({
       id: conversations.id,
       type: conversations.type,
+      mode: conversations.mode,
       characterId: conversations.characterId,
       title: conversations.title,
       lastMessageAt: conversations.lastMessageAt,
@@ -29,24 +33,48 @@ export class ConversationsController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  async create(@Body() body: { type: string; characterId?: string }, @Req() req: any) {
+  async create(@Body() body: { type: string; characterId?: string; mode?: 'chat' | 'roleplay' }, @Req() req: any) {
     const db = getDb();
     const [conv] = await db.insert(conversations).values({
       type: body.type as 'human_character',
       characterId: body.characterId,
       createdByUserId: req.user.userId,
+      mode: body.mode ?? 'chat',
     }).returning();
     return conv;
   }
 
+  @Patch(':conversationId/mode')
+  @UseGuards(JwtAuthGuard)
+  async updateMode(
+    @Param('conversationId') id: string,
+    @Body() body: { mode?: string },
+    @Req() req: any,
+  ) {
+    if (body.mode !== 'chat' && body.mode !== 'roleplay') {
+      throw new NotFoundException('Conversation mode not found');
+    }
+    const db = getDb();
+    const [conversation] = await db.update(conversations).set({ mode: body.mode, updatedAt: new Date() })
+      .where(and(eq(conversations.id, id), eq(conversations.createdByUserId, req.user.userId)))
+      .returning({ id: conversations.id, mode: conversations.mode });
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    return conversation;
+  }
+
   @Get(':conversationId/messages')
   @UseGuards(JwtAuthGuard)
-  async getMessages(@Param('conversationId') id: string, @Query('before') before?: string) {
+  async getMessages(@Param('conversationId') id: string, @Query('before') before: string | undefined, @Req() req: any) {
     const db = getDb();
-    return db.select().from(messages)
+    const [conversation] = await db.select({ id: conversations.id }).from(conversations)
+      .where(and(eq(conversations.id, id), eq(conversations.createdByUserId, req.user.userId))).limit(1);
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    const history = await db.select().from(messages)
       .where(eq(messages.conversationId, id))
       .orderBy(desc(messages.createdAt))
       .limit(50);
+    const reactions = await this.messageReactions.listForMessages(history.map((message) => message.id));
+    return history.map((message) => ({ ...message, reactions: reactions[message.id] ?? [] }));
   }
 
   @Post(':conversationId/messages')
@@ -144,17 +172,7 @@ export class ConversationsController {
     @Body() body: { emoji: string },
     @Req() req: any,
   ) {
-    const db = getDb();
-    const userId = req.user.userId;
-    await db.execute(sql`
-      UPDATE messages SET metadata = jsonb_set(
-        COALESCE(metadata, '{}'::jsonb),
-        '{reactions}'::text[],
-        COALESCE(metadata->'reactions', '{}'::jsonb) || ${JSON.stringify({ [userId]: body.emoji })}::jsonb
-      )
-      WHERE id = ${msgId} AND conversation_id = ${convId}
-    `);
-    return { reacted: true, emoji: body.emoji };
+    return this.messageReactions.react(convId, msgId, req.user.userId, body.emoji);
   }
 
   @Delete(':conversationId/messages/:messageId/reactions')
@@ -164,16 +182,6 @@ export class ConversationsController {
     @Param('messageId') msgId: string,
     @Req() req: any,
   ) {
-    const db = getDb();
-    const userId = req.user.userId;
-    await db.execute(sql`
-      UPDATE messages SET metadata = jsonb_set(
-        COALESCE(metadata, '{}'::jsonb),
-        '{reactions}'::text[],
-        (COALESCE(metadata->'reactions', '{}'::jsonb) - ${userId})
-      )
-      WHERE id = ${msgId} AND conversation_id = ${convId}
-    `);
-    return { removed: true };
+    return this.messageReactions.remove(convId, msgId, req.user.userId);
   }
 }

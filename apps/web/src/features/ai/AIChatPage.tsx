@@ -1,423 +1,270 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, MoreHorizontal, Phone, Sparkles } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import {
-  ArrowLeft, Send, Bot, ImageIcon, Mic, MicOff, Play, Pause,
-  UserCircle, Heart, Camera, Smile,
-} from 'lucide-react';
 import type { RootState } from '@/app/store';
+import { ChatComposer } from './ChatComposer';
+import { MessageBubble } from './MessageBubble';
+import {
+  normalizeHistoryMessage,
+  parseAssistantResponse,
+  responsePartsToMessages,
+  type ChatMessage,
+  type ConversationMode,
+} from './chatModel';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
+const API = '/v1';
 
-interface Message {
-  role: string;
-  content: string;
-  id: string;
-  type?: string;
-  audioUrl?: string;
-  metadata?: { status?: string; reactions?: Record<string, string> };
+function fallbackAvatar(name: string) {
+  return `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(name)}`;
 }
 
 export default function AIChatPage() {
-  const { characterId } = useParams<{ characterId: string }>();
-  const nav = useNavigate();
-  const { token } = useSelector((s: RootState) => s.auth);
-  const characters = useSelector((s: RootState) => s.characters.mine);
-  const char = characters.find((c: any) => c.id === characterId);
-
-  const [msgs, setMsgs] = useState<Message[]>([]);
+  const { characterId = '' } = useParams<{ characterId: string }>();
+  const navigate = useNavigate();
+  const auth = useSelector((state: RootState) => state.auth);
+  const characters = useSelector((state: RootState) => [...state.characters.mine, ...state.characters.discover]);
+  const character = characters.find((item) => item.id === characterId);
+  const name = character?.name || 'Character';
+  const avatarUrl = character?.avatarUrl || fallbackAvatar(name);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [mode, setMode] = useState<ConversationMode>('chat');
+  const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState('');
+  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [playing, setPlaying] = useState<string | null>(null);
-  const [mode, setMode] = useState<'text' | 'voice'>('text');
-  const [imageBase64, setImageBase64] = useState('');
-  const [imagePreview, setImagePreview] = useState('');
+  const [error, setError] = useState<string>();
+  const [playingId, setPlayingId] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [msgs, streaming]);
+  useEffect(scrollToBottom, [messages, streaming, scrollToBottom]);
 
   useEffect(() => {
-    if (!token || !characterId) return;
-    async function load() {
-      setLoading(true);
-      try {
-        const [histRes, relRes] = await Promise.all([
-          fetch(`${API}/ai/chat/history/${characterId}`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${API}/ai/relationship/${characterId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        ]);
-        if (histRes.ok) {
-          const data = await histRes.json();
-          if (data.messages?.length) {
-            setMsgs(data.messages.map((m: any) => ({
-              id: m.id,
-              role: m.senderType === 'user' ? 'user' : 'assistant',
-              content: m.content,
-              type: m.type,
-              audioUrl: m.metadata?.audioUrl,
-            })));
-          }
-        }
-        if (relRes.ok) {
-          const rel = await relRes.json();
-          setRelationship(rel);
-        }
-      } catch { /* offline or API unavailable */ }
-      setLoading(false);
-    }
-    load();
-  }, [characterId, token]);
-
-  const send = async () => {
-    if ((!input.trim() && !imageBase64) || !token) return;
-    const msgContent = input.trim() || 'Describe this image';
-    const userMsg: Message = { role: 'user', content: imageBase64 ? '📷 ' + msgContent : msgContent, id: crypto.randomUUID(), type: imageBase64 ? 'image' : 'text' };
-    setMsgs((prev) => [...prev, userMsg]);
-    setInput('');
-    const imgData = imageBase64;
-    setImageBase64(''); setImagePreview('');
-    setSending(true);
-    setStreaming('');
-
-    try {
-      const res = await fetch(`${API}/ai/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ characterId, message: userMsg.content, imageBase64: imgData || undefined }),
+    if (!auth.token || !characterId) return;
+    let active = true;
+    Promise.all([
+      fetch(`${API}/ai/chat/history/${characterId}`, { headers: headers() }),
+      fetch(`${API}/ai/relationship/${characterId}`, { headers: headers() }),
+    ]).then(async ([historyResponse, relationshipResponse]) => {
+      if (!historyResponse.ok) throw new Error('Conversation history could not be loaded.');
+      const history = await historyResponse.json();
+      const relation = relationshipResponse.ok ? await relationshipResponse.json() : null;
+      if (!active) return;
+      const normalized = (history.messages ?? []).flatMap((item: any): ChatMessage[] => {
+        const base = normalizeHistoryMessage(item);
+        if (base.sender !== 'character' || base.kind !== 'text') return [base];
+        const parts = parseAssistantResponse(base.text);
+        return responsePartsToMessages(parts, history.mode ?? 'chat', characterId)
+          .map((part, index) => ({ ...part, id: index === 0 ? base.id : `${base.id}-${index}`, createdAt: base.createdAt }));
       });
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No stream');
+      setMessages(normalized);
+      setConversationId(history.conversationId);
+      setMode(history.mode ?? 'chat');
+      setRelationship(relation);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : 'Conversation could not be loaded.');
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [auth.token, characterId, headers]);
+
+  async function updateMode(nextMode: ConversationMode) {
+    const previous = mode;
+    setMode(nextMode);
+    if (!conversationId) return;
+    try {
+      const response = await fetch(`${API}/conversations/${conversationId}/mode`, {
+        method: 'PATCH', headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: nextMode }),
+      });
+      if (!response.ok) throw new Error('Mode could not be saved.');
+    } catch (cause) {
+      setMode(previous);
+      setError(cause instanceof Error ? cause.message : 'Mode could not be saved.');
+    }
+  }
+
+  async function send() {
+    const content = input.trim();
+    if (!content || !auth.token || busy) return;
+    const optimisticId = crypto.randomUUID();
+    setMessages((current) => [...current, {
+      id: optimisticId, sender: 'user', kind: 'text', text: content,
+      createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
+    }]);
+    setInput('');
+    setBusy(true);
+    setError(undefined);
+    setStreaming('');
+    let fullResponse = '';
+    try {
+      const response = await fetch(`${API}/ai/chat/stream`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characterId, conversationId, message: content }),
+      });
+      if (!response.ok || !response.body) throw new Error('Message could not be sent.');
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buf = '';
-      let fullReply = '';
+      let buffer = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const d = JSON.parse(line.slice(6));
-              if (d.type === 'chunk') {
-                fullReply += d.content;
-                setStreaming(fullReply);
-              } else if (d.type === 'done') {
-                const final = d.content || fullReply;
-                setMsgs((prev) => [...prev, { role: 'assistant', content: final, id: crypto.randomUUID() }]);
-                setStreaming('');
-                fullReply = '';
-              } else if (d.type === 'error') {
-                setMsgs((prev) => [...prev, { role: 'assistant', content: d.message || 'AI error', id: crypto.randomUUID() }]);
-              }
-            } catch { /* skip unparseable chunks */ }
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          const dataLine = event.split('\n').find((line) => line.startsWith('data: '));
+          if (!dataLine) continue;
+          const payload = JSON.parse(dataLine.slice(6));
+          if (payload.type === 'chunk') {
+            fullResponse += payload.content;
+            setStreaming(fullResponse);
           }
+          if (payload.type === 'done') {
+            const parts = parseAssistantResponse(fullResponse);
+            setMessages((current) => [
+              ...current.map((message) => message.id === optimisticId ? { ...message, delivery: 'delivered' as const } : message),
+              ...responsePartsToMessages(parts, mode, characterId).map((message, index) => ({
+                ...message, id: index === 0 && payload.messageId ? payload.messageId : message.id,
+              })),
+            ]);
+            setStreaming('');
+          }
+          if (payload.type === 'image') {
+            setMessages((current) => [...current, {
+              id: crypto.randomUUID(), sender: 'character', kind: 'image',
+              text: payload.description ? `${name} sent an image` : `${name} sent a selfie`,
+              mediaUrl: payload.url, createdAt: new Date().toISOString(),
+              delivery: 'delivered', reactions: [],
+            }]);
+          }
+          if (payload.type === 'video') {
+            setMessages((current) => [...current, {
+              id: crypto.randomUUID(), sender: 'character', kind: 'video',
+              text: payload.description ? `${name} sent a video` : `${name} sent a video`,
+              mediaUrl: payload.url, createdAt: new Date().toISOString(),
+              delivery: 'delivered', reactions: [],
+            }]);
+          }
+          if (payload.type === 'video_queued') {
+            setMessages((current) => [...current, {
+              id: crypto.randomUUID(), sender: 'character', kind: 'system',
+              text: payload.message || `Video is generating: ${payload.description}`,
+              createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+            }]);
+          }
+          if (payload.type === 'media_error') {
+            setMessages((current) => [...current, {
+              id: crypto.randomUUID(), sender: 'character', kind: 'system',
+              text: `⚠️ ${payload.message}`,
+              createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+            }]);
+          }
+          if (payload.type === 'error') throw new Error(payload.message || 'Character could not reply.');
         }
       }
-    } catch {
-      setMsgs((prev) => [...prev, { role: 'assistant', content: 'Connection error — check if the API server is running.', id: crypto.randomUUID() }]);
+    } catch (cause) {
+      setMessages((current) => current.map((message) => message.id === optimisticId
+        ? { ...message, delivery: 'failed' as const } : message));
+      setError(cause instanceof Error ? cause.message : 'Message could not be sent.');
+    } finally {
+      setBusy(false);
+      setStreaming('');
     }
-    setSending(false);
-    setStreaming('');
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      const chunks: BlobPart[] = [];
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        stream.getTracks().forEach((t) => t.stop());
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-        setMsgs((prev) => [...prev, { role: 'user', content: '🎤 Voice message', id: crypto.randomUUID(), type: 'voice', audioUrl: dataUrl }]);
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch {
-      alert('Microphone access needed for voice messages');
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
-  };
-
-  const playAudio = (url: string) => {
-    if (!audioRef.current) { audioRef.current = new Audio(); }
-    if (playing === url) { audioRef.current.pause(); setPlaying(null); return; }
-    audioRef.current.src = url;
-    audioRef.current.play();
-    setPlaying(url);
-    audioRef.current.onended = () => setPlaying(null);
-  };
-
-  const requestSelfie = async () => {
-    if (!token || !characterId) return;
-    setSending(true);
-    try {
-      const res = await fetch(`${API}/ai/selfie`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ characterId, context: 'Can you send me a selfie?' }),
-      });
-      const data = await res.json();
-      if (data.url) {
-        setMsgs((prev) => [...prev, { role: 'assistant', content: data.url, id: crypto.randomUUID(), type: 'image' }]);
-      } else {
-        setMsgs((prev) => [...prev, { role: 'assistant', content: data.error || 'Could not generate selfie', id: crypto.randomUUID() }]);
-      }
-    } catch { setMsgs((prev) => [...prev, { role: 'assistant', content: 'Selfie generation failed', id: crypto.randomUUID() }]); }
-    setSending(false);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10MB'); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setImagePreview(dataUrl);
-      setImageBase64(dataUrl.split(',')[1] || dataUrl);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  if (!token) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-bg-canvas text-text-muted text-sm">
-        Sign in to chat with AI characters
-      </div>
-    );
   }
 
+  async function react(messageId: string, emoji: string) {
+    if (!conversationId) return;
+    try {
+      const response = await fetch(`${API}/conversations/${conversationId}/messages/${messageId}/reactions`, {
+        method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ emoji }),
+      });
+      if (!response.ok) throw new Error('Reaction could not be saved.');
+      const reaction = await response.json();
+      setMessages((current) => current.map((message) => message.id === messageId ? {
+        ...message,
+        reactions: [...message.reactions.filter((item) => item.actorType !== 'user'), reaction],
+      } : message));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Reaction could not be saved.');
+    }
+  }
+
+  function playVoice(message: ChatMessage) {
+    if (!message.mediaUrl) return;
+    if (!audioRef.current) audioRef.current = new Audio();
+    if (playingId === message.id) {
+      audioRef.current.pause();
+      setPlayingId(undefined);
+      return;
+    }
+    audioRef.current.src = message.mediaUrl;
+    void audioRef.current.play();
+    setPlayingId(message.id);
+    audioRef.current.onended = () => setPlayingId(undefined);
+  }
+
+  if (!auth.token) return <main className="chat-auth-required">Sign in to continue this conversation.</main>;
+
   return (
-    <div className="flex flex-col h-full bg-bg-canvas">
-      <header className="flex items-center gap-3 px-4 py-3 safe-top glass border-b border-border-subtle shrink-0">
-        <button onClick={() => nav('/ai')} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <ArrowLeft size={20} className="text-text-secondary" />
+    <main className="real-chat-shell">
+      <header className="real-chat-header safe-top">
+        <button type="button" className="chat-header-button" aria-label="Back to characters" onClick={() => navigate('/ai')}>
+          <ArrowLeft size={20} />
         </button>
-        <Link to={`/ai/profile/${characterId}`} className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-9 h-9 rounded-full bg-brand-glow flex items-center justify-center shrink-0">
-            <span className="text-brand-secondary font-semibold text-sm">{char?.name?.[0] || 'AI'}</span>
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-text-primary truncate">{char?.name || 'AI Character'}</p>
-            <div className="flex items-center gap-1.5">
-              <p className="text-[10px] text-text-muted">
-                {relationship ? `${relationship.label} (Lv ${relationship.level})` : 'Loading...'}
-              </p>
-            </div>
-          </div>
+        <Link to={`/ai/profile/${characterId}`} className="chat-identity">
+          <img src={avatarUrl} alt={`${name} profile`} />
+          <span>
+            <strong>{name}</strong>
+            <small><i aria-hidden="true" /> {relationship?.label || 'Getting to know you'}</small>
+          </span>
         </Link>
-        <Link to={`/ai/profile/${characterId}`} className="p-1.5 rounded-full hover:bg-white/5 transition-colors">
-          <UserCircle size={20} className="text-text-secondary" />
-        </Link>
+        <button type="button" className="chat-header-button" aria-label={`Call ${name}`}><Phone size={19} /></button>
+        <button type="button" className="chat-header-button" aria-label="Conversation options"><MoreHorizontal size={20} /></button>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {loading && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
-            <div className="flex gap-1">
-              <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
-          </div>
-        )}
-        {!loading && msgs.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
-            <div className="w-16 h-16 rounded-3xl glass flex items-center justify-center">
-              <Bot size={28} className="text-brand-secondary" />
-            </div>
-            <p className="text-sm font-medium">Start a conversation</p>
-            <p className="text-xs text-text-muted max-w-[240px] text-center">
-              Say hello to {char?.name || 'your AI friend'} — they remember your conversations and grow closer over time
-            </p>
-          </div>
-        )}
-        {msgs.map((m) => (
-          <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} animate-slide-up`}>
-            <div
-              className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed relative group ${
-                m.role === 'user'
-                  ? 'bg-brand-primary text-white rounded-br-md shadow-lg shadow-brand-glow'
-                  : 'glass text-text-primary rounded-bl-md'
-              }`}
-            >
-              {m.type === 'voice' && m.audioUrl ? (
-                <button onClick={() => playAudio(m.audioUrl!)} className="flex items-center gap-2 text-white">
-                  {playing === m.audioUrl ? <Pause size={18} /> : <Play size={18} />}
-                  <div className="flex gap-0.5 items-end h-8">
-                    {[4, 8, 6, 10, 7, 12, 5, 9, 6].map((h, i) => (
-                      <div key={i} className="w-1 bg-current rounded-full opacity-70 animate-pulse"
-                        style={{ height: `${h}px`, animationDelay: `${i * 80}ms` }} />
-                    ))}
-                  </div>
-                </button>
-              ) : m.type === 'image' || m.content?.startsWith('http') ? (
-                <img src={m.content} alt="" className="max-w-full rounded-lg max-h-80 object-contain" loading="lazy" />
-              ) : (
-                <div className="whitespace-pre-wrap break-words">{m.content}</div>
-              )}
-              {/* Reactions display */}
-              {m.metadata?.reactions && Object.keys(m.metadata.reactions).length > 0 && (
-                <div className="flex gap-1 mt-1.5 flex-wrap">
-                  {Object.entries(m.metadata.reactions).map(([userId, emoji]) => (
-                    <span key={userId} className="text-xs bg-white/10 rounded-full px-1.5 py-0.5 leading-none" title={userId === 'ai' ? 'AI reacted' : 'Reaction'}>
-                      {emoji}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* Message status for user messages */}
-            {m.role === 'user' && (
-              <div className="flex items-center gap-1 mt-0.5 px-1">
-                <span className="text-[10px] text-text-muted">
-                  {m.metadata?.status === 'seen' ? '✓✓' : m.metadata?.status === 'delivered' ? '✓✓' : '✓'}
-                </span>
-              </div>
-            )}
-            {/* Quick reaction buttons (appear on hover for AI messages) */}
-            {m.role === 'assistant' && (
-              <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity px-1">
-                {['❤️', '😂', '😮', '🔥', '👍'].map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={async () => {
-                      try {
-                        await fetch(`${API}/conversations/${m.id.split('-')[0]}/messages/${m.id}/reactions`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ emoji }),
-                        });
-                        // Update local state
-                        const updated = msgs.map(msg => 
-                          msg.id === m.id 
-                            ? { ...msg, metadata: { ...msg.metadata, reactions: { ...(msg.metadata?.reactions || {}), me: emoji } } }
-                            : msg
-                        );
-                        setMsgs(updated);
-                      } catch {}
-                    }}
-                    className="text-sm hover:scale-125 transition-transform"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-        {streaming && (
-          <div className="flex justify-start animate-slide-up">
-            <div className="max-w-[82%] rounded-2xl rounded-bl-md px-4 py-3 text-sm leading-relaxed glass text-text-primary">
-              {streaming}
-              <span className="inline-block w-1.5 h-4 ml-0.5 bg-brand-primary rounded-full animate-pulse align-middle" />
-            </div>
-          </div>
-        )}
-        {sending && !streaming && (
-          <div className="flex justify-start animate-slide-up">
-            <div className="glass rounded-2xl rounded-bl-md px-4 py-3">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
+      <nav className="conversation-mode" aria-label="Conversation mode">
+        <button type="button" aria-pressed={mode === 'chat'} onClick={() => void updateMode('chat')}>Chat</button>
+        <button type="button" aria-pressed={mode === 'roleplay'} onClick={() => void updateMode('roleplay')}>Roleplay</button>
+      </nav>
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (mode === 'text') send(); }}
-        className="flex items-center gap-2 px-4 py-3 glass safe-bottom shrink-0"
-      >
-        <button
-          type="button"
-          onClick={() => setMode((m) => (m === 'text' ? 'voice' : 'text'))}
-          className="p-2 rounded-full hover:bg-white/5 transition-colors"
-        >
-          {mode === 'voice' ? <Mic size={20} className="text-brand-primary" /> : <Mic size={20} className="text-text-muted" />}
-        </button>
-        {/* Image upload button */}
-        <label className="p-2 rounded-full hover:bg-white/5 transition-colors cursor-pointer">
-          <ImageIcon size={20} className="text-text-muted hover:text-brand-secondary" />
-          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-        </label>
-        {/* Selfie request button */}
-        <button
-          type="button"
-          onClick={requestSelfie}
-          disabled={sending}
-          className="p-2 rounded-full hover:bg-white/5 transition-colors disabled:opacity-30"
-        >
-          <Camera size={20} className="text-text-muted hover:text-brand-secondary" />
-        </button>
-        {mode === 'text' ? (
-          <>
-            <div className="flex-1 glass rounded-full flex items-center px-4">
-              {imagePreview ? (
-                <div className="relative mr-2">
-                  <img src={imagePreview} alt="" className="h-8 w-8 rounded-lg object-cover" />
-                  <button onClick={() => { setImageBase64(''); setImagePreview(''); }} className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white text-[8px]">✕</button>
-                </div>
-              ) : null}
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Message ${char?.name || 'AI'}...`}
-                className="flex-1 bg-transparent py-3 text-sm text-text-primary placeholder:text-text-muted outline-none"
-                disabled={sending}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={sending || (!input.trim() && !imageBase64)}
-              className="rounded-full bg-brand-primary p-3 text-white disabled:opacity-40 transition-all hover:brightness-110 hover:shadow-lg hover:shadow-brand-glow"
-            >
-              <Send size={18} />
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onMouseDown={startRecording}
-            onMouseUp={stopRecording}
-            onMouseLeave={stopRecording}
-            onTouchStart={startRecording}
-            onTouchEnd={stopRecording}
-            className={`flex-1 rounded-full py-4 text-sm font-medium transition-all ${
-              recording
-                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                : 'glass text-text-muted hover:bg-white/5'
-            }`}
-          >
-            {recording ? 'Recording... release to send' : 'Hold to record voice message'}
-          </button>
+      <section className="message-timeline" aria-live="polite" aria-busy={loading || busy}>
+        {loading && <div className="chat-loading">Opening your conversation…</div>}
+        {!loading && messages.length === 0 && (
+          <div className="chat-empty">
+            <img src={avatarUrl} alt="" />
+            <Sparkles size={18} aria-hidden="true" />
+            <h1>Start where it feels natural</h1>
+            <p>{mode === 'chat' ? `${name} will reply like a real private chat.` : `You and ${name} are in a live scene. Actions and thoughts can appear.`}</p>
+          </div>
         )}
-      </form>
-    </div>
+        {messages.map((message) => (
+          <MessageBubble key={message.id} message={message} onReact={react} onPlay={playVoice} playing={playingId === message.id} />
+        ))}
+        {streaming && <div className="character-typing"><span /><span /><span /></div>}
+        <div ref={bottomRef} />
+      </section>
+
+      <input ref={uploadRef} type="file" accept="image/*" hidden />
+      <ChatComposer
+        characterName={name}
+        value={input}
+        disabled={busy}
+        error={error}
+        onChange={setInput}
+        onSend={() => void send()}
+        onVoice={() => setError('Voice-note recording is being connected to persistent uploads.')}
+        onImage={() => uploadRef.current?.click()}
+      />
+    </main>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeHistoryMessage, responsePartsToMessages } from './chatModel';
+import { normalizeHistoryMessage, parseAssistantResponse, responsePartsToMessages } from './chatModel';
 
 describe('normalizeHistoryMessage', () => {
   it('preserves media, delivery state, and attributed reactions', () => {
@@ -51,5 +51,20 @@ describe('responsePartsToMessages', () => {
       expect.objectContaining({ kind: 'action', text: '*leans closer to the camera*' }),
       expect.objectContaining({ kind: 'text', text: 'Of course I remembered.' }),
     ]);
+  });
+});
+
+describe('parseAssistantResponse', () => {
+  it('accepts fenced structured output and drops invalid parts', () => {
+    expect(parseAssistantResponse('```json\n[{"type":"thought","content":" nervous "},{"type":"speech","content":"Hey"},{"type":"tool","content":"ignore"}]\n```'))
+      .toEqual([
+        { type: 'thought', content: 'nervous' },
+        { type: 'speech', content: 'Hey' },
+      ]);
+  });
+
+  it('falls back to speech for provider responses that are still plain text', () => {
+    expect(parseAssistantResponse('I was just thinking about you.'))
+      .toEqual([{ type: 'speech', content: 'I was just thinking about you.' }]);
   });
 });

@@ -1,8 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR } from '@itchats/ai-core';
+import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR, buildSelfiePrompt } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
-import { messages, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters } from '@itchats/database/schema';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { messages, messageReactions, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters, characterVersions } from '@itchats/database/schema';
+import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
 import { MemoryService } from './memory.service';
@@ -168,15 +168,94 @@ export class AiService {
       this.contextBuilder.updateRelationship(characterId, userId, 'positive');
       this.extractMemory(characterId, userId, convId, message, fullResponse).catch(() => {});
       // AI sometimes reacts to the user's message
-      this.autoReact(convId, message).catch(() => {});
+      this.autoReact(convId, characterId, message).catch(() => {});
     }
 
     yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost };
+
+    // ── Detect and generate media markers ──
+    yield* this.generateMediaFromMarkers(userId, characterId, convId, fullResponse);
+  }
+
+  /**
+   * Detects [SELFIE], [IMAGE: ...], [VIDEO: ...] markers in the AI response
+   * and generates the corresponding media. Yields SSE events for each media item.
+   */
+  private async *generateMediaFromMarkers(
+    userId: string,
+    characterId: string | null,
+    conversationId: string,
+    aiResponse: string,
+  ): AsyncGenerator<{ type: string; [key: string]: any }> {
+    if (!characterId) return;
+
+    const selfieMatch = aiResponse.match(/\[SELFIE\]/i);
+    const imageMatch = aiResponse.match(/\[IMAGE:\s*(.+?)\]/i);
+    const videoMatch = aiResponse.match(/\[VIDEO:\s*(.+?)\]/i);
+
+    // Only generate one media item per response (first match wins)
+    if (selfieMatch) {
+      yield { type: 'status', message: 'Generating selfie...' };
+      try {
+        const result = await this.generateSelfie(userId, characterId, 'casual_front_camera');
+        if (result?.url) {
+          const selfie = result!;
+          await this.saveMediaMessage(conversationId, characterId, 'image', selfie.url);
+          yield { type: 'image', url: selfie.url, model: selfie.model, creditsUsed: selfie.creditsUsed };
+        }
+      } catch (err: any) {
+        yield { type: 'media_error', message: `Couldn't take a selfie right now: ${String(err.message).slice(0, 100)}` };
+      }
+    } else if (imageMatch) {
+      const description = imageMatch[1]!.trim();
+      yield { type: 'status', message: `Generating image: ${description}` };
+      try {
+        const result = await this.generateImage(userId, description);
+        if (result?.url) {
+          const img = result!;
+          await this.saveMediaMessage(conversationId, characterId, 'image', img.url);
+          yield { type: 'image', url: img.url, description, model: img.model, creditsUsed: img.creditsUsed };
+        }
+      } catch (err: any) {
+        yield { type: 'media_error', message: `Couldn't generate that image: ${String(err.message).slice(0, 100)}` };
+      }
+    } else if (videoMatch) {
+      const description = videoMatch[1]!.trim();
+      yield { type: 'status', message: `Generating video: ${description}` };
+      try {
+        const result = await this.generateTextToVideo(userId, description);
+        const videoUrl = (result as any)?.videoUrl || (result as any)?.url;
+        if (videoUrl) {
+          await this.saveMediaMessage(conversationId, characterId, 'video', videoUrl);
+          yield { type: 'video', url: videoUrl, description, creditsUsed: result.creditsUsed };
+        } else if (result?.taskId) {
+          yield { type: 'video_queued', taskId: result.taskId, description, message: 'Video is being generated. It will appear shortly.' };
+        }
+      } catch (err: any) {
+        yield { type: 'media_error', message: `Couldn't generate that video: ${String(err.message).slice(0, 100)}` };
+      }
+    }
+  }
+
+  private async saveMediaMessage(
+    conversationId: string,
+    characterId: string,
+    mediaType: 'image' | 'video',
+    mediaUrl: string,
+  ) {
+    const db = getDb();
+    await db.insert(messages).values({
+      conversationId,
+      senderType: 'character',
+      senderCharacterId: characterId,
+      type: mediaType,
+      content: mediaUrl,
+    } as any);
   }
 
   async getChatHistory(characterId: string, userId: string) {
     const db = getDb();
-    const [conv] = await db.select({ id: conversations.id }).from(conversations)
+    const [conv] = await db.select({ id: conversations.id, mode: conversations.mode }).from(conversations)
       .where(and(
         eq(conversations.characterId, characterId),
         eq(conversations.createdByUserId, userId),
@@ -195,7 +274,20 @@ export class AiService {
       .orderBy(sql`${messages.createdAt} ASC`)
       .limit(100);
 
-    return { messages: msgs, conversationId: conv.id };
+    const reactionRows = msgs.length ? await db.select().from(messageReactions)
+      .where(inArray(messageReactions.messageId, msgs.map((message) => message.id))) : [];
+    const reactionsByMessage = reactionRows.reduce<Record<string, Array<{ id: string; actorType: 'user' | 'character'; actorId: string; emoji: string }>>>((grouped, reaction) => {
+      const actorId = reaction.actorUserId ?? reaction.actorCharacterId;
+      if (!actorId) return grouped;
+      (grouped[reaction.messageId] ??= []).push({ id: reaction.id, actorType: reaction.actorType, actorId, emoji: reaction.emoji });
+      return grouped;
+    }, {});
+
+    return {
+      messages: msgs.map((message) => ({ ...message, reactions: reactionsByMessage[message.id] ?? [] })),
+      conversationId: conv.id,
+      mode: conv.mode,
+    };
   }
 
   async generateImage(userId: string, prompt: string, model?: string) {
@@ -300,18 +392,42 @@ export class AiService {
 
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
+    if (!char.avatarUrl) throw new Error('Character profile picture is required');
+    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
-    const prompt = [
-      `${char.name}, a ${char.gender || 'person'} in their ${char.ageDisplay || 'prime'}`,
-      char.description || '',
-      context || '',
-      'selfie style, casual, natural lighting, portrait, looking at camera, modern smartphone selfie quality, 1 person only',
-    ].filter(Boolean).join(', ');
+    const [version] = await db.select().from(characterVersions)
+      .where(eq(characterVersions.characterId, characterId)).orderBy(desc(characterVersions.version)).limit(1);
+    const prompt = buildSelfiePrompt({
+      characterName: char.name,
+      gender: char.gender || undefined,
+      ageDisplay: char.ageDisplay || undefined,
+      description: char.description,
+      canonicalPrompt: version?.canonicalPrompt,
+      photographyStyle: char.photographyStyle || undefined,
+      selfieStyle: char.selfieStyle || undefined,
+      wardrobe: char.wardrobe || undefined,
+      skinTone: char.skinTone || undefined,
+      eyeColor: char.eyeColor || undefined,
+      hair: char.hair || undefined,
+      facialFeatures: char.facialFeatures || undefined,
+    }, context || 'casual_front_camera');
 
-    const result = await alibabaTextToImageWithFallback({ prompt, size: '1024*1024' });
+    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
+    const result = await alibabaImageToImage({ prompt, imageBase64: referenceBase64 });
     if (!result?.url) throw new Error('Selfie generation failed');
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, characterId, generationType: 'image_to_image', routeKey: 'image.edit.private',
+      idempotencyKey: randomUUID(), requestJson: { prompt, style: context, referenceUrl: char.avatarUrl },
+      responseJson: { url: result.url, model: result.model }, status: 'succeeded', completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
+      imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
+      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
+    });
 
     await db.update(creditWallets).set({
       balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
@@ -319,7 +435,34 @@ export class AiService {
       updatedAt: new Date(),
     }).where(eq(creditWallets.userId, userId));
 
-    return { url: result.url, model: result.usedModel, creditsUsed: cost };
+    return { url: result.url, model: result.model, creditsUsed: cost, referenceConditioned: true };
+  }
+
+  async generateCharacterVideo(userId: string, characterId: string, style = 'casual_front_camera') {
+    const db = getDb();
+    const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!char?.avatarUrl) throw new Error('Character profile picture is required');
+    const prompt = [
+      `Short realistic phone video of ${char.name}`,
+      style === 'mirror_selfie' ? 'filmed through a mirror, phone naturally visible' : 'front-camera video message, natural handheld motion',
+      'preserve the exact identity, facial geometry, hair, skin tone, and apparent age from the reference image',
+      char.selfieStyle || char.cameraStyle || 'casual practical lighting',
+      'subtle blinking and breathing, natural expression, one person only, no face morphing, no cuts, no text, five seconds',
+    ].join(', ');
+    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
+    return this.generateImageToVideo(userId, prompt, referenceBase64);
+  }
+
+  private async fetchReferenceImage(url: string) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Invalid character reference image');
+    const response = await fetch(parsed, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error('Character reference image could not be loaded');
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) throw new Error('Character reference is not an image');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > 10 * 1024 * 1024) throw new Error('Character reference image is too large');
+    return bytes.toString('base64');
   }
 
   async generateTextToVideo(userId: string, prompt: string) {
@@ -493,11 +636,11 @@ Rules:
   }
 
   /** AI character automatically reacts to user messages with emoji */
-  private async autoReact(conversationId: string, userMessage: string) {
+  private async autoReact(conversationId: string, characterId: string, userMessage: string) {
     try {
       const msg = userMessage.toLowerCase();
       let emoji: string | null = null;
-      
+
       if (/😂|haha|lol|lmao|funny|joke/.test(msg)) emoji = '😂';
       else if (/❤️|love|ily|adorable|cute|sweet/.test(msg)) emoji = '❤️';
       else if (/🔥|fire|amazing|awesome|dope|lit/.test(msg)) emoji = '🔥';
@@ -505,7 +648,7 @@ Rules:
       else if (/😮|wow|omg|no way|really\?|what\?/.test(msg)) emoji = '😮';
       else if (/👍|ok|sure|fine|alright|bet/.test(msg)) emoji = '👍';
       else if (/👏|well done|congrats|proud/.test(msg)) emoji = '👏';
-      
+
       if (!emoji) return;
 
       const db = getDb();
@@ -514,18 +657,18 @@ Rules:
         .where(and(eq(messages.conversationId, conversationId), eq(messages.senderType, 'user')))
         .orderBy(sql`${messages.createdAt} DESC`)
         .limit(1);
-      
+
       if (!latestMsg) return;
 
-      // Add reaction to the user's message
-      await db.execute(sql`
-        UPDATE messages SET metadata = jsonb_set(
-          COALESCE(metadata, '{}'::jsonb),
-          '{reactions}'::text[],
-          COALESCE(metadata->'reactions', '{}'::jsonb) || ${JSON.stringify({ ai: emoji })}::jsonb
-        )
-        WHERE id = ${latestMsg.id}
-      `);
+      await db.insert(messageReactions).values({
+        messageId: latestMsg.id,
+        actorType: 'character',
+        actorCharacterId: characterId,
+        emoji,
+      }).onConflictDoUpdate({
+        target: [messageReactions.messageId, messageReactions.actorCharacterId],
+        set: { emoji, updatedAt: new Date() },
+      });
     } catch {
       // Non-critical, never block the main flow
     }

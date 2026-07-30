@@ -43,6 +43,27 @@ export type ResponsePart = {
   content: string;
 };
 
+const responsePartTypes = new Set<ResponsePart['type']>(['speech', 'action', 'thought']);
+
+export function parseAssistantResponse(content: string): ResponsePart[] {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+  const json = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    const value = JSON.parse(json);
+    if (!Array.isArray(value)) throw new Error('Response is not an array');
+    const parts = value.flatMap((part): ResponsePart[] => {
+      if (!part || typeof part !== 'object') return [];
+      if (!responsePartTypes.has(part.type) || typeof part.content !== 'string') return [];
+      const partContent = part.content.trim();
+      return partContent ? [{ type: part.type, content: partContent }] : [];
+    });
+    return parts.length > 0 ? parts : [{ type: 'speech', content: trimmed }];
+  } catch {
+    return [{ type: 'speech', content: trimmed }];
+  }
+}
+
 const messageKinds = new Set<MessageKind>([
   'text', 'thought', 'action', 'image', 'video', 'audio', 'voice_note', 'system',
 ]);
