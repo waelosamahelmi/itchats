@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@/app/store';
 
@@ -25,19 +25,25 @@ export default function DashboardTab() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchAuth = useCallback((url: string) =>
-    fetch(`${API}${url}`, { headers: { Authorization: `Bearer ${token}` } }),
-  [token]);
-
   useEffect(() => {
-    fetchAuth('/admin/stats').then(r => r.json()).then(setStats).finally(() => setLoading(false));
-  }, [fetchAuth]);
+    if (!token) return;
+    fetch(`${API}/admin/stats`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setLoading(false));
+  }, [token]);
 
   if (loading) return <div className="flex items-center justify-center h-40"><div className="h-7 w-7 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" /></div>;
-  if (!stats) return <p className="text-gray-500">Failed to load stats</p>;
+  if (!stats) return (
+    <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-8 text-center">
+      <p className="text-zinc-500">Unable to load dashboard stats</p>
+      <button onClick={() => { setLoading(true); setStats(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-zinc-800 text-xs text-zinc-400 hover:bg-zinc-700">Retry</button>
+    </div>
+  );
 
-  const revenueMax = Math.max(...stats.revenue.map(d => d.total), 1);
-  const growthMax = Math.max(...stats.userGrowth.map(d => d.cnt), 1);
+  const revenueMax = Math.max(...(stats.revenue?.map(d => d.total) || [0]), 1);
+  const growthMax = Math.max(...(stats.userGrowth?.map(d => d.cnt) || [0]), 1);
 
   return (
     <div className="space-y-6">

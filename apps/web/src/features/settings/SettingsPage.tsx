@@ -384,6 +384,19 @@ export default function SettingsPage() {
           )}
         </div>
 
+        {/* Admin Panel (admin only) */}
+        {user?.role === 'admin' && (
+          <div className="px-4 mt-6">
+            <button
+              onClick={() => nav('/admin')}
+              className="flex w-full items-center gap-4 px-4 py-3.5 rounded-xl glass hover:bg-violet-500/10 transition-colors text-left border border-violet-500/20"
+            >
+              <Shield size={20} className="text-violet-400 shrink-0" />
+              <span className="text-sm font-medium text-violet-400">Admin Panel</span>
+            </button>
+          </div>
+        )}
+
         {/* Sign Out */}
         <div className="px-4 mt-6 mb-4">
           <button
