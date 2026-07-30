@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import AppShell from './AppShell';
 import RequireAuth from './RequireAuth';
@@ -8,7 +8,6 @@ import AnimatedLogo from '@/components/AnimatedLogo';
 const FeedPage = lazy(() => import('@/features/feed/FeedPage'));
 const ChatsPage = lazy(() => import('@/features/chats/ChatsPage'));
 const ChatDetailPage = lazy(() => import('@/features/chats/ChatPage'));
-const AIPage = lazy(() => import('@/features/ai/AIPage'));
 const AIChatPage = lazy(() => import('@/features/ai/AIChatPage'));
 const CreateCharacterPage = lazy(() => import('@/features/ai/CreateCharacterPage'));
 const CharacterProfilePage = lazy(() => import('@/features/ai/CharacterProfilePage'));
@@ -62,7 +61,7 @@ export function Router() {
             <Route path="/chat/:convId" element={<ChatDetailPage />} />
 
             {/* AI Characters */}
-            <Route path="/ai" element={<AIPage />} />
+            <Route path="/ai" element={<Navigate to="/discover" replace />} />
             <Route path="/ai/create" element={<CreateCharacterPage />} />
             <Route path="/ai/edit/:characterId" element={<CreateCharacterPage />} />
             <Route path="/ai/chat/:characterId" element={<AIChatPage />} />

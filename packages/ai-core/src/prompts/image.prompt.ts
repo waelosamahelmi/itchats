@@ -70,21 +70,25 @@ export function buildSelfiePrompt(params: ImagePromptParams, context?: string): 
   const genderLabel = params.gender || 'person';
 
   const scenePresets: Record<string, string> = {
-    casual_front_camera: 'a natural front-camera selfie at arm length, direct eye contact, relaxed imperfect framing',
-    mirror_selfie: 'a realistic mirror selfie, phone visible in the reflection, natural reversed composition, no duplicate person',
-    activity_snapshot: 'a spontaneous front-camera snapshot during their current activity, candid expression, believable surroundings',
-    dressed_up: 'a dressed-up front-camera portrait before going out, flattering practical lighting, authentic phone-camera framing',
-    candid_low_light: 'a casual low-light phone selfie, mild sensor grain, ambient practical lights, natural skin texture',
+    casual_front_camera: 'a natural front-camera selfie at arm\'s length, direct eye contact with slight smile, relaxed imperfect framing, smartphone held visibly, natural room lighting from a window, slightly grainy phone camera quality',
+    mirror_selfie: 'a realistic mirror selfie, phone visible covering part of face, reflected in a full-length mirror, natural reversed composition, bedroom or bathroom mirror with realistic background clutter, casual outfit, messy hair okay',
+    activity_snapshot: 'a spontaneous front-camera snapshot during their current activity, candid mid-action expression, believable surroundings matching their lifestyle, slightly blurred movement, natural daylight or indoor practical lighting',
+    dressed_up: 'a dressed-up front-camera portrait before going out, flattering warm practical lighting from a vanity mirror or window, authentic phone-camera framing, slight downward angle, confident expression',
+    candid_low_light: 'a casual low-light phone selfie, mild sensor grain and noise, ambient practical lights from street lamps or dim room, natural skin texture, slight motion blur, authentic late-night vibe',
+    golden_hour: 'a warm golden-hour front-camera selfie, soft directional sunlight at sunset, skin glowing naturally, slight lens flare, relaxed squinting expression, outdoor setting with warm amber tones',
+    morning_bed: 'a messy morning selfie in bed, soft diffused morning light through curtains, bedhead hair, no makeup, sleepy expression, cozy bedroom atmosphere, slightly overexposed window light',
+    cafe_moment: 'a candid selfie at a cozy coffee shop, warm interior lighting, coffee cup visible in frame or on table, natural window light, relaxed pose, slightly busy background with bokeh',
   };
   const scene = context && scenePresets[context] ? scenePresets[context] : context;
 
   return [
-    params.canonicalPrompt || `${characterName}, a ${genderLabel}, ${params.description || ''}`,
+    `photorealistic smartphone selfie photo of ${params.canonicalPrompt || `${characterName}, a ${genderLabel}, ${params.description || ''}`}`,
     scene || scenePresets.casual_front_camera,
-    selfieStyle || 'casual, natural lighting, looking at camera, modern smartphone selfie quality',
+    selfieStyle || 'casual, natural lighting, looking at camera, modern smartphone selfie quality, slightly grainy',
     wardrobe ? `wearing ${wardrobe}` : '',
-    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age',
-    'one real person only, photorealistic, anatomically correct hands, natural skin texture, no beauty-filter plastic skin, no text, no watermark',
+    'vertical 9:16 aspect ratio, social media story format, candid authentic feel, no studio lighting, real phone camera quality',
+    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age across all images',
+    'one real person only, photorealistic, anatomically correct hands holding phone, natural skin texture with visible pores and slight imperfections, no beauty-filter plastic skin, no text, no watermark, no AI smoothness',
   ].filter(Boolean).join(', ');
 }
 

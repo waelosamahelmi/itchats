@@ -1,18 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { stories, storyViews, contentLikes, characterFollows, users, characters } from '@itchats/database/schema';
 import { eq, and, desc, count, inArray, isNull, or, sql } from 'drizzle-orm';
 
 @Injectable()
 export class StoriesService {
-  /** GET /v1/stories — all published, active (non-expired) stories with author info */
+  private readonly logger = new Logger(StoriesService.name);
+  /**
+   * GET /v1/stories — returns ONE story per character that has active stories.
+   * Groups stories by character, returns the latest active story per character.
+   * Characters without published/active stories are excluded.
+   */
   async getAllStories() {
     const db = getDb();
     const now = new Date();
-    const results = await db.select({
+
+    // Get all active, published, non-expired stories
+    const allActive = await db.select({
       id: stories.id,
       authorUserId: stories.authorUserId,
       authorCharacterId: stories.authorCharacterId,
+      characterId: stories.characterId,
       status: stories.status,
       caption: stories.caption,
       storyType: stories.storyType,
@@ -27,6 +35,8 @@ export class StoriesService {
       createdAt: stories.createdAt,
       authorUsername: users.username,
       authorCharacterName: characters.name,
+      authorAvatarUrl: characters.avatarUrl,
+      authorHandle: characters.handle,
     }).from(stories)
       .leftJoin(users, eq(stories.authorUserId, users.id))
       .leftJoin(characters, eq(stories.authorCharacterId, characters.id))
@@ -34,14 +44,28 @@ export class StoriesService {
         eq(stories.status, 'published'),
         or(isNull(stories.expiresAt), sql`${stories.expiresAt} > ${now}`),
       ))
-      .orderBy(desc(stories.publishedAt))
-      .limit(50);
+      .orderBy(desc(stories.publishedAt));
 
-    return results.map(r => ({
+    // Group by character - one story ring per character (their latest)
+    const grouped = new Map<string, typeof allActive[0]>();
+    for (const story of allActive) {
+      const key = story.authorCharacterId || story.authorUserId || 'unknown';
+      if (!grouped.has(key)) {
+        grouped.set(key, story);
+      }
+    }
+
+    // Convert to array with derived fields
+    const result = Array.from(grouped.values()).map(r => ({
       ...r,
       authorName: r.authorUsername || r.authorCharacterName || 'Unknown',
-      authorAvatar: null,
-    }));
+      authorAvatar: r.authorAvatarUrl || null,
+      isAI: !!r.authorCharacterId,
+      isLive: false,
+      viewed: false,
+    })).slice(0, 50);
+
+    return result;
   }
 
   async getFeed() {
@@ -74,15 +98,73 @@ export class StoriesService {
 
   async createStory(userId: string, data: { storyType: string; caption?: string; mediaUrl?: string }) {
     const db = getDb();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 3600000);
     const [story] = await db.insert(stories).values({
       authorUserId: userId,
       creatorId: userId,
-      status: 'draft',
+      status: 'published',
       storyType: data.storyType,
       caption: data.caption,
       mediaUrl: data.mediaUrl,
+      publishedAt: now,
+      expiresAt,
     } as any).returning();
+
+    // Schedule AI character reactions to this user story
+    if (story) {
+      this.scheduleStoryReactions(story.id, userId);
+    }
+
     return story;
+  }
+
+  /**
+   * Schedule AI characters to view/react to user's story.
+   * Called after a user publishes a story.
+   */
+  private scheduleStoryReactions(storyId: string, userId: string) {
+    this.logger.log(`Scheduling story reactions for story ${storyId}`);
+
+    // Get all active characters and randomly decide which react
+    getDb().select().from(characters)
+      .where(and(
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      ))
+      .then(allCharacters => {
+        const reactors = allCharacters
+          .filter(() => Math.random() < 0.4) // 40% chance each character reacts
+          .slice(0, 5); // Max 5 reactors
+
+        for (const char of reactors) {
+          const delayMs = (5 + Math.floor(Math.random() * 55)) * 60 * 1000; // 5-60 min delay
+          setTimeout(async () => {
+            try {
+              const db = getDb();
+              // Record a story view
+              await db.insert(storyViews).values({
+                storyId,
+                viewerUserId: userId,
+              }).onConflictDoNothing();
+
+              // Add a story like (50% chance)
+              if (Math.random() < 0.5) {
+                await db.insert(contentLikes).values({
+                  userId,
+                  entityType: 'story',
+                  entityId: storyId,
+                }).onConflictDoNothing();
+              }
+
+              console.log(`Character ${char.name} reacted to story ${storyId}`);
+            } catch (err: any) {
+              console.error(`Story reaction failed for ${char.name}: ${err.message}`);
+            }
+          }, delayMs);
+        }
+      })
+      .catch(err => console.error(`Failed to schedule story reactions: ${err.message}`));
   }
 
   async deleteStory(userId: string, storyId: string) {

@@ -43,7 +43,25 @@ export class BillingController {
   @Post('checkout')
   @UseGuards(JwtAuthGuard)
   async createCheckout(@Body() body: { planId: string }, @Req() req: any) {
-    return this.billingService.createCheckoutSession(req.user.userId, body.planId, req.user.email ?? '');
+    const validPlans = ['free', 'starter', 'pro', 'unlimited'];
+    if (!body.planId || !validPlans.includes(body.planId)) {
+      return {
+        url: null,
+        sessionId: null,
+        error: `Invalid plan ID "${body.planId}". Valid plans: ${validPlans.join(', ')}`,
+        mode: 'credits-only',
+      };
+    }
+    try {
+      return await this.billingService.createCheckoutSession(req.user.userId, body.planId, req.user.email ?? '');
+    } catch (err: any) {
+      return {
+        url: null,
+        sessionId: null,
+        error: err.message || 'Checkout creation failed',
+        mode: 'credits-only',
+      };
+    }
   }
 
   @Post('seed-plans')

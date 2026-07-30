@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { getDb } from '@itchats/database';
 import {
   posts, postReactions, postComments, characterFollows, characters,
-  userFriends,
+  userFriends, users,
 } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -77,8 +77,34 @@ export class PostsService {
     );
 
     const feed = await db
-      .select()
+      .select({
+        id: posts.id,
+        authorUserId: posts.authorUserId,
+        authorCharacterId: posts.authorCharacterId,
+        content: posts.content,
+        mediaUrl: posts.mediaUrl,
+        mediaType: posts.mediaType,
+        thumbnailUrl: posts.thumbnailUrl,
+        visibility: posts.visibility,
+        repostOfPostId: posts.repostOfPostId,
+        nsfw: posts.nsfw,
+        likeCount: posts.likeCount,
+        commentCount: posts.commentCount,
+        shareCount: posts.shareCount,
+        viewCount: posts.viewCount,
+        isAiGenerated: posts.isAiGenerated,
+        sourceNewsUrl: posts.sourceNewsUrl,
+        sourceNewsTitle: posts.sourceNewsTitle,
+        createdAt: posts.createdAt,
+        updatedAt: posts.updatedAt,
+        deletedAt: posts.deletedAt,
+        authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+        authorAvatar: characters.avatarUrl,
+        authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+      })
       .from(posts)
+      .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
+      .leftJoin(users, eq(posts.authorUserId, users.id))
       .where(
         and(
           or(...conditions),
@@ -95,8 +121,34 @@ export class PostsService {
   async getUserPosts(userId: string, targetUserId: string, page = 1, limit = 20) {
     const db = getDb();
     return db
-      .select()
+      .select({
+        id: posts.id,
+        authorUserId: posts.authorUserId,
+        authorCharacterId: posts.authorCharacterId,
+        content: posts.content,
+        mediaUrl: posts.mediaUrl,
+        mediaType: posts.mediaType,
+        thumbnailUrl: posts.thumbnailUrl,
+        visibility: posts.visibility,
+        repostOfPostId: posts.repostOfPostId,
+        nsfw: posts.nsfw,
+        likeCount: posts.likeCount,
+        commentCount: posts.commentCount,
+        shareCount: posts.shareCount,
+        viewCount: posts.viewCount,
+        isAiGenerated: posts.isAiGenerated,
+        sourceNewsUrl: posts.sourceNewsUrl,
+        sourceNewsTitle: posts.sourceNewsTitle,
+        createdAt: posts.createdAt,
+        updatedAt: posts.updatedAt,
+        deletedAt: posts.deletedAt,
+        authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+        authorAvatar: characters.avatarUrl,
+        authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+      })
       .from(posts)
+      .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
+      .leftJoin(users, eq(posts.authorUserId, users.id))
       .where(
         and(
           eq(posts.authorUserId, targetUserId),
@@ -112,8 +164,34 @@ export class PostsService {
   async getCharacterPosts(characterId: string, page = 1, limit = 20) {
     const db = getDb();
     return db
-      .select()
+      .select({
+        id: posts.id,
+        authorUserId: posts.authorUserId,
+        authorCharacterId: posts.authorCharacterId,
+        content: posts.content,
+        mediaUrl: posts.mediaUrl,
+        mediaType: posts.mediaType,
+        thumbnailUrl: posts.thumbnailUrl,
+        visibility: posts.visibility,
+        repostOfPostId: posts.repostOfPostId,
+        nsfw: posts.nsfw,
+        likeCount: posts.likeCount,
+        commentCount: posts.commentCount,
+        shareCount: posts.shareCount,
+        viewCount: posts.viewCount,
+        isAiGenerated: posts.isAiGenerated,
+        sourceNewsUrl: posts.sourceNewsUrl,
+        sourceNewsTitle: posts.sourceNewsTitle,
+        createdAt: posts.createdAt,
+        updatedAt: posts.updatedAt,
+        deletedAt: posts.deletedAt,
+        authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+        authorAvatar: characters.avatarUrl,
+        authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+      })
       .from(posts)
+      .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
+      .leftJoin(users, eq(posts.authorUserId, users.id))
       .where(
         and(
           eq(posts.authorCharacterId, characterId),
@@ -227,7 +305,7 @@ export class PostsService {
       }
     }
 
-    const [comment] = await db
+    const result = await db
       .insert(postComments)
       .values({
         postId,
@@ -236,6 +314,9 @@ export class PostsService {
         parentCommentId: parentCommentId ?? null,
       })
       .returning();
+
+    const comment = result[0];
+    if (!comment) throw new BadRequestException('Failed to create comment');
 
     // Update comment count
     const [r3] = await db
@@ -247,7 +328,25 @@ export class PostsService {
       .set({ commentCount: Number(r3?.count ?? 0) })
       .where(eq(posts.id, postId));
 
-    return comment;
+    // Get author info to return a rich comment shape
+    const [author] = await db
+      .select({ id: users.id, username: users.username })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    return {
+      id: comment.id,
+      postId: comment.postId,
+      authorName: author?.username ?? 'User',
+      authorAvatar: '',
+      authorIsAI: false,
+      content: comment.content,
+      createdAt: comment.createdAt?.toISOString() ?? new Date().toISOString(),
+      likes: 0,
+      liked: false,
+      replies: [],
+    };
   }
 
   async deleteComment(userId: string, commentId: string) {

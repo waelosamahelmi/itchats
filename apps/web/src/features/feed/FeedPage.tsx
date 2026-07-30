@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Home, Heart, MessageCircle, Share2, Send, MoreHorizontal,
-  Image, Smile, Globe, Lock, Plus, ChevronRight, Sparkles, BadgeCheck,
+  Image, Smile, Globe, Lock, Plus, ChevronRight, Sparkles, BadgeCheck, Check, Camera, X,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
@@ -32,21 +32,34 @@ function timeAgo(dateStr: string): string {
 }
 
 // ── Story Circle ──
-function StoryCircle({ story, isYours, userAvatar }: { story: Story; isYours?: boolean; userAvatar?: string }) {
+function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: Story; isYours?: boolean; userAvatar?: string; onYourStoryClick?: () => void }) {
+  if (isYours) {
+    return (
+      <button onClick={onYourStoryClick} className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
+        <div className="relative w-[64px] h-[64px] rounded-full overflow-hidden border-[3px] border-bg-canvas">
+          {userAvatar ? (
+            <img src={userAvatar} alt="You" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+          ) : (
+            <div className="w-full h-full bg-bg-elevated flex items-center justify-center">
+              <Camera size={24} className="text-text-muted" />
+            </div>
+          )}
+        </div>
+        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-primary flex items-center justify-center border-[3px] border-bg-canvas">
+          <Plus size={12} className="text-white" />
+        </div>
+        <span className="text-[10px] text-text-secondary truncate w-full text-center leading-tight">Your Story</span>
+      </button>
+    );
+  }
+
   return (
     <button className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
       <div className={`relative p-[2px] rounded-full ${story.viewed ? '' : 'bg-gradient-to-br from-brand-primary via-social-warm to-brand-secondary'} ${story.isLive ? 'ring-2 ring-danger ring-offset-2 ring-offset-bg-canvas' : ''}`}>
         <div className="w-[60px] h-[60px] rounded-full overflow-hidden border-[3px] border-bg-canvas">
-          {isYours ? (
-            <div className="w-full h-full bg-bg-elevated flex flex-col items-center justify-center gap-0.5 group-hover:bg-brand-glow/20 transition-colors">
-              <Plus size={18} className="text-brand-primary" />
-              <span className="text-[9px] text-brand-primary font-medium">Yours</span>
-            </div>
-          ) : (
-            <img src={story.authorAvatar} alt={story.authorName} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
-          )}
+          <img src={story.authorAvatar} alt={story.authorName} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
         </div>
-        {!story.viewed && !isYours && (
+        {!story.viewed && (
           <div className="absolute inset-[2px] rounded-full border-[2px] border-transparent bg-gradient-to-br from-brand-primary via-social-warm to-brand-secondary" style={{ mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)', maskComposite: 'exclude', WebkitMaskComposite: 'xor' }} />
         )}
       </div>
@@ -56,7 +69,7 @@ function StoryCircle({ story, isYours, userAvatar }: { story: Story; isYours?: b
 }
 
 // ── Stories Bar ──
-function StoriesBar({ stories, userAvatar }: { stories: Story[]; userAvatar?: string }) {
+function StoriesBar({ stories, userAvatar, onYourStoryClick }: { stories: Story[]; userAvatar?: string; onYourStoryClick?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -70,6 +83,8 @@ function StoriesBar({ stories, userAvatar }: { stories: Story[]; userAvatar?: st
         <StoryCircle
           story={{ id: 'you', authorId: 'you', authorName: 'You', authorAvatar: userAvatar ?? '', isAI: false, viewed: false, isLive: false }}
           isYours
+          userAvatar={userAvatar}
+          onYourStoryClick={onYourStoryClick}
         />
         {stories.map(s => (
           <StoryCircle key={s.id} story={s} />
@@ -110,7 +125,13 @@ function PostCard({ post }: { post: Post }) {
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [expandedContent, setExpandedContent] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const nav = useNavigate();
+
+  const avatarSrc = avatarFailed || !post.authorAvatar
+    ? `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(post.authorName)}`
+    : post.authorAvatar;
 
   const isLongContent = post.content.length > 200;
   const displayContent = expandedContent ? post.content : post.content.slice(0, 200);
@@ -148,6 +169,24 @@ function PostCard({ post }: { post: Post }) {
     setCommentText('');
   };
 
+  const handleShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const shareUrl = `${window.location.origin}/post/${post.id}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setShowCopiedToast(true);
+      setTimeout(() => setShowCopiedToast(false), 2000);
+    } catch {
+      // Fallback: show URL in alert
+      const shareUrl = `${window.location.origin}/post/${post.id}`;
+      try {
+        await navigator.share({ url: shareUrl, title: `Post by ${post.authorName}` });
+      } catch {
+        // Both failed, do nothing
+      }
+    }
+  };
+
   const handleLikeComment = (commentId: string) => {
     setComments(c => c.map(cmt =>
       cmt.id === commentId ? { ...cmt, liked: !cmt.liked, likes: cmt.likes + (cmt.liked ? -1 : 1) } : cmt
@@ -162,7 +201,7 @@ function PostCard({ post }: { post: Post }) {
       {/* Post Header */}
       <div className="flex items-center gap-3 p-4">
         <div className="relative shrink-0">
-          <img src={post.authorAvatar} alt={post.authorName} className="w-10 h-10 rounded-full object-cover" />
+          <img src={avatarSrc} alt={post.authorName} className="w-10 h-10 rounded-full object-cover" onError={() => setAvatarFailed(true)} />
           {post.authorIsAI && (
             <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-brand-primary flex items-center justify-center border-2 border-bg-canvas">
               <Sparkles size={8} className="text-white" />
@@ -242,7 +281,7 @@ function PostCard({ post }: { post: Post }) {
           <MessageCircle size={16} />
           Comment
         </button>
-        <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5 hover:text-text-secondary transition-colors">
+        <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5 hover:text-text-secondary transition-colors">
           <Share2 size={16} />
           Share
         </button>
@@ -325,20 +364,136 @@ function PostCard({ post }: { post: Post }) {
           </button>
         </div>
       </div>
+
+      {/* Copied toast */}
+      {showCopiedToast && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 glass rounded-full px-4 py-2 text-xs font-medium text-text-primary flex items-center gap-1.5 shadow-lg animate-fade-in">
+          <Check size={12} className="text-success" /> Link copied!
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Composer ──
-function Composer({ onPost, userAvatar, username }: { onPost: (text: string) => void; userAvatar?: string; username?: string }) {
+function Composer({ onPost, userAvatar, username, onStoryCreate }: {
+  onPost: (text: string, mediaUrl?: string, feeling?: string, mediaType?: string) => void;
+  userAvatar?: string;
+  username?: string;
+  onStoryCreate?: () => void;
+}) {
   const [text, setText] = useState('');
   const [expanded, setExpanded] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [selectedFeeling, setSelectedFeeling] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [showFeelingPicker, setShowFeelingPicker] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = () => {
-    if (!text.trim()) return;
-    onPost(text.trim());
+  const FEELINGS = [
+    { emoji: '😊', label: 'Happy' },
+    { emoji: '🎵', label: 'Listening' },
+    { emoji: '📚', label: 'Reading' },
+    { emoji: '🍽️', label: 'Eating' },
+    { emoji: '✈️', label: 'Traveling' },
+    { emoji: '💪', label: 'Working out' },
+    { emoji: '🎮', label: 'Gaming' },
+    { emoji: '😴', label: 'Tired' },
+    { emoji: '🤔', label: 'Thinking' },
+    { emoji: '☕', label: 'Coffee' },
+    { emoji: '🎬', label: 'Watching' },
+    { emoji: '💼', label: 'Working' },
+    { emoji: '🌧️', label: 'Moody' },
+    { emoji: '🔥', label: 'Hyped' },
+    { emoji: '🌿', label: 'Chill' },
+    { emoji: '🎉', label: 'Celebrating' },
+  ];
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedMedia(file);
+    const reader = new FileReader();
+    reader.onload = () => setMediaPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!text.trim() && !selectedMedia) return;
+    setUploading(true);
+    let mediaUrl: string | undefined;
+    let mediaType: string | undefined;
+    if (selectedMedia) {
+      mediaType = selectedMedia.type.startsWith('video/') ? 'video' : 'image';
+      try {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+          reader.readAsDataURL(selectedMedia);
+        });
+        // Upload via media service
+        const token = localStorage.getItem('accessToken');
+        // Create media asset first
+        const uploadRes = await fetch('/v1/media/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            fileName: selectedMedia.name,
+            contentType: selectedMedia.type,
+            fileSize: selectedMedia.size,
+            visibility: 'public',
+          }),
+        });
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          const { mediaAssetId, uploadUrl } = uploadData;
+          if (uploadUrl) {
+            // Try S3/local upload
+            try {
+              await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': selectedMedia.type },
+                body: selectedMedia,
+              });
+              await fetch('/v1/media/confirm-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ mediaAssetId }),
+              });
+            } catch {
+              // PUT failed, try local base64 store
+              await fetch('/v1/media/upload-local', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ mediaAssetId, base64Content: base64 }),
+              });
+            }
+          }
+          // Get download URL
+          const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (dlRes.ok) {
+            const { url } = await dlRes.json();
+            mediaUrl = url;
+          }
+        }
+      } catch (err) {
+        console.error('Upload failed:', err);
+      }
+      // Fallback: use base64 data URL if upload didn't produce a URL
+      if (!mediaUrl) {
+        mediaUrl = mediaPreview ?? undefined;
+      }
+    }
+    onPost(text.trim(), mediaUrl, selectedFeeling ?? undefined, mediaType);
     setText('');
+    setSelectedMedia(null);
+    setMediaPreview(null);
+    setSelectedFeeling(null);
     setExpanded(false);
+    setUploading(false);
   };
 
   return (
@@ -366,25 +521,209 @@ function Composer({ onPost, userAvatar, username }: { onPost: (text: string) => 
           />
         )}
       </div>
-      {expanded && (
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle">
-          <div className="flex items-center gap-2">
-            <button className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all">
-              <Image size={18} />
-            </button>
-            <button className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-social-warm transition-all">
-              <Smile size={18} />
-            </button>
-          </div>
+
+      {/* Media Preview */}
+      {mediaPreview && (
+        <div className="mt-3 relative rounded-xl overflow-hidden">
+          <img src={mediaPreview} alt="Preview" className="w-full max-h-[200px] object-cover rounded-xl" />
           <button
-            onClick={handleSubmit}
-            disabled={!text.trim()}
-            className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40"
+            onClick={() => { setSelectedMedia(null); setMediaPreview(null); }}
+            className="absolute top-2 right-2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
           >
-            Post
+            <X size={14} />
           </button>
         </div>
       )}
+
+      {/* Feeling badge */}
+      {selectedFeeling && (
+        <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full glass text-xs">
+          <span className="text-base">{selectedFeeling.split(' ')[0]}</span>
+          <span className="text-text-secondary">{selectedFeeling.split(' ').slice(1).join(' ')}</span>
+          <button onClick={() => setSelectedFeeling(null)} className="ml-1 text-text-muted hover:text-text-primary">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle">
+          <div className="flex items-center gap-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFilePick}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
+              title="Add photo"
+            >
+              <Image size={18} />
+            </button>
+            <button
+              onClick={() => onStoryCreate?.()}
+              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-social-warm transition-all"
+              title="Create story"
+            >
+              <Camera size={18} />
+            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowFeelingPicker(!showFeelingPicker)}
+                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
+                title="Add feeling"
+              >
+                <Smile size={18} />
+              </button>
+              {showFeelingPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-30 p-3 glass rounded-2xl shadow-xl max-w-[300px] animate-fade-in">
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">How are you feeling?</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {FEELINGS.map(f => (
+                      <button
+                        key={f.label}
+                        onClick={() => { setSelectedFeeling(`${f.emoji} ${f.label}`); setShowFeelingPicker(false); }}
+                        className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-white/10 transition-colors"
+                      >
+                        <span className="text-xl">{f.emoji}</span>
+                        <span className="text-[9px] text-text-muted">{f.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={handleSubmit}
+            disabled={(!text.trim() && !selectedMedia) || uploading}
+            className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40"
+          >
+            {uploading ? 'Posting...' : 'Post'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Story Creator Modal ──
+function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPublish: (caption: string, mediaUrl?: string) => void }) {
+  const [caption, setCaption] = useState('');
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setMediaPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handlePublish = async () => {
+    if (!caption.trim() && !mediaFile) return;
+    setPublishing(true);
+    let mediaUrl: string | undefined;
+    if (mediaFile) {
+      try {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+          reader.readAsDataURL(mediaFile);
+        });
+        const token = localStorage.getItem('accessToken');
+        const uploadRes = await fetch('/v1/media/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            fileName: mediaFile.name,
+            contentType: mediaFile.type,
+            fileSize: mediaFile.size,
+            visibility: 'public',
+          }),
+        });
+        if (uploadRes.ok) {
+          const { mediaAssetId } = await uploadRes.json();
+          await fetch('/v1/media/upload-local', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ mediaAssetId, base64Content: base64 }),
+          });
+          const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (dlRes.ok) {
+            const { url } = await dlRes.json();
+            mediaUrl = url;
+          }
+        }
+      } catch { mediaUrl = mediaPreview ?? undefined; }
+    }
+    onPublish(caption.trim() || 'My story 📸', mediaUrl);
+    setPublishing(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={onClose}>
+      <div className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/5">
+            <X size={20} className="text-text-secondary" />
+          </button>
+          <h2 className="text-lg font-semibold text-text-primary">Create Story</h2>
+          <button
+            onClick={handlePublish}
+            disabled={(!caption.trim() && !mediaFile) || publishing}
+            className="text-sm font-semibold text-brand-primary disabled:opacity-40"
+          >
+            {publishing ? 'Sharing...' : 'Share'}
+          </button>
+        </div>
+
+        {mediaPreview ? (
+          <div className="relative rounded-2xl overflow-hidden mb-3">
+            <img src={mediaPreview} alt="" className="w-full aspect-[9/16] object-cover" />
+            <button
+              onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+              className="absolute top-2 right-2 p-2 rounded-full bg-black/50 text-white"
+            >
+              <X size={14} />
+            </button>
+            <input
+              value={caption}
+              onChange={e => setCaption(e.target.value)}
+              placeholder="Add a caption..."
+              className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-sm p-3 outline-none placeholder:text-white/60"
+            />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="w-full aspect-[9/16] max-h-[300px] rounded-2xl glass border-2 border-dashed border-border-subtle flex flex-col items-center justify-center gap-2 hover:border-brand-primary/50 transition-colors"
+            >
+              <Camera size={32} className="text-text-muted" />
+              <span className="text-sm text-text-muted">Tap to add a photo</span>
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" onChange={handleFilePick} className="hidden" />
+            <textarea
+              value={caption}
+              onChange={e => setCaption(e.target.value)}
+              placeholder="What's on your mind?"
+              rows={2}
+              className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -399,6 +738,7 @@ export default function FeedPage() {
   const profile = useSelector((s: RootState) => s.profile.profile);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [showStoryCreator, setShowStoryCreator] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -416,8 +756,28 @@ export default function FeedPage() {
     setRefreshing(false);
   }
 
-  const handleCreatePost = (text: string) => {
-    dispatch(createNewPost({ content: text }));
+  const handleCreatePost = (text: string, mediaUrl?: string, feeling?: string, mediaType?: string) => {
+    const content = feeling ? `${feeling} — ${text}` : text;
+    dispatch(createNewPost({ content, mediaUrl, mediaType }));
+  };
+
+  const handleCreateStory = async (caption: string, mediaUrl?: string) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      await fetch('/v1/stories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          storyType: 'selfie',
+          caption,
+          mediaUrl,
+        }),
+      });
+      // Refresh stories after creating
+      dispatch(fetchStoriesThunk());
+    } catch (err) {
+      console.error('Failed to create story:', err);
+    }
   };
 
   if (!user) {
@@ -439,9 +799,6 @@ export default function FeedPage() {
       <header className="safe-top px-5 pt-5 pb-2 shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">Feed</h1>
-          <button onClick={() => nav('/search')} className="glass rounded-full p-2.5 text-text-secondary hover:text-brand-primary transition-all">
-            <Sparkles size={18} />
-          </button>
         </div>
       </header>
 
@@ -454,11 +811,11 @@ export default function FeedPage() {
         )}
 
         {/* Stories Bar */}
-        <StoriesBar stories={stories} userAvatar={profile?.avatarUrl} />
+        <StoriesBar stories={stories} userAvatar={profile?.avatarUrl} onYourStoryClick={() => setShowStoryCreator(true)} />
 
         {/* Composer */}
         <div className="px-4">
-          <Composer onPost={handleCreatePost} userAvatar={profile?.avatarUrl} username={profile?.username ?? user?.username} />
+          <Composer onPost={handleCreatePost} userAvatar={profile?.avatarUrl} username={profile?.username ?? user?.username} onStoryCreate={() => setShowStoryCreator(true)} />
         </div>
 
         {/* Posts Feed */}

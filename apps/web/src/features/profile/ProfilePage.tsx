@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   User, Settings, Star, MapPin, Globe, Calendar, Camera, Sparkles,
   Users2, Image, Heart, MessageCircle, Share2, MoreHorizontal,
-  Plus, Pencil, Lock, ChevronRight, Shield, BadgeCheck,
+  Plus, Pencil, Lock, ChevronRight, Shield, BadgeCheck, Check,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import type { Post, UserProfile, Character } from '@/app/store';
@@ -30,10 +30,25 @@ function Section({ title, children, className }: { title?: string; children: Rea
 function ProfilePost({ post }: { post: Post }) {
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.likes);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
 
   const isLongContent = post.content.length > 200;
   const [expanded, setExpanded] = useState(false);
   const displayContent = expanded ? post.content : post.content.slice(0, 200);
+
+  const handleShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const shareUrl = `${window.location.origin}/post/${post.id}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setShowCopiedToast(true);
+      setTimeout(() => setShowCopiedToast(false), 2000);
+    } catch {
+      try {
+        await navigator.share({ url: `${window.location.origin}/post/${post.id}`, title: `Post by ${post.authorName}` });
+      } catch { /* fallback silent */ }
+    }
+  };
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -75,10 +90,16 @@ function ProfilePost({ post }: { post: Post }) {
         <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
           <MessageCircle size={16} /> Comment
         </button>
-        <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
+        <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
           <Share2 size={16} /> Share
         </button>
       </div>
+      {/* Copied toast */}
+      {showCopiedToast && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 glass rounded-full px-4 py-2 text-xs font-medium text-text-primary flex items-center gap-1.5 shadow-lg animate-fade-in">
+          <Check size={12} className="text-success" /> Link copied!
+        </div>
+      )}
     </div>
   );
 }

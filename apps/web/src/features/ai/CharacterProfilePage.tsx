@@ -1,15 +1,192 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
   ArrowLeft, MessageCircle, Heart, Share2, Flag, MapPin, Sparkles,
   Globe, Lock, Pencil, Ban, Camera, Clock, Users, Star, Image, Plus, Loader2, AlertTriangle,
+  Send, MoreHorizontal,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
+import { useAppDispatch } from '@/app/store';
+import { reactToPostThunk, addCommentThunk } from '@/app/store';
 import { Badge } from '@itchats/ui';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, genId } from '@/lib/api';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
+
+// ── Time ago helper ──
+function timeAgoStr(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+// ── Character Post Card (interactive, like feed) ──
+function CharacterPostCard({ post, characterName, characterAvatar }: { post: any; characterName: string; characterAvatar?: string }) {
+  const dispatch = useAppDispatch();
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(post.likeCount || 0);
+  const [comments, setComments] = useState<any[]>([]);
+  const [showComments, setShowComments] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [showReactions, setShowReactions] = useState(false);
+  const [expandedContent, setExpandedContent] = useState(false);
+
+  const isLongContent = (post.content?.length || 0) > 200;
+  const displayContent = expandedContent ? post.content : (post.content || '').slice(0, 200);
+
+  const handleLike = () => {
+    const newLiked = !liked;
+    setLiked(newLiked);
+    setLikeCount((c: number) => c + (newLiked ? 1 : -1));
+    dispatch(reactToPostThunk({ postId: post.id, emoji: '❤️' }));
+  };
+
+  const handleAddComment = () => {
+    if (!commentText.trim()) return;
+    dispatch(addCommentThunk({ postId: post.id, content: commentText.trim() }));
+    setComments(c => [...c, {
+      id: genId(), authorName: 'You', authorAvatar: '',
+      content: commentText.trim(), createdAt: new Date().toISOString(),
+      likes: 0, liked: false,
+    }]);
+    setCommentText('');
+  };
+
+  const toggleComments = async () => {
+    if (!showComments && comments.length === 0) {
+      try {
+        const data = await apiFetch<any[]>(`/posts/${post.id}/comments`);
+        setComments(data || []);
+      } catch { }
+    }
+    setShowComments(!showComments);
+  };
+
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/ai/profile/${post.authorCharacterId}`);
+    } catch { /* fallback */ }
+  };
+
+  return (
+    <div className="glass rounded-2xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 p-4">
+        <div className="w-10 h-10 rounded-full overflow-hidden bg-bg-elevated shrink-0">
+          {characterAvatar ? (
+            <img src={characterAvatar} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-brand-primary/20">
+              <span className="text-brand-primary font-bold text-sm">{characterName?.[0]}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-text-primary truncate">{characterName}</span>
+            <Badge variant="ai" className="text-[9px] px-1.5">AI</Badge>
+          </div>
+          <span className="text-[11px] text-text-muted">{post.createdAt ? timeAgoStr(post.createdAt) : ''}</span>
+        </div>
+        <button className="p-1.5 rounded-full hover:bg-white/5">
+          <MoreHorizontal size={16} className="text-text-muted" />
+        </button>
+      </div>
+
+      {/* Content */}
+      {post.content && (
+        <div className="px-4 pb-3">
+          <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
+            {displayContent}
+            {isLongContent && !expandedContent && '...'}
+          </p>
+          {isLongContent && (
+            <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
+              {expandedContent ? 'Show less' : 'See more'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Media */}
+      {post.mediaUrl && (
+        <div className="mx-4 mb-3 rounded-xl overflow-hidden">
+          <img src={post.mediaUrl} alt="" className="w-full object-cover max-h-[400px] rounded-xl" />
+        </div>
+      )}
+
+      {/* Stats */}
+      {(likeCount > 0 || (post.commentCount ?? 0) > 0) && (
+        <div className="flex items-center justify-between px-4 py-2 text-[11px] text-text-muted">
+          <span>{likeCount} likes</span>
+          <span>{(post.commentCount ?? 0) + comments.length} comments</span>
+        </div>
+      )}
+
+      {/* Action Bar */}
+      <div className="flex items-center border-t border-border-subtle mx-4 py-1">
+        <button
+          onClick={handleLike}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${liked ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5'}`}
+        >
+          <Heart size={16} className={liked ? 'fill-current text-brand-primary' : ''} />
+          Like
+        </button>
+        <button onClick={toggleComments} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
+          <MessageCircle size={16} />
+          Comment
+        </button>
+        <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
+          <Share2 size={16} />
+          Share
+        </button>
+      </div>
+
+      {/* Comments */}
+      {showComments && (
+        <div className="px-4 pb-3">
+          <div className="border-t border-border-subtle pt-3 space-y-3">
+            {comments.slice(0, 3).map((c: any) => (
+              <div key={c.id} className="flex gap-2.5">
+                <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="rounded-2xl px-3 py-2 bg-bg-elevated inline-block max-w-full">
+                    <span className="text-xs font-semibold text-text-primary">{c.authorName || 'User'}</span>
+                    <p className="text-xs text-text-secondary">{c.content || c.text}</p>
+                  </div>
+                  <span className="text-[10px] text-text-muted ml-1">{c.createdAt ? timeAgoStr(c.createdAt) : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2.5 mt-3">
+            <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
+            <div className="flex-1 flex items-center gap-2 glass rounded-full px-3 py-2">
+              <input
+                type="text"
+                placeholder="Write a comment..."
+                value={commentText}
+                onChange={e => setCommentText(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddComment()}
+                className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted outline-none"
+              />
+              <button onClick={handleAddComment} disabled={!commentText.trim()} className="text-brand-primary disabled:opacity-30">
+                <Send size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CharacterProfilePage() {
   const { characterId } = useParams<{ characterId: string }>();
@@ -25,7 +202,92 @@ export default function CharacterProfilePage() {
   const [followersCount, setFollowersCount] = useState(0);
   const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
   const [tab, setTab] = useState<'posts' | 'about'>('posts');
+  const [showAvatarUploaded, setShowAvatarUploaded] = useState(false);
+  const [showCoverUploaded, setShowCoverUploaded] = useState(false);
   const isOwner = user?.id === char?.ownerUserId;
+
+  const avatarRef = useRef<HTMLInputElement>(null);
+  const coverRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !token) return;
+    try {
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+        reader.readAsDataURL(file);
+      });
+      // Upload via media API
+      const uploadRes = await fetch('/v1/media/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size, visibility: 'public' }),
+      });
+      if (uploadRes.ok) {
+        const { mediaAssetId } = await uploadRes.json();
+        await fetch('/v1/media/upload-local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ mediaAssetId, base64Content: base64 }),
+        });
+        const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (dlRes.ok) {
+          const { url } = await dlRes.json();
+          // Update character avatar
+          await fetch(`${API}/characters/${characterId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ avatarUrl: url }),
+          });
+          setChar({ ...char, avatarUrl: url });
+          setShowAvatarUploaded(true);
+          setTimeout(() => setShowAvatarUploaded(false), 2000);
+        }
+      }
+    } catch (err) { console.error('Avatar upload failed', err); }
+  };
+
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !token) return;
+    try {
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+        reader.readAsDataURL(file);
+      });
+      const uploadRes = await fetch('/v1/media/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size, visibility: 'public' }),
+      });
+      if (uploadRes.ok) {
+        const { mediaAssetId } = await uploadRes.json();
+        await fetch('/v1/media/upload-local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ mediaAssetId, base64Content: base64 }),
+        });
+        const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (dlRes.ok) {
+          const { url } = await dlRes.json();
+          await fetch(`${API}/characters/${characterId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ coverUrl: url }),
+          });
+          setChar({ ...char, coverUrl: url });
+          setShowCoverUploaded(true);
+          setTimeout(() => setShowCoverUploaded(false), 2000);
+        }
+      }
+    } catch (err) { console.error('Cover upload failed', err); }
+  };
 
   useEffect(() => {
     if (!token || !characterId) return;
@@ -160,24 +422,56 @@ export default function CharacterProfilePage() {
 
       <div className="flex-1 overflow-y-auto">
         {/* Cover Image */}
-        <div className="relative h-[180px] bg-gradient-to-br from-brand-primary/30 via-brand-primary/10 to-surface-elevated overflow-hidden">
+        <div className="relative h-[180px] bg-gradient-to-br from-brand-primary/30 via-brand-primary/10 to-surface-elevated overflow-hidden group">
           {char.coverUrl ? (
             <img src={char.coverUrl} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/20 via-brand-glow/10 to-bg-canvas" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-bg-canvas to-transparent" />
+          {isOwner && (
+            <button
+              onClick={() => coverRef.current?.click()}
+              className="absolute top-3 right-3 p-2 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
+              title="Change cover photo"
+            >
+              <Camera size={16} />
+            </button>
+          )}
+          <input ref={coverRef} type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
+          {showCoverUploaded && (
+            <div className="absolute bottom-3 left-3 px-3 py-1.5 rounded-full bg-success/20 text-success text-xs font-medium animate-fade-in">
+              Cover updated!
+            </div>
+          )}
         </div>
 
         {/* Profile Info */}
         <div className="px-5 -mt-16 relative z-10">
           <div className="flex items-end justify-between">
-            <div className="w-24 h-24 rounded-full overflow-hidden ring-4 ring-bg-canvas shadow-xl bg-bg-elevated">
-              {char.avatarUrl ? (
-                <img src={char.avatarUrl} alt={char.name} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-primary/30 to-brand-glow/20">
-                  <span className="text-brand-secondary text-3xl font-bold">{char.name?.[0]}</span>
+            <div className="relative group">
+              <div className="w-24 h-24 rounded-full overflow-hidden ring-4 ring-bg-canvas shadow-xl bg-bg-elevated">
+                {char.avatarUrl ? (
+                  <img src={char.avatarUrl} alt={char.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-primary/30 to-brand-glow/20">
+                    <span className="text-brand-secondary text-3xl font-bold">{char.name?.[0]}</span>
+                  </div>
+                )}
+              </div>
+              {isOwner && (
+                <button
+                  onClick={() => avatarRef.current?.click()}
+                  className="absolute bottom-0 right-0 p-1.5 rounded-full bg-brand-primary text-white opacity-0 group-hover:opacity-100 transition-opacity hover:brightness-110"
+                  title="Change profile picture"
+                >
+                  <Camera size={14} />
+                </button>
+              )}
+              <input ref={avatarRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+              {showAvatarUploaded && (
+                <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-success/20 text-success text-[10px] font-medium whitespace-nowrap animate-fade-in">
+                  Updated!
                 </div>
               )}
             </div>
@@ -327,17 +621,7 @@ export default function CharacterProfilePage() {
               ) : (
                 <div className="space-y-4">
                   {posts.map((post: any) => (
-                    <div key={post.id} className="glass rounded-2xl p-4">
-                      {post.content && (
-                        <p className="text-sm text-text-primary whitespace-pre-line leading-relaxed">{post.content}</p>
-                      )}
-                      {post.mediaUrl && (
-                        <img src={post.mediaUrl} alt="" className="mt-3 rounded-xl w-full max-h-[300px] object-cover" />
-                      )}
-                      <p className="text-[11px] text-text-muted mt-2">
-                        {post.createdAt ? new Date(post.createdAt).toLocaleDateString() : ''}
-                      </p>
-                    </div>
+                    <CharacterPostCard key={post.id} post={post} characterName={char.name} characterAvatar={char.avatarUrl} />
                   ))}
                 </div>
               )}

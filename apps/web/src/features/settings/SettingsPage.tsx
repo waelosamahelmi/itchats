@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
   ArrowLeft, CreditCard, Bell, Lock, Shield, Globe, Smartphone,
   User, Mail, Camera, Mic, Info, Trash2, LogOut, ChevronRight,
   ToggleLeft, ToggleRight, Sparkles, ExternalLink, AlertTriangle,
-  Cookie, HelpCircle, FileText, Sun, Moon,
+  Cookie, HelpCircle, FileText, Sun, Moon, X, Check,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch } from '@/app/store';
@@ -84,6 +84,12 @@ export default function SettingsPage() {
 
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordChanging, setPasswordChanging] = useState(false);
+  const [passwordResult, setPasswordResult] = useState<{ success?: boolean; message?: string } | null>(null);
 
   // Real wallet / subscription data
   const [wallet, setWallet] = useState<{ balance: number } | null>(null);
@@ -136,6 +142,37 @@ export default function SettingsPage() {
   const balance = wallet?.balance ?? 0;
   const planName = subscription?.plan ?? subscription?.planId ?? 'Free';
   const planStatus = subscription?.status ?? 'active';
+
+  const handleChangePassword = async () => {
+    if (newPassword !== confirmPassword) {
+      setPasswordResult({ success: false, message: 'Passwords do not match' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordResult({ success: false, message: 'Password must be at least 6 characters' });
+      return;
+    }
+    setPasswordChanging(true);
+    setPasswordResult(null);
+    try {
+      await apiFetch('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setPasswordResult({ success: true, message: 'Password changed successfully!' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordResult(null);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      }, 1500);
+    } catch (err: any) {
+      setPasswordResult({ success: false, message: err.message || 'Failed to change password' });
+    } finally {
+      setPasswordChanging(false);
+    }
+  };
 
   // ── Credit display card ──
   const CreditCard_ = () => (
@@ -196,7 +233,7 @@ export default function SettingsPage() {
         <div className="space-y-1 px-4">
           <SettingsRow icon={Mail} label="Email" value={user?.email || '(not set)'} disabled />
           <SettingsRow icon={User} label="Username" value={user?.username || '(not set)'} />
-          <SettingsRow icon={Lock} label="Change Password" onClick={() => {}} />
+          <SettingsRow icon={Lock} label="Change Password" onClick={() => setShowPasswordModal(true)} />
           <SettingsRow
             icon={theme === 'dark' ? Moon : Sun}
             label="Appearance"
@@ -211,7 +248,7 @@ export default function SettingsPage() {
         <SectionHeader title="Billing & Credits" />
         <CreditCard_ />
         <div className="space-y-1 px-4 mt-2">
-          <SettingsRow icon={CreditCard} label="Transaction History" onClick={() => {}} />
+          <SettingsRow icon={CreditCard} label="Transaction History" onClick={() => nav('/billing')} />
         </div>
 
         {/* Notifications */}
@@ -335,6 +372,66 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={() => setShowPasswordModal(false)}>
+          <div className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => setShowPasswordModal(false)} className="p-1.5 rounded-full hover:bg-white/5">
+                <X size={20} className="text-text-secondary" />
+              </button>
+              <h2 className="text-lg font-semibold text-text-primary">Change Password</h2>
+              <div className="w-8" />
+            </div>
+
+            {passwordResult?.success ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="w-14 h-14 rounded-full bg-success/20 flex items-center justify-center">
+                  <Check size={28} className="text-success" />
+                </div>
+                <p className="text-text-primary font-medium">{passwordResult.message}</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {passwordResult?.message && (
+                  <div className="px-3 py-2 rounded-lg bg-danger/10 text-danger text-xs font-medium">
+                    {passwordResult.message}
+                  </div>
+                )}
+                <input
+                  type="password"
+                  placeholder="Current password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  className="w-full glass rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none"
+                />
+                <input
+                  type="password"
+                  placeholder="New password (min 6 chars)"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full glass rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none"
+                />
+                <input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full glass rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none"
+                />
+                <button
+                  onClick={handleChangePassword}
+                  disabled={passwordChanging || !currentPassword || !newPassword}
+                  className="w-full rounded-full bg-brand-primary py-3 text-sm font-semibold text-white hover:brightness-110 transition-all disabled:opacity-40"
+                >
+                  {passwordChanging ? 'Changing...' : 'Change Password'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

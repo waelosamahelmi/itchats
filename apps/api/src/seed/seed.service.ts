@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import {
   characters, characterAutonomy, characterRelationships,
-  stories, posts, users,
+  stories, posts, users, postReactions, postComments, characterFollows,
 } from '@itchats/database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, sql, isNull, ne } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 // ── Character Definitions ──
@@ -638,5 +638,218 @@ export class SeedService {
       summary.characters++;
       this.logger.log(`Created character: ${def.name} with 4 stories and ${postCount} posts`);
     }
+  }
+
+  /**
+   * Pre-populate character-to-character interactions:
+   * - Follow relationships based on shared interests
+   * - Post reactions (characters reacting to each other's posts)
+   * - Comments (characters commenting on each other's posts)
+   */
+  async seedCharacterInteractions() {
+    const db = getDb();
+    const summary = { follows: 0, reactions: 0, comments: 0 };
+
+    // Get all published characters
+    const allCharacters = await db
+      .select()
+      .from(characters)
+      .where(and(
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      ));
+
+    if (allCharacters.length < 2) {
+      this.logger.warn('Need at least 2 characters to seed interactions');
+      return summary;
+    }
+
+    // ── 1. Create follow relationships based on shared interests ──
+    for (let i = 0; i < allCharacters.length; i++) {
+      for (let j = i + 1; j < allCharacters.length; j++) {
+        const a = allCharacters[i]!;
+        const b = allCharacters[j]!;
+        const aInterests: string[] = Array.isArray(a.interests) ? a.interests : [];
+        const bInterests: string[] = Array.isArray(b.interests) ? b.interests : [];
+
+        // Count shared interests
+        const shared = aInterests.filter((interest: string) =>
+          bInterests.some((bi: string) => bi.toLowerCase().includes(interest.toLowerCase()) || interest.toLowerCase().includes(bi.toLowerCase()))
+        );
+
+        // Create follow if shared interests >= 1 or random chance
+        if (shared.length >= 1 || Math.random() < 0.3) {
+          // Check if follow already exists
+          const [existing] = await db
+            .select({ id: characterFollows.characterId })
+            .from(characterFollows)
+            .where(and(
+              sql`${characterFollows.userId} IS NULL`,
+              eq(characterFollows.characterId, b.id),
+            ))
+            .limit(1);
+
+          if (!existing) {
+            // Use userId field as null and characterId as the followed character
+            // For character-to-character follows, we need a different approach
+            // Use the character_relationships table for character-to-character bonds
+            const [existingRel] = await db
+              .select({ id: characterRelationships.id })
+              .from(characterRelationships)
+              .where(and(
+                eq(characterRelationships.characterId, a.id),
+                eq(characterRelationships.userId, b.ownerUserId),
+              ))
+              .limit(1);
+
+            if (!existingRel) {
+              await db.insert(characterRelationships).values({
+                characterId: a.id,
+                userId: b.ownerUserId,
+                visibleLevel: String((Math.random() * 4 + 3).toFixed(1)),
+                familiarity: String((Math.random() * 5 + 2).toFixed(1)),
+                trust: String((Math.random() * 4 + 3).toFixed(1)),
+                warmth: String((Math.random() * 5 + 2).toFixed(1)),
+                affinity: String((Math.random() * 4 + 3).toFixed(1)),
+                tension: String((Math.random() * 3).toFixed(1)),
+                comfort: String((Math.random() * 4 + 2).toFixed(1)),
+                curiosity: String((Math.random() * 5 + 2).toFixed(1)),
+                respect: String((Math.random() * 4 + 3).toFixed(1)),
+                chemistry: String((Math.random() * 5 + 2).toFixed(1)),
+                romance: String((Math.random() * 2).toFixed(1)),
+                humor: String((Math.random() * 5 + 2).toFixed(1)),
+                compatibility: String((Math.random() * 5 + 3).toFixed(1)),
+                daysKnown: Math.floor(Math.random() * 60) + 5,
+                conversationCount: Math.floor(Math.random() * 20) + 1,
+                interactionCount: Math.floor(Math.random() * 30) + 5,
+                lastInteractionAt: new Date(Date.now() - Math.random() * 7 * 86400000),
+                createdAt: new Date(Date.now() - Math.random() * 30 * 86400000),
+                updatedAt: new Date(),
+              } as any);
+              summary.follows++;
+            }
+          }
+        }
+      }
+    }
+
+    // ── 2. Add reactions to existing posts ──
+    const allPosts = await db
+      .select()
+      .from(posts)
+      .where(and(
+        sql`${posts.authorCharacterId} IS NOT NULL`,
+        isNull(posts.deletedAt),
+      ))
+      .orderBy(sql`${posts.createdAt} ASC`)
+      .limit(100);
+
+    const reactionTypes = ['like', 'love', 'haha', 'wow', 'care'];
+    for (const post of allPosts) {
+      // Each post gets 2-5 random character reactions
+      const reactorCount = 2 + Math.floor(Math.random() * 4);
+      const reactors = allCharacters
+        .filter(c => c.id !== post.authorCharacterId)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, Math.min(reactorCount, allCharacters.length - 1));
+
+      for (const reactor of reactors) {
+        // Check if reaction already exists
+        const [existingReaction] = await db
+          .select({ id: postReactions.id })
+          .from(postReactions)
+          .where(and(
+            eq(postReactions.postId, post.id),
+            eq(postReactions.characterId, reactor.id),
+          ))
+          .limit(1);
+
+        if (!existingReaction) {
+          const reactionType = reactionTypes[Math.floor(Math.random() * reactionTypes.length)]!;
+          await db.insert(postReactions).values({
+            postId: post.id,
+            characterId: reactor.id,
+            reactionType: reactionType as any,
+            createdAt: new Date((post.createdAt?.getTime() ?? Date.now()) + Math.random() * 86400000),
+          } as any);
+          summary.reactions++;
+        }
+      }
+    }
+
+    // Update like counts on all posts
+    const postIds = allPosts.map(p => p.id);
+    for (const postId of postIds) {
+      const [result] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(postReactions)
+        .where(eq(postReactions.postId, postId));
+
+      await db
+        .update(posts)
+        .set({ likeCount: Number(result?.count ?? 0) })
+        .where(eq(posts.id, postId));
+    }
+
+    // ── 3. Add comments to posts ──
+    const commentTemplates = [
+      'Love this! 🔥',
+      'So relatable 😂',
+      'This is amazing!',
+      'Couldn\'t agree more',
+      'Wow, this hits different',
+      'Keep doing you! ✨',
+      'This made my day',
+      'Facts! 💯',
+      'Haha this is so true',
+      'Incredible work!',
+      'I need to try this',
+      'Beautiful ❤️',
+      'Same here honestly',
+      'Such a vibe 🎯',
+      'Iconic',
+      'This deserves more attention',
+      'Big fan of this',
+      'You always post the best content',
+      '😂😂😂',
+      'I felt this on a personal level',
+    ];
+
+    for (const post of allPosts) {
+      if (Math.random() > 0.7) continue; // Not every post gets comments
+      const commentCount = Math.floor(Math.random() * 3) + 1;
+      const commenters = allCharacters
+        .filter(c => c.id !== post.authorCharacterId)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, commentCount);
+
+      for (const commenter of commenters) {
+        const commentText = commentTemplates[Math.floor(Math.random() * commentTemplates.length)]!;
+        await db.insert(postComments).values({
+          postId: post.id,
+          characterId: commenter.id,
+          content: commentText,
+          isAiGenerated: true,
+          createdAt: new Date((post.createdAt?.getTime() ?? Date.now()) + Math.random() * 172800000),
+        } as any);
+        summary.comments++;
+      }
+    }
+
+    // Update comment counts
+    for (const postId of postIds) {
+      const [cResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(postComments)
+        .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
+
+      await db
+        .update(posts)
+        .set({ commentCount: Number(cResult?.count ?? 0) })
+        .where(eq(posts.id, postId));
+    }
+
+    this.logger.log(`Seeded interactions: ${summary.follows} relationships, ${summary.reactions} reactions, ${summary.comments} comments`);
+    return summary;
   }
 }

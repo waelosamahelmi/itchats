@@ -15,9 +15,10 @@ export interface Post {
   id: string; authorId: string; authorName: string; authorAvatar: string;
   authorIsAI: boolean; content: string; mediaUrl?: string; mediaType?: 'image' | 'video';
   createdAt: string; privacy: 'public' | 'friends';
-  likes: number; liked: boolean;
+  likes: number; liked: boolean; likeCount?: number;
   topReactions: { emoji: string; count: number }[];
   comments: Comment[]; commentCount: number; shares: number;
+  shareCount?: number; viewCount?: number;
 }
 export interface Comment {
   id: string; authorName: string; authorAvatar: string; authorIsAI: boolean;
@@ -36,6 +37,8 @@ export interface Voice {
 export interface Story {
   id: string; authorId: string; authorName: string; authorAvatar: string;
   isAI: boolean; viewed: boolean; isLive: boolean;
+  caption?: string; storyType?: string; mediaUrl?: string;
+  authorCharacterId?: string; authorUserId?: string;
 }
 export interface Msg {
   id: string; conversationId: string; senderType: string; content: string; createdAt: string;
@@ -116,11 +119,17 @@ export const { setDiscoverCharacters, appendDiscoverCharacters, setMyCharacters,
 export const fetchFeed = createAsyncThunk('posts/feed', async (page?: number) => {
   return (await apiFetch(`/posts/feed?page=${page ?? 1}&limit=10`)) as Post[];
 });
-export const createNewPost = createAsyncThunk('posts/create', async (data: { content: string; mediaUrl?: string }) => {
+export const createNewPost = createAsyncThunk('posts/create', async (data: { content: string; mediaUrl?: string; mediaType?: string; feeling?: string }) => {
   return (await apiFetch('/posts', { method: 'POST', body: JSON.stringify(data) })) as Post;
 });
+// Map frontend emojis to backend reactionType enum values
+const EMOJI_TO_REACTION: Record<string, string> = {
+  '👍': 'like', '❤️': 'love', '😂': 'haha', '😮': 'wow', '😢': 'sad', '😡': 'angry', '🔥': 'care',
+  '👏': 'like', '🎉': 'like', '💯': 'like',
+};
 export const reactToPostThunk = createAsyncThunk('posts/react', async ({ postId, emoji }: { postId: string; emoji: string }) => {
-  await apiFetch(`/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ reactionType: emoji }) });
+  const reactionType = EMOJI_TO_REACTION[emoji] || 'like';
+  await apiFetch(`/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ reactionType }) });
   return { postId, emoji };
 });
 export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId, content }: { postId: string; content: string }) => {
@@ -162,7 +171,11 @@ const posts = createSlice({
     });
     b.addCase(addCommentThunk.fulfilled, (s, a) => {
       const post = s.feedPosts.find(p => p.id === a.payload.postId);
-      if (post) { post.comments.push(a.payload.comment); post.commentCount += 1; }
+      if (post) {
+        post.comments = post.comments || [];
+        post.comments.push(a.payload.comment);
+        post.commentCount = (post.commentCount || 0) + 1;
+      }
     });
     b.addCase(deletePostThunk.fulfilled, (s, id) => {
       s.feedPosts = s.feedPosts.filter(p => p.id !== id.payload);
@@ -179,7 +192,11 @@ export const updateProfileThunk = createAsyncThunk('profile/update', async (data
   return (await apiFetch('/users/me', { method: 'PATCH', body: JSON.stringify(data) })) as UserProfile;
 });
 export const fetchFriendsThunk = createAsyncThunk('profile/friends', async () => {
-  return (await apiFetch('/users/friends')) as UserProfile[];
+  const data = await apiFetch('/users/friends');
+  // Backend returns { friends: [...], count: N } — extract array if wrapped
+  if (data && Array.isArray(data.friends)) return data.friends as UserProfile[];
+  if (Array.isArray(data)) return data as UserProfile[];
+  return [] as UserProfile[];
 });
 const profile = createSlice({
   name: 'profile',

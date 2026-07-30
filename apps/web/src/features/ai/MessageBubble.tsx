@@ -44,6 +44,28 @@ export function MessageBubble({
     holdTimer.current = null;
   };
 
+  // ── Media generating placeholder ──
+  if (message.kind === 'media_generating') {
+    return (
+      <article className="chat-message chat-message-character">
+        <div className="message-stack">
+          <div className="media-request-card" role="status" aria-live="polite">
+            <div className="media-request-header">
+              <span className="media-request-emoji">🎨</span>
+              <span>{message.text}</span>
+            </div>
+            <div className="media-generating-loader">
+              <div className="generating-bar" />
+              <div className="generating-bar" />
+              <div className="generating-bar" />
+            </div>
+            <p className="media-request-cost">Generating your media...</p>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
   // ── Media request card ──
   if (message.kind === 'media_request') {
     const isSelfie = message.mediaRequestType === 'selfie';

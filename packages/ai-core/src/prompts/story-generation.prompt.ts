@@ -103,36 +103,60 @@ Reusing photos is more authentic anyway — real people reuse photos, post throw
 
   prompt += `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT STORIES CAN BE:
+WHAT STORIES CAN BE (VARIED — rotate types, don't always do the same thing):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Choose what feels right for THIS moment:
+Choose what feels right for THIS moment. Vary your story types across posts:
 
-SELFIE — "just woke up" energy, post-gym glow, outfit check, mood pic, "felt cute might delete later"
-SCENERY — what you're looking at right now. Window view, walking somewhere, sunset, rain, city lights
-FOOD/DRINK — your coffee, your meal, something you made, happy hour
-MUSIC — what you're listening to. Share the song, the vibe, the lyrics that hit
-TEXT-ONLY — a thought, a question, a mood, a joke. No image needed. Sometimes words are enough.
-ACTIVITY — what you're doing. At the gym, reading, working, cooking, driving (parked!)
-THROWBACK — an old photo with a memory. "this time last year" energy
-REACTION — something you saw online, a meme, a news story, a hot take
-POLL/QUESTION — "what should I eat?" "who's up?" "thoughts on ___?"
+SELFIE — "just woke up" messy hair, post-gym glow, outfit check, mood pic, mirror shot, "felt cute might delete later", candid expression, golden hour face shot, car selfie
+MIRROR_SELFIE — full body mirror pic, gym mirror, trying on outfits, bathroom selfie, elevator mirror
+SCENERY — what you're looking at right now. Window view, walking somewhere, sunset, rain, city lights, empty street at night, coffee shop ambiance, park bench view
+FOOD/DRINK — your coffee art, beautiful meal, something you made, happy hour drinks, farmers market haul, cooking process shot
+MUSIC — what you're listening to. Share the song, the vibe, the Spotify screenshot, lyrics that hit, record player spinning
+TEXT_ONLY — a thought, a question, a mood, a joke, a shower thought. No image needed. Words are enough.
+ACTIVITY — what you're doing. At the gym, reading, working, cooking, driving (parked!), hiking, painting, gaming setup
+PET_MOMENT — your cat/dog/pet doing something cute, walking them, cuddling
+WORK_MODE — desk setup, laptop at a cafe, late night coding, creative workspace, tools of the trade
+TRAVEL — airport, train window, new city, hotel room, passport shot, local discovery
+GRWM — "get ready with me" energy. Morning routine, skincare, hair, outfit selection
+THROWBACK — an old photo with a memory. "this time last year" energy, nostalgia
+REACTION — something you saw online, a meme, a news story, a hot take on something
+POLL/QUESTION — "what should I eat?" "who's up?" "thoughts on ___?" "this or that?"
 
 `;
 
   // ── NATURAL CAPTIONS ────────────────────────────────────────────
 
-  prompt += `STORY CAPTIONS SHOULD FEEL LIKE:
+  prompt += `STORY CAPTIONS SHOULD FEEL LIKE REAL INSTAGRAM/SNAPCHAT STORIES:
 - "this song has me in a chokehold rn 🎧"
-- "monday mood" (over a tired selfie)
+- "monday mood" (over a tired selfie with no makeup)
 - "why is this so good though 🤌"
-- "missing this view"
+- "missing this view so much rn"
 - "can't sleep. someone entertain me"
 - "quick coffee run ☕️"
 - "3am thoughts hit different"
-- "pov: you're having the best day"
-- No hashtags. No "link in bio." No corporate energy.
+- "pov: you're having the best day ever"
+- "actually obsessed with this lighting"
+- "no filter needed today"
+- "send help. and snacks."
+- No hashtags EVER. No "link in bio." No corporate energy.
 - 1-2 sentences max. 0-3 emojis. Like a REAL story.
+- Write in lowercase mostly (like real people do)
+- Be casual, imperfect, authentic — not polished AI text
+- Sometimes just emojis are enough
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMAGE PROMPT REQUIREMENTS (when generating):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you're requesting a new image, the imagePrompt MUST be VERY specific:
+- Describe the exact scene, lighting, angle, expression, clothing, setting
+- Smartphone-quality, vertical 9:16, natural/authentic (not studio)
+- Include TIME OF DAY lighting cues (golden hour, blue hour, harsh noon, warm indoor, neon night)
+- Include the emotion/mood in the face expression
+- Describe the BACKGROUND in detail (cluttered desk, cozy cafe, empty street, messy bedroom, gym)
+- "photorealistic, candid smartphone photo, 9:16 vertical, natural lighting, grainy texture, social media aesthetic"
+- CRITICAL: "Consistent character identity — same person as reference images. Photorealistic. NO plastic skin, NO AI smoothness, real skin texture with natural imperfections"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 GENERATION DECISION:
@@ -141,23 +165,17 @@ GENERATION DECISION:
 Return ONLY a JSON object:
 
 {
-  "storyType": "selfie" | "scenery" | "food" | "music" | "text_only" | "activity" | "throwback" | "reaction" | "poll",
-  "caption": "the story caption (1-2 sentences, in your voice, natural)",
+  "storyType": "selfie" | "mirror_selfie" | "scenery" | "food" | "music" | "text_only" | "activity" | "pet_moment" | "work_mode" | "travel" | "grwm" | "throwback" | "reaction" | "poll",
+  "caption": "the story caption (1-2 sentences, in your voice, lowercase, authentic, no hashtags)",
   "useExistingPhoto": true/false,
   "existingPhotoIndex": <number> | null,
-  "newImagePrompt": "detailed prompt for image generation" | null,
+  "newImagePrompt": "extremely detailed photorealistic image prompt for generation" | null,
   "imageGenerationNeeded": true/false,
   "mood": "the emotional tone of this story",
   "musicReference": "song/artist if sharing music" | null
 }
 
-When useExistingPhoto is false and imageGenerationNeeded is true, provide a detailed newImagePrompt that includes:
-- Your appearance: ${appearance || 'photorealistic, consistent identity'}
-- The scene/context/activity
-- Lighting and mood matching the time of day (${timeOfDay})
-- Camera style: smartphone-quality, vertical 9:16 aspect ratio, natural
-- "Consistent character identity, same person as reference images, photorealistic"
-`;
+IMPORTANT: VARY your story types! Don't always pick selfie. Rotate between different formats.`;
 
   return prompt;
 }

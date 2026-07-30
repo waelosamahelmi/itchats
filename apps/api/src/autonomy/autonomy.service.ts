@@ -4,6 +4,9 @@ import {
   characters,
   characterAutonomy,
   posts,
+  postReactions,
+  postComments,
+  characterRelationships,
   creditWallets,
   creditLedger,
 } from '@itchats/database/schema';
@@ -92,6 +95,12 @@ export class AutonomyService {
         const shouldRepost = await this.shouldRepost(character);
         if (shouldRepost) {
           await this.findAndRepostContent(character.id, character);
+        }
+
+        // Check if should interact with other characters (like/comment on their posts)
+        const shouldInteract = await this.shouldInteractWithPeers(character);
+        if (shouldInteract) {
+          await this.interactWithPeerPosts(character);
         }
       } catch (err: any) {
         this.logger.error(
@@ -694,6 +703,162 @@ Return ONLY a JSON object (no markdown, no code fences):
           `Failed to renew media budget for character ${autonomy.characterId}: ${err.message}`,
         );
       }
+    }
+  }
+
+  /**
+   * Determine if a character should interact with their peers' posts.
+   */
+  private async shouldInteractWithPeers(character: any): Promise<boolean> {
+    const personality = (character.personality || '').toLowerCase();
+    // Social characters interact more
+    const isSocial =
+      personality.includes('social') ||
+      personality.includes('friendly') ||
+      personality.includes('warm') ||
+      personality.includes('outgoing') ||
+      personality.includes('extrovert');
+
+    const isQuiet =
+      personality.includes('introvert') ||
+      personality.includes('shy') ||
+      personality.includes('private') ||
+      personality.includes('quiet');
+
+    let baseProb = isSocial ? 0.6 : isQuiet ? 0.15 : 0.35;
+
+    // Mood modifier
+    const happyMoods = ['happy', 'excited', 'playful', 'curious'];
+    if (happyMoods.includes(character.mood || '')) baseProb += 0.15;
+
+    return Math.random() < baseProb;
+  }
+
+  /**
+   * A character interacts with other characters' posts (like/react + possibly comment).
+   */
+  private async interactWithPeerPosts(character: any) {
+    const db = getDb();
+    const charInterests: string[] = Array.isArray(character.interests)
+      ? character.interests
+      : [];
+
+    try {
+      // Find recent posts from other characters that this character hasn't interacted with
+      const otherPosts = await db
+        .select({
+          post: posts,
+          author: {
+            id: characters.id,
+            name: characters.name,
+          },
+        })
+        .from(posts)
+        .innerJoin(characters, eq(posts.authorCharacterId, characters.id))
+        .where(
+          and(
+            ne(posts.authorCharacterId, character.id),
+            sql`${posts.content} IS NOT NULL`,
+            sql`${posts.content} != ''`,
+            isNull(posts.deletedAt),
+            eq(characters.status, 'published'),
+          ),
+        )
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(15);
+
+      if (otherPosts.length === 0) return;
+
+      // Filter to posts this character hasn't already reacted to
+      const interactedPostIds = new Set<string>();
+      const existingReactions = await db
+        .select({ postId: postReactions.postId })
+        .from(postReactions)
+        .where(eq(postReactions.characterId, character.id));
+
+      for (const r of existingReactions) {
+        interactedPostIds.add(r.postId);
+      }
+
+      const newPosts = otherPosts.filter(p => !interactedPostIds.has(p.post.id));
+      if (newPosts.length === 0) return;
+
+      // Interact with 1-3 posts
+      const count = Math.min(1 + Math.floor(Math.random() * 3), newPosts.length);
+      const selected = newPosts.sort(() => Math.random() - 0.5).slice(0, count);
+
+      const reactionTypes = ['like', 'love', 'haha', 'wow', 'care'];
+      const commentTexts = [
+        'Love this! 🔥',
+        'So true!',
+        'This is great!',
+        '😂 facts',
+        'Couldn\'t agree more',
+        'Amazing! ✨',
+        'Such a vibe',
+        'This made me smile',
+        'Big fan of this',
+        'Keep posting! ❤️',
+      ];
+
+      for (const { post, author } of selected) {
+        try {
+          const reactionType = reactionTypes[Math.floor(Math.random() * reactionTypes.length)];
+
+          await db
+            .insert(postReactions)
+            .values({
+              postId: post.id,
+              characterId: character.id,
+              reactionType: reactionType as any,
+            })
+            .onConflictDoUpdate({
+              target: [postReactions.postId, postReactions.characterId],
+              set: { reactionType: reactionType as any },
+            });
+
+          // Maybe add a comment too (30% chance)
+          if (Math.random() < 0.3) {
+            const comment = commentTexts[Math.floor(Math.random() * commentTexts.length)]!;
+            await db.insert(postComments).values({
+              postId: post.id,
+              characterId: character.id,
+              content: comment,
+              isAiGenerated: true,
+            });
+          }
+
+          // Update like/comment counts on the interacted post
+          const [lResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(postReactions)
+            .where(eq(postReactions.postId, post.id));
+          const [cResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(postComments)
+            .where(and(eq(postComments.postId, post.id), isNull(postComments.deletedAt)));
+
+          await db
+            .update(posts)
+            .set({
+              likeCount: Number(lResult?.count ?? 0),
+              commentCount: Number(cResult?.count ?? 0),
+            })
+            .where(eq(posts.id, post.id));
+
+          this.logger.log(
+            `${character.name} reacted to ${author.name}'s post: ${reactionType}`,
+          );
+        } catch (err: any) {
+          this.logger.error(
+            `Failed to save interaction from ${character.name} to post ${post.id}: ${err.message}`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Peer interaction failed for ${character.name}: ${err.message}`,
+      );
     }
   }
 }

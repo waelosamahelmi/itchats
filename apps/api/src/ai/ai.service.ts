@@ -270,24 +270,76 @@ export class AiService {
       return { status: 'denied' as const };
     }
 
-    let result: { url: string; model: string; creditsUsed: number } | undefined;
-    if (pending.mediaType === 'selfie') {
-      result = await this.generateSelfie(userId, pending.characterId, pending.mediaPrompt);
-    } else if (pending.mediaType === 'image') {
-      result = await this.generateImage(userId, pending.mediaPrompt);
-    }
+    // Create a generation job and spawn async work to avoid proxy timeout
+    const db = getDb();
+    const jobId = randomUUID();
+    await db.insert(generationJobs).values({
+      id: jobId,
+      userId,
+      characterId,
+      generationType: pending.mediaType === 'selfie' ? 'image_to_image' : 'text_to_image',
+      routeKey: 'chat.media.approve',
+      idempotencyKey: randomUUID(),
+      requestJson: { mediaType: pending.mediaType, mediaPrompt: pending.mediaPrompt },
+      status: 'processing',
+      startedAt: new Date(),
+    });
 
-    if (result?.url) {
-      await this.saveMediaMessage(pending.conversationId, pending.characterId, 'image', result.url);
-    }
+    // Fire-and-forget: generate in background, update job when done
+    (async () => {
+      try {
+        let result: { url: string; model: string; creditsUsed: number } | undefined;
+        if (pending.mediaType === 'selfie') {
+          result = await this.generateSelfie(userId, pending.characterId, pending.mediaPrompt);
+        } else if (pending.mediaType === 'image') {
+          result = await this.generateImage(userId, pending.mediaPrompt);
+        }
+
+        if (result?.url) {
+          await this.saveMediaMessage(pending.conversationId, pending.characterId, 'image', result.url);
+        }
+
+        const d = getDb();
+        await d.update(generationJobs).set({
+          status: result?.url ? 'succeeded' : 'failed',
+          responseJson: result || { error: 'No URL returned' },
+          completedAt: new Date(),
+        }).where(eq(generationJobs.id, jobId));
+      } catch (err: any) {
+        const d = getDb();
+        await d.update(generationJobs).set({
+          status: 'failed',
+          errorCode: 'PROVIDER_ERROR',
+          errorMessageSafe: String(err.message).slice(0, 200),
+          completedAt: new Date(),
+        }).where(eq(generationJobs.id, jobId));
+      }
+    })();
 
     return {
-      status: result?.url ? 'generated' as const : 'failed' as const,
-      url: result?.url,
-      model: result?.model,
-      creditsUsed: result?.creditsUsed,
+      status: 'queued' as const,
+      jobId,
       mediaType: pending.mediaType,
       mediaPrompt: pending.mediaPrompt,
+    };
+  }
+
+  /**
+   * Get the status of a media generation job for polling.
+   */
+  async getMediaJobStatus(jobId: string) {
+    const db = getDb();
+    const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).limit(1);
+    if (!job) throw new Error('Job not found');
+
+    const responseJson = job.responseJson as any;
+    return {
+      status: job.status,
+      url: responseJson?.url || null,
+      model: responseJson?.model || null,
+      creditsUsed: responseJson?.creditsUsed || null,
+      mediaType: responseJson?.mediaType || null,
+      error: job.errorMessageSafe || null,
     };
   }
 

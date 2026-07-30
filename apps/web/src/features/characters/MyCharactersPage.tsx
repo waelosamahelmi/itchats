@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Bot, Pencil, Plus, Sparkles, Star, Users,
+  Bot, Pencil, Plus, Sparkles, Star, Users, Lock,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import type { Character } from '@/app/store';
@@ -50,6 +50,7 @@ function CharacterCard({ char, index, onEdit }: { char: Character; index: number
       <div className="p-3">
         <div className="flex items-center gap-1.5 mb-1">
           <h3 className="text-sm font-semibold text-text-primary truncate flex-1">{char.name}</h3>
+          {char.visibility === 'private' && <Lock size={11} className="text-amber-400 shrink-0" />}
           <Badge variant="ai" className="text-[9px] px-1.5 shrink-0">AI</Badge>
         </div>
         <p className="text-[11px] text-text-muted line-clamp-2 leading-relaxed mb-2">

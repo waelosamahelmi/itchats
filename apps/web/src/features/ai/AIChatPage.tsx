@@ -19,6 +19,39 @@ function fallbackAvatar(name: string) {
   return `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(name)}`;
 }
 
+/** Strip raw JSON artifacts from streaming text for cleaner display */
+function stripJsonArtifacts(text: string): string {
+  // Try to parse the full accumulated text as an assistant response array
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+  try {
+    const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const value = JSON.parse(cleaned);
+    if (Array.isArray(value)) {
+      // Extract speech content from parsed parts
+      return value
+        .filter((p: any) => p && typeof p === 'object' && (p.type === 'speech' || p.type === 'action' || p.type === 'thought') && typeof p.content === 'string')
+        .map((p: any) => {
+          if (p.type === 'action') return `*${p.content}*`;
+          if (p.type === 'thought') return `_${p.content}_`;
+          return p.content;
+        })
+        .join('\n') || text;
+    }
+  } catch {
+    // Not valid JSON yet, strip any partial JSON wrapper characters
+    let cleaned = text;
+    // If text starts with [{"type": pattern, try to extract partial content
+    const partialMatch = cleaned.match(/\{"type":"speech","content":"([^"]*(?:\\.[^"]*)*)"/);
+    if (partialMatch) {
+      try {
+        return JSON.parse(`"${partialMatch[1]}"`);
+      } catch { /* fall through */ }
+    }
+  }
+  return text;
+}
+
 export default function AIChatPage() {
   const { characterId = '' } = useParams<{ characterId: string }>();
   const navigate = useNavigate();
@@ -306,7 +339,9 @@ export default function AIChatPage() {
           const payload = JSON.parse(dataLine.slice(6));
           if (payload.type === 'chunk') {
             fullResponse += payload.content;
-            setStreaming(fullResponse);
+            // Strip raw JSON artifacts from streaming display
+            const displayText = stripJsonArtifacts(fullResponse);
+            setStreaming(displayText);
           }
           if (payload.type === 'done') {
             if (payload.conversationId && !conversationId) {
@@ -435,15 +470,75 @@ export default function AIChatPage() {
       const result = await response.json();
 
       if (result.status === 'generated' && result.url) {
+        // Legacy sync path
         setMessages((current) => [...current, {
           id: crypto.randomUUID(), sender: 'character', kind: 'image',
           text: result.mediaType === 'selfie' ? `${name} sent a selfie` : `${name} sent an image`,
           mediaUrl: result.url, createdAt: new Date().toISOString(),
           delivery: 'delivered', reactions: [],
         }]);
-        // Update credit balance after deduction
         if (result.creditsUsed) {
           setCreditBalance((b) => Math.max(0, b - result.creditsUsed));
+        }
+      } else if (result.status === 'queued' && result.jobId) {
+        // Async path: poll for job completion
+        const placeholderId = crypto.randomUUID();
+        setMessages((current) => [...current, {
+          id: placeholderId, sender: 'character', kind: 'system',
+          text: `🎨 ${name} is generating an image...`,
+          createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+        }]);
+
+        // Start polling in background
+        const maxPolls = 60;
+        let resolved = false;
+        for (let i = 0; i < maxPolls && !resolved; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const statusRes = await fetch(`${API}/ai/chat/media/status/${result.jobId}`, {
+              headers: headers(),
+            });
+            if (!statusRes.ok) continue;
+            const job = await statusRes.json();
+
+            if (job.status === 'succeeded' && job.url) {
+              resolved = true;
+              setMessages((current) => [
+                ...current.filter((m) => m.id !== placeholderId),
+                {
+                  id: crypto.randomUUID(), sender: 'character', kind: 'image',
+                  text: result.mediaType === 'selfie' ? `${name} sent a selfie` : `${name} sent an image`,
+                  mediaUrl: job.url, createdAt: new Date().toISOString(),
+                  delivery: 'delivered', reactions: [],
+                },
+              ]);
+              if (job.creditsUsed) {
+                setCreditBalance((b) => Math.max(0, b - job.creditsUsed));
+              }
+            } else if (job.status === 'failed') {
+              resolved = true;
+              setMessages((current) => [
+                ...current.filter((m) => m.id !== placeholderId),
+                {
+                  id: crypto.randomUUID(), sender: 'character', kind: 'system',
+                  text: `⚠️ Image generation failed${job.error ? `: ${job.error}` : ''}`,
+                  createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+                },
+              ]);
+            }
+          } catch {
+            // Network error, continue polling
+          }
+        }
+        if (!resolved) {
+          setMessages((current) => [
+            ...current.filter((m) => m.id !== placeholderId),
+            {
+              id: crypto.randomUUID(), sender: 'character', kind: 'system',
+              text: `⏰ Image generation is taking too long. It may appear shortly.`,
+              createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+            },
+          ]);
         }
       } else if (result.status === 'failed') {
         setError(result.message || 'Media generation failed. Please try again.');
@@ -473,7 +568,7 @@ export default function AIChatPage() {
   return (
     <main className="real-chat-shell">
       <header className="real-chat-header safe-top">
-        <button type="button" className="chat-header-button" aria-label="Back to characters" onClick={() => navigate('/ai')}>
+        <button type="button" className="chat-header-button" aria-label="Go back" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
         </button>
         <Link to={`/ai/profile/${characterId}`} className="chat-identity">
@@ -483,8 +578,8 @@ export default function AIChatPage() {
             <small><i aria-hidden="true" /> {relationship?.label || 'Getting to know you'}</small>
           </span>
         </Link>
-        <button type="button" className="chat-header-button" aria-label={`Call ${name}`}><Phone size={19} /></button>
-        <button type="button" className="chat-header-button" aria-label="Conversation options"><MoreHorizontal size={20} /></button>
+        <button type="button" className="chat-header-button hidden" aria-label={`Call ${name}`}><Phone size={19} /></button>
+        <button type="button" className="chat-header-button hidden" aria-label="Conversation options"><MoreHorizontal size={20} /></button>
       </header>
 
       <nav className="conversation-mode" aria-label="Conversation mode">

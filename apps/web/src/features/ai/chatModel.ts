@@ -9,7 +9,8 @@ export type MessageKind =
   | 'audio'
   | 'voice_note'
   | 'system'
-  | 'media_request';
+  | 'media_request'
+  | 'media_generating';
 export type DeliveryState = 'sending' | 'sent' | 'delivered' | 'seen' | 'failed';
 
 export interface MessageReaction {
@@ -71,7 +72,7 @@ export function parseAssistantResponse(content: string): ResponsePart[] {
 }
 
 const messageKinds = new Set<MessageKind>([
-  'text', 'thought', 'action', 'image', 'video', 'audio', 'voice_note', 'system', 'media_request',
+  'text', 'thought', 'action', 'image', 'video', 'audio', 'voice_note', 'system', 'media_request', 'media_generating',
 ]);
 const deliveryStates = new Set<DeliveryState>(['sending', 'sent', 'delivered', 'seen', 'failed']);
 

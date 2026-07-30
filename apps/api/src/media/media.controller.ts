@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, UseGuards, Param, Get, Res, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, Param, Get, Res, HttpCode, HttpStatus, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { z } from 'zod';
@@ -25,6 +25,7 @@ const LocalUploadSchema = z.object({
 @Controller('v1/media')
 @UseGuards(JwtAuthGuard)
 export class MediaController {
+  private readonly logger = new Logger(MediaController.name);
   constructor(private readonly media: MediaService) {}
 
   @Post('upload-url')
@@ -41,11 +42,20 @@ export class MediaController {
 
   @Post('voice-note-upload-url')
   async getVoiceNoteUploadUrl(@Body() body: { fileName?: string; fileSize: number }, @Req() req: any) {
-    return this.media.createVoiceNoteUploadUrl(
-      req.user.userId,
-      body.fileName ?? `voice-${Date.now()}.webm`,
-      body.fileSize,
-    );
+    try {
+      if (!body.fileSize || body.fileSize <= 0) {
+        throw new BadRequestException('fileSize must be a positive number');
+      }
+      return await this.media.createVoiceNoteUploadUrl(
+        req.user.userId,
+        body.fileName ?? `voice-${Date.now()}.webm`,
+        body.fileSize,
+      );
+    } catch (err: any) {
+      this.logger.error(`Voice note upload URL failed: ${err.message}`, err.stack);
+      if (err.status) throw err; // re-throw NestJS HTTP exceptions
+      throw new InternalServerErrorException(err.message || 'Failed to create voice note upload URL');
+    }
   }
 
   @Post('confirm-upload')

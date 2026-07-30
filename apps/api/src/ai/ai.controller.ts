@@ -74,6 +74,16 @@ export class AiController {
     }
   }
 
+  @Get('chat/media/status/:jobId')
+  @UseGuards(JwtAuthGuard)
+  async getMediaJobStatus(@Param('jobId') jobId: string) {
+    try {
+      return await this.aiService.getMediaJobStatus(jobId);
+    } catch (err: any) {
+      return { status: 'error', message: err.message || 'Failed to get job status' };
+    }
+  }
+
   @Post('chat')
   @UseGuards(JwtAuthGuard)
   async chat(@Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string }, @Req() req: any) {

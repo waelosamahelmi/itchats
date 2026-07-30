@@ -1,11 +1,9 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { MessageCircle, Compass, Home, Radio, User, Sun, Moon, Bell } from 'lucide-react';
+import { MessageCircle, Compass, Home, Radio, User, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
 import CookieBanner from '@/components/CookieBanner';
 import { getStoredTheme, toggleAndNotify } from './theme';
-import type { Theme } from './theme';
-import { apiGet } from '@/lib/api';
 
 const tabs = [
   { to: '/chats', icon: MessageCircle, label: 'Chats' },
@@ -28,7 +26,6 @@ function activeTabIndex(pathname: string): number {
 export default function AppShell() {
   const loc = useLocation();
   const navigate = useNavigate();
-  const [theme, setTheme] = useState<Theme>(getStoredTheme());
   const activeIdx = activeTabIndex(loc.pathname);
   const [unreadCount, setUnreadCount] = useState(0);
   const [justArrived, setJustArrived] = useState(false);
@@ -43,7 +40,12 @@ export default function AppShell() {
       try {
         const token = getToken();
         if (!token) return;
-        const data = await apiGet<{ count: number }>('/notifications/unread-count');
+        // Use raw fetch to avoid apiFetch's automatic 401 redirect for background polling
+        const res = await fetch('/v1/notifications/unread-count', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return; // Silently ignore — user might not be authenticated
+        const data = await res.json();
         if (mounted) {
           const newCount = data?.count ?? 0;
           if (newCount > prevCountRef.current) {
@@ -64,16 +66,6 @@ export default function AppShell() {
     return () => { mounted = false; clearInterval(interval); };
   }, []);
 
-  // Listen for external theme changes (e.g. from Settings page)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const custom = e as CustomEvent<Theme>;
-      setTheme(custom.detail);
-    };
-    window.addEventListener('themechange', handler);
-    return () => window.removeEventListener('themechange', handler);
-  }, []);
-
   const hideNav =
     loc.pathname.startsWith('/chat/') ||
     loc.pathname.startsWith('/ai/chat/') ||
@@ -85,36 +77,14 @@ export default function AppShell() {
     loc.pathname.startsWith('/admin') ||
     loc.pathname.startsWith('/legal');
 
-  const handleToggleTheme = () => {
-    const next = toggleAndNotify();
-    setTheme(next);
-  };
-
   return (
     <div className="flex flex-col bg-bg-canvas overflow-hidden relative" style={{ height: '100dvh' }}>
-      {/* ── Main content area with page transitions ── */}
-      <main className="flex-1 overflow-hidden relative">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={loc.pathname}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="h-full"
-          >
-            <Outlet />
-          </motion.div>
-        </AnimatePresence>
-      </main>
-
-      {/* ── Floating theme toggle above the nav ── */}
+      {/* ── Top header bar with notification bell ── */}
       {!hideNav && (
-        <>
-          {/* Notification bell */}
+        <header className="safe-top shrink-0 flex items-center justify-end px-4 pt-3 pb-1 relative z-40">
           <motion.button
             onClick={() => navigate('/notifications')}
-            className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-[calc(3.25rem)] z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
+            className="relative w-9 h-9 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center hover:bg-white/10 transition-colors"
             whileTap={{ scale: 0.88 }}
             whileHover={{ scale: 1.06 }}
             aria-label="Notifications"
@@ -139,28 +109,24 @@ export default function AppShell() {
               </motion.span>
             )}
           </motion.button>
-
-          <motion.button
-            onClick={handleToggleTheme}
-            className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 z-50 w-10 h-10 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center shadow-lg hover:shadow-xl transition-shadow"
-            whileTap={{ scale: 0.88 }}
-            whileHover={{ scale: 1.06 }}
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-          <motion.div
-            initial={false}
-            animate={{ rotate: theme === 'dark' ? 0 : 180 }}
-            transition={{ duration: 0.45, ease: 'easeInOut' }}
-          >
-            {theme === 'dark' ? (
-              <Moon size={16} className="text-text-secondary" />
-            ) : (
-              <Sun size={16} className="text-accent-amber" />
-            )}
-          </motion.div>
-        </motion.button>
-        </>
+        </header>
       )}
+
+      {/* ── Main content area with page transitions ── */}
+      <main className="flex-1 overflow-hidden relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={loc.pathname}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="h-full"
+          >
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
       {/* ── Bottom tab navigation ── */}
       {!hideNav && (

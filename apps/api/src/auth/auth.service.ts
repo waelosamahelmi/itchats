@@ -185,6 +185,27 @@ export class AuthService {
     return { reset: true };
   }
 
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const pool = getPool();
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1 LIMIT 1', [userId]);
+    const row = result.rows[0] as { password_hash: string } | undefined;
+    if (!row) throw new UnauthorizedException('User not found');
+
+    const valid = await this.verifyPassword(row.password_hash, currentPassword);
+    if (!valid) throw new UnauthorizedException('Current password is incorrect');
+
+    if (newPassword.length < 6) throw new UnauthorizedException('New password must be at least 6 characters');
+
+    const pw = await this.hashPassword(newPassword);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [pw, userId]);
+
+    // Revoke all refresh tokens for security
+    const db = getDb();
+    await db.update(refreshTokens).set({ revokedAt: new Date() } as any).where(eq(refreshTokens.userId, userId));
+
+    return { changed: true };
+  }
+
   private sanitizeUsername(name: string): string {
     const base = name
       .toLowerCase()
