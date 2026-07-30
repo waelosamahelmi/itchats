@@ -32,7 +32,7 @@ export class AiController {
   @Header('Cache-Control', 'no-cache')
   @Header('X-Accel-Buffering', 'no')
   async streamChat(
-    @Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string },
+    @Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string; detectedLanguage?: string },
     @Req() req: any,
   ) {
     const userId = req.user.userId;
@@ -43,7 +43,7 @@ export class AiController {
 
     (async () => {
       try {
-        for await (const chunk of this.aiService.streamChat(userId, characterId, body.message, conversationId, body.imageBase64)) {
+        for await (const chunk of this.aiService.streamChat(userId, characterId, body.message, conversationId, body.imageBase64, body.detectedLanguage)) {
           readable.push(`data: ${JSON.stringify(chunk)}\n\n`);
         }
       } catch (err: any) {
@@ -95,6 +95,7 @@ export class AiController {
       body.message,
       body.conversationId,
       body.imageBase64,
+      undefined,
     )) {
       if (chunk.type === 'chunk') content += chunk.content;
       if (chunk.type === 'done') creditsUsed = chunk.creditsUsed ?? 0;
@@ -274,5 +275,15 @@ export class AiController {
   @UseGuards(JwtAuthGuard)
   async getRoleplayStatus(@Param('characterId') characterId: string, @Req() req: any) {
     return this.roleplayService.getStatus(characterId, req.user.userId);
+  }
+
+  @Post('translate')
+  @UseGuards(JwtAuthGuard)
+  async translate(@Body() body: { text: string; targetLanguage: string }, @Req() req: any) {
+    try {
+      return await this.aiService.translateText(req.user.userId, body.text, body.targetLanguage);
+    } catch {
+      return { error: 'Translation failed. Please try again.' };
+    }
   }
 }

@@ -16,6 +16,8 @@ export function MessageBubble({
   characterName = 'Character',
   characterId,
   creditBalance = 0,
+  characterAvatarUrl,
+  userAvatarUrl,
 }: {
   message: ChatMessage;
   onReact: (messageId: string, emoji: string) => void;
@@ -26,6 +28,8 @@ export function MessageBubble({
   characterName?: string;
   characterId?: string;
   creditBalance?: number;
+  characterAvatarUrl?: string;
+  userAvatarUrl?: string;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(false);
@@ -50,6 +54,9 @@ export function MessageBubble({
   if (message.kind === 'media_generating') {
     return (
       <article className="chat-message chat-message-character">
+        {characterAvatarUrl && (
+          <img src={characterAvatarUrl} alt={characterName} className="message-avatar" />
+        )}
         <div className="message-stack">
           <div className="media-request-card" role="status" aria-live="polite">
             <div className="media-request-header">
@@ -85,6 +92,9 @@ export function MessageBubble({
 
     return (
       <article className="chat-message chat-message-character">
+        {characterAvatarUrl && (
+          <img src={characterAvatarUrl} alt={characterName} className="message-avatar" />
+        )}
         <div className="message-stack">
           <div className="media-request-card" role="alert">
             <div className="media-request-header">
@@ -144,6 +154,9 @@ export function MessageBubble({
 
   return (
     <article className={`chat-message ${isUser ? 'chat-message-user' : 'chat-message-character'}`}>
+      {!isUser && characterAvatarUrl && (
+        <img src={characterAvatarUrl} alt={characterName} className="message-avatar" />
+      )}
       <div className="message-stack">
         {pickerOpen && (
           <ReactionBar
@@ -198,6 +211,9 @@ export function MessageBubble({
           </span>
         )}
       </div>
+      {isUser && userAvatarUrl && (
+        <img src={userAvatarUrl} alt="You" className="message-avatar" />
+      )}
     </article>
   );
 }

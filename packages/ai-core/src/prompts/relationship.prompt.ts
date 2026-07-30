@@ -186,6 +186,14 @@ export interface RelationshipDeltaParams {
   chemistry?: number;
   romance?: number;
   tension?: number;
+  /** Conversation type for pacing */
+  conversationType?: 'work' | 'casual' | 'deep_personal' | 'romantic_flirty';
+  /** Character's gender */
+  characterGender?: string;
+  /** User's gender */
+  userGender?: string;
+  /** User's orientation */
+  userInterestedIn?: string;
 }
 
 export function buildRelationshipDeltaPrompt(
@@ -193,13 +201,35 @@ export function buildRelationshipDeltaPrompt(
   userMessage: string,
   aiResponse: string,
 ): string {
-  const { relationshipLabel, chemistry, romance } = params;
+  const { relationshipLabel, chemistry, romance, characterGender, userGender, userInterestedIn, conversationType = 'casual' } = params;
 
-  return `Evaluate how this conversation exchange affected the relationship between an AI character and the person they're talking to.
+  // Determine max delta based on conversation type and level caps
+  let maxPositiveDelta = 3;
+  let levelCap = 10;
+  if (conversationType === 'work') { maxPositiveDelta = 1; levelCap = 3; }
+  else if (conversationType === 'casual') { maxPositiveDelta = 3; levelCap = 5; }
+  else if (conversationType === 'deep_personal') { maxPositiveDelta = 5; levelCap = 7; }
+  else if (conversationType === 'romantic_flirty') { maxPositiveDelta = 8; levelCap = 10; }
+
+  // Gender incompatibility check
+  let romanticAllowed = true;
+  if (characterGender && userInterestedIn) {
+    const chGender = characterGender.toLowerCase();
+    if (chGender === 'male' && userInterestedIn === 'women') romanticAllowed = false;
+    if (chGender === 'female' && userInterestedIn === 'men') romanticAllowed = false;
+    if ((chGender === 'male' || chGender === 'female') && userInterestedIn === 'everyone') romanticAllowed = true;
+  }
+
+  return `Evaluate how this conversation exchange affected the relationship between a character and the person they're talking to. BE CONSERVATIVE.
 
 Current relationship: ${relationshipLabel}
 ${chemistry !== undefined ? `Chemistry: ${chemistry.toFixed(2)}` : ''}
 ${romance !== undefined ? `Romance: ${romance.toFixed(2)}` : ''}
+
+Conversation type: ${conversationType?.replace(/_/g, ' ') || 'casual'}
+Maximum positive delta allowed: +${maxPositiveDelta}
+Relationship level cap for this conversation type: ${levelCap}
+${!romanticAllowed ? '⚠️ ROMANTIC ADVANCES ARE NOT ALLOWED — character gender is incompatible with user orientation.' : ''}
 
 USER MESSAGE: ${userMessage.slice(0, 500)}
 CHARACTER RESPONSE: ${aiResponse.slice(0, 500)}
@@ -212,15 +242,16 @@ Return ONLY a JSON object (no markdown, no explanation):
   "significance": "low" | "medium" | "high"
 }
 
-Scoring guidelines:
-- Good conversation, sharing, being kind: +1 to +5
-- Deep emotional sharing, vulnerability, major bonding: +5 to +10
-- Conflict, argument, being hurtful: -3 to -10
-- Being ignored, dismissed, or cold: -1 to -3
-- Flirting (if chemistry > 0.5): +3 to +8
-- Being mean, rude, or disrespectful: -5 to -15
-- Neutral small talk: 0 to +1
-- Making them laugh genuinely: +2 to +4`;
+Strict scoring guidelines:
+- Casual small talk, work discussion, neutral messages: 0 to +1 (should barely move the needle)
+- Friendly chat, shared humor, being kind: +1 to +3 (slow, natural growth)
+- Deep emotional sharing, vulnerability, real bonding: +3 to +${maxPositiveDelta} (significant but not instant)
+- ${romanticAllowed ? 'Flirting, romantic interest from user, genuine chemistry: +3 to +8 (only if user initiates and gender preferences match)' : 'Flirting, romantic interest: DO NOT AWARD romantic points — incompatible orientation'}
+- Conflict, being cold, dismissive: -1 to -5
+- Being hurtful, disrespectful: -5 to -15
+- ${!romanticAllowed ? 'Setting romance to 0 — no romantic development allowed' : ''}
+
+IMPORTANT: A few normal messages about work, weather, or daily life should NOT produce high deltas. Relationship growth requires EARNED emotional depth over many conversations. Be conservative.`;
 }
 
 /**

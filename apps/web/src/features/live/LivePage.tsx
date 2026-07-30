@@ -13,6 +13,9 @@ export default function LivePage() {
     dispatch(fetchDiscover()).finally(() => setLoaded(true));
   }, [dispatch]);
 
+  // Filter to public characters with avatars
+  const publicChars = chars.filter(c => c.visibility === 'public' && c.avatarUrl).slice(0, 12);
+
   return (
     <div className="flex flex-col h-full bg-bg-canvas relative overflow-hidden">
       {/* Ambient background */}
@@ -22,12 +25,16 @@ export default function LivePage() {
         <div className="absolute top-[40%] left-[30%] w-[200px] h-[200px] rounded-full blur-[80px] opacity-15 bg-social-warm/20" />
       </div>
 
-      {/* Blurred character grid behind */}
-      <div className="absolute inset-0 grid grid-cols-3 gap-3 p-8 opacity-[0.12] blur-[2px] pointer-events-none">
-        {chars.filter(c => c.visibility === 'public').slice(0, 9).map(c => (
+      {/* Blurred character grid behind — heavy 20px blur, low opacity */}
+      <div className="absolute inset-0 grid grid-cols-3 gap-4 p-10 opacity-[0.08] blur-[20px] pointer-events-none">
+        {publicChars.map(c => (
           <div key={c.id} className="aspect-square rounded-2xl overflow-hidden">
             <img src={c.avatarUrl ?? ''} alt="" className="w-full h-full object-cover" />
           </div>
+        ))}
+        {/* Fill remaining slots with placeholders if less than 12 chars */}
+        {publicChars.length < 12 && Array.from({ length: 12 - publicChars.length }).map((_, i) => (
+          <div key={`ph-${i}`} className="aspect-square rounded-2xl bg-white/5" />
         ))}
       </div>
 
@@ -38,10 +45,10 @@ export default function LivePage() {
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center px-5 relative z-10">
-        {/* Animated icon */}
+        {/* Animated icon with subtle pulse */}
         <div className="relative mb-8">
           <div className="absolute inset-0 rounded-full bg-brand-primary/30 animate-ping opacity-30" style={{ animationDuration: '3s' }} />
-          <div className="absolute inset-[-8px] rounded-full bg-brand-primary/20 animate-pulse" style={{ animationDuration: '2s' }} />
+          <div className="absolute inset-[-12px] rounded-full bg-brand-primary/20 animate-[pulse_2.5s_ease-in-out_infinite]" />
           <div className="relative w-28 h-28 rounded-full glass flex items-center justify-center shadow-lg shadow-brand-glow/30">
             <Radio size={48} className="text-brand-primary animate-[pulse_2s_ease-in-out_infinite]" />
           </div>
@@ -66,7 +73,7 @@ export default function LivePage() {
             { label: 'Reactions', desc: 'Real-time emoji reactions' },
           ].map(f => (
             <div key={f.label} className="glass rounded-2xl p-3.5 text-center">
-              <div className="w-2 h-2 rounded-full bg-brand-primary mb-2 mx-auto" />
+              <div className="w-2 h-2 rounded-full bg-brand-primary mb-2 mx-auto animate-pulse" />
               <p className="text-xs font-semibold text-text-primary">{f.label}</p>
               <p className="text-[10px] text-text-muted mt-0.5">{f.desc}</p>
             </div>

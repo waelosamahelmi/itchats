@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { users, userProfiles, userFriends, userScores, posts, mediaAssets, characterFollows } from '@itchats/database/schema';
+import { users, userProfiles, userFriends, userScores, posts, characters, characterFollows } from '@itchats/database/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
 @Injectable()
@@ -13,7 +13,34 @@ export class UsersService {
     }).from(users).where(eq(users.id, userId)).limit(1);
     if (!user) throw new NotFoundException('User not found');
     const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
-    return { ...user, profile: profile ?? { displayName: null, bio: null } };
+
+    // Count characters owned by user
+    const [charCount] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(characters)
+      .where(and(
+        eq(characters.ownerUserId, userId),
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      ));
+
+    // Count followers
+    const [followerCount] = await db
+      .select({ count: sql<number>`count(distinct ${characterFollows.userId})` })
+      .from(characterFollows)
+      .innerJoin(characters, and(
+        eq(characterFollows.characterId, characters.id),
+        eq(characters.ownerUserId, userId),
+        sql`${characters.deletedAt} IS NULL`,
+      ))
+      .where(sql`${characterFollows.userId} IS NOT NULL`);
+
+    return {
+      ...user,
+      profile: profile ?? { displayName: null, bio: null },
+      characterCount: Number(charCount?.count ?? 0),
+      followerCount: Number(followerCount?.count ?? 0),
+    };
   }
 
   async updateMe(userId: string, data: { username?: string; displayName?: string; bio?: string; timezone?: string }) {
@@ -81,6 +108,27 @@ export class UsersService {
       .orderBy(sql`${posts.createdAt} DESC`)
       .limit(10);
 
+    // Count characters owned by user
+    const [charCount] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(characters)
+      .where(and(
+        eq(characters.ownerUserId, userId),
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      ));
+
+    // Count followers (users following characters owned by this user)
+    const [followerCount] = await db
+      .select({ count: sql<number>`count(distinct ${characterFollows.userId})` })
+      .from(characterFollows)
+      .innerJoin(characters, and(
+        eq(characterFollows.characterId, characters.id),
+        eq(characters.ownerUserId, userId),
+        sql`${characters.deletedAt} IS NULL`,
+      ))
+      .where(sql`${characterFollows.userId} IS NOT NULL`);
+
     return {
       id: user.id,
       username: user.username,
@@ -92,6 +140,8 @@ export class UsersService {
       website: profile?.website ?? null,
       location: profile?.location ?? null,
       friendshipCount: profile?.friendshipCount ?? 0,
+      characterCount: Number(charCount?.count ?? 0),
+      followerCount: Number(followerCount?.count ?? 0),
       posts: userPosts,
       createdAt: user.createdAt,
     };
@@ -361,6 +411,9 @@ export class UsersService {
       theme?: 'dark' | 'light';
       followedCharacterIds?: string[];
       wizardCompleted?: boolean;
+      gender?: string;
+      lookingFor?: string;
+      interestedIn?: string;
     },
   ) {
     const db = getDb();
@@ -369,6 +422,9 @@ export class UsersService {
     const profileUpdate: Record<string, any> = { updatedAt: new Date() };
     if (data.displayName !== undefined) profileUpdate.displayName = data.displayName;
     if (data.country !== undefined) profileUpdate.location = data.country;
+    if (data.gender !== undefined) profileUpdate.gender = data.gender;
+    if (data.lookingFor !== undefined) profileUpdate.lookingFor = data.lookingFor;
+    if (data.interestedIn !== undefined) profileUpdate.interestedIn = data.interestedIn;
 
     if (Object.keys(profileUpdate).length > 1) {
       await db

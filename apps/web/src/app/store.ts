@@ -45,7 +45,7 @@ export interface Msg {
 }
 
 // ── Auth ──
-export const registerUser = createAsyncThunk('auth/register', async (d: { email: string; username: string; password: string; dateOfBirth?: string; agreedToTerms?: boolean }) => {
+export const registerUser = createAsyncThunk('auth/register', async (d: { email: string; username: string; password: string; dateOfBirth?: string; agreedToTerms?: boolean; gender?: string; lookingFor?: string; interestedIn?: string }) => {
   const data = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(d) });
   localStorage.setItem('accessToken', data.accessToken); localStorage.setItem('refreshToken', data.refreshToken);
   return data;
@@ -74,6 +74,7 @@ export const saveWizard = createAsyncThunk('auth/saveWizard', async (data: {
   displayName?: string; country?: string; referrer?: string; avatarUrl?: string;
   preferredLanguage?: string; autoTranslate?: boolean; theme?: string;
   followedCharacterIds?: string[]; wizardCompleted?: boolean;
+  gender?: string; lookingFor?: string; interestedIn?: string;
 }) => {
   return await apiFetch('/users/me/wizard', { method: 'PATCH', body: JSON.stringify(data) });
 });

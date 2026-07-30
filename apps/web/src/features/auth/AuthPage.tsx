@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, ArrowRight, ArrowLeft, Calendar } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, ArrowLeft, Calendar, Users } from 'lucide-react';
 import { loginUser, registerUser, useAppDispatch } from '@/app/store';
 import type { RootState } from '@/app/store';
 import AnimatedLogo from '@/components/AnimatedLogo';
@@ -45,6 +45,11 @@ export default function AuthPage() {
   const [dobMonth, setDobMonth] = useState('');
   const [dobYear, setDobYear] = useState('');
 
+  // Gender & relationship preferences
+  const [gender, setGender] = useState('');
+  const [lookingFor, setLookingFor] = useState('');
+  const [interestedIn, setInterestedIn] = useState('');
+
   // Terms agreement
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
@@ -73,7 +78,7 @@ export default function AuthPage() {
         return;
       }
       const dateOfBirth = `${dobYear}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`;
-      dispatch(registerUser({ email, username, password, dateOfBirth, agreedToTerms }));
+      dispatch(registerUser({ email, username, password, dateOfBirth, agreedToTerms, gender: gender || undefined, lookingFor: lookingFor || undefined, interestedIn: interestedIn || undefined }));
     }
   };
 
@@ -182,6 +187,69 @@ export default function AuthPage() {
                 <User size={17} className="text-text-muted shrink-0" />
                 <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" className="flex-1 bg-transparent py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none" required minLength={3} />
               </div>
+              {/* ── Gender ── */}
+              <div className="animate-slide-up">
+                <label className="text-xs text-text-muted mb-1.5 block font-medium">I am</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'male', label: 'Male' },
+                    { value: 'female', label: 'Female' },
+                    { value: 'non_binary', label: 'Non-binary' },
+                    { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => setGender(gender === opt.value ? '' : opt.value)}
+                      className={`rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                        gender === opt.value
+                          ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                          : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                      }`}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+              {/* ── Looking for / Relationship preferences ── */}
+              <div className="animate-slide-up">
+                <label className="text-xs text-text-muted mb-1.5 block font-medium">Looking for</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'friends', label: 'Friends' },
+                    { value: 'relationships', label: 'Relationships' },
+                    { value: 'both', label: 'Open to both' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => setLookingFor(lookingFor === opt.value ? '' : opt.value)}
+                      className={`flex-1 rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                        lookingFor === opt.value
+                          ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                          : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                      }`}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+              {/* ── Interested in (only if looking for relationships or both) ── */}
+              {(lookingFor === 'relationships' || lookingFor === 'both') && (
+                <div className="animate-slide-up">
+                  <label className="text-xs text-text-muted mb-1.5 block font-medium">Interested in</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: 'men', label: 'Men' },
+                      { value: 'women', label: 'Women' },
+                      { value: 'everyone', label: 'Everyone' },
+                    ].map(opt => (
+                      <button key={opt.value} type="button"
+                        onClick={() => setInterestedIn(interestedIn === opt.value ? '' : opt.value)}
+                        className={`flex-1 rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                          interestedIn === opt.value
+                            ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                            : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                        }`}
+                      >{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="animate-slide-up">
                 <label className="text-xs text-text-muted mb-1.5 block font-medium">Date of Birth</label>
                 <div className="flex gap-2">

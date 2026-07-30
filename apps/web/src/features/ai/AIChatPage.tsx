@@ -15,11 +15,18 @@ import {
   type ConversationMode,
 } from './chatModel';
 import { detectTextLanguage, getCharacterCooldown, setCharacterCooldown, clearCharacterCooldown } from '@/lib/translate';
+import { t } from '@/lib/i18n';
 
 const API = '/v1';
 
 function fallbackAvatar(name: string) {
   return `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(name)}`;
+}
+
+function userAvatarUrl(user: any): string {
+  if (user?.avatarUrl) return user.avatarUrl;
+  if (user?.username) return fallbackAvatar(user.username);
+  return fallbackAvatar('user');
 }
 
 /** Strip raw JSON artifacts from streaming text for cleaner display */
@@ -64,6 +71,7 @@ export default function AIChatPage() {
   const character = characters.find((item) => item.id === characterId);
   const name = character?.name || 'Character';
   const avatarUrl = character?.avatarUrl || fallbackAvatar(name);
+  const userAvatar = userAvatarUrl(auth.user);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [mode, setMode] = useState<ConversationMode>('chat');
@@ -91,6 +99,16 @@ export default function AIChatPage() {
   const [cooldownUntil, setCooldownUntil] = useState<Date | null>(null);
   const [cooldownMessage, setCooldownMessage] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+
+  // ── Voice Call State ──
+  const [callActive, setCallActive] = useState(false);
+  const [callMuted, setCallMuted] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+  const [callSpeaking, setCallSpeaking] = useState(false);
+  const [callTranscript, setCallTranscript] = useState('');
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speechRecognitionRef = useRef<any>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
@@ -617,6 +635,129 @@ export default function AIChatPage() {
     approveMediaRequest(msg.mediaRequestId, false);
   }
 
+  // ── Voice Call (Walkie-Talkie Mode) ──
+  async function startVoiceCall() {
+    setCallActive(true);
+    setCallDuration(0);
+    setCallTranscript('');
+    callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
+
+    // Start speech recognition
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = detectedLang || 'en';
+      speechRecognitionRef.current = recognition;
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setCallTranscript(transcript);
+      };
+
+      recognition.onerror = () => { /* silently retry */ };
+      recognition.onend = () => {
+        if (callActive) {
+          try { recognition.start(); } catch { /* ignore */ }
+        }
+      };
+
+      try { recognition.start(); } catch { /* not supported */ }
+    }
+
+    // Send initial greeting
+    await sendVoiceCallMessage('Hello?');
+  }
+
+  async function sendVoiceCallMessage(text: string) {
+    if (!text.trim() || !characterId || !auth.token) return;
+    setCallSpeaking(true);
+    try {
+      const response = await fetch(`${API}/ai/chat/stream`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characterId, conversationId, message: text, detectedLanguage: detectedLang }),
+      });
+      if (!response.ok || !response.body) throw new Error('Call failed');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullResponse = '';
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          const dataLine = event.split('\n').find((line) => line.startsWith('data: '));
+          if (!dataLine) continue;
+          const payload = JSON.parse(dataLine.slice(6));
+          if (payload.type === 'chunk') fullResponse += payload.content;
+          if (payload.type === 'done') {
+            if (payload.conversationId && !conversationId) {
+              setConversationId(payload.conversationId);
+              conversationIdRef.current = payload.conversationId;
+            }
+            const parts = parseAssistantResponse(fullResponse);
+            const speechText = parts.filter(p => p.type === 'speech').map(p => p.content).join('\n');
+            // Speak the response via TTS
+            if (speechText && !callMuted) {
+              await speakTTS(speechText);
+            }
+          }
+          if (payload.type === 'error') throw new Error(payload.message);
+        }
+      }
+    } catch { /* call error */ }
+    setCallSpeaking(false);
+  }
+
+  async function speakTTS(text: string) {
+    try {
+      const res = await fetch(`${API}/ai/tts`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: character?.voiceId || 'Cherry' }),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as any;
+      if (data.audioBase64) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
+        ttsAudioRef.current = audio;
+        await audio.play();
+      }
+    } catch { /* TTS error */ }
+  }
+
+  function endVoiceCall() {
+    setCallActive(false);
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
+    if (speechRecognitionRef.current) {
+      try { speechRecognitionRef.current.stop(); } catch { /* ignore */ }
+      speechRecognitionRef.current = null;
+    }
+    if (ttsAudioRef.current) { ttsAudioRef.current.pause(); ttsAudioRef.current = null; }
+    setCallDuration(0);
+    setCallTranscript('');
+    setCallSpeaking(false);
+    setCallMuted(false);
+  }
+
+  function toggleCallMute() {
+    setCallMuted(m => !m);
+    if (ttsAudioRef.current && !callMuted) {
+      ttsAudioRef.current.pause();
+    }
+  }
+
+  // Format duration as mm:ss
+  const callDurationStr = `${Math.floor(callDuration / 60).toString().padStart(2, '0')}:${(callDuration % 60).toString().padStart(2, '0')}`;
+
   if (!auth.token) return <main className="chat-auth-required">Sign in to continue this conversation.</main>;
 
   return (
@@ -626,15 +767,22 @@ export default function AIChatPage() {
           <ArrowLeft size={20} />
         </button>
         <Link to={`/ai/profile/${characterId}`} className="chat-identity">
-          <img src={avatarUrl} alt={`${name} profile`} />
+          <img
+            src={avatarUrl}
+            alt={`${name} profile`}
+            className="w-[2.65rem] h-[2.65rem] rounded-xl object-cover bg-surface-elevated shrink-0"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = fallbackAvatar(name);
+            }}
+          />
           <span>
             <strong>{name}</strong>
-            <small><i aria-hidden="true" /> {relationship?.label || 'Getting to know you'}</small>
+            <small><i aria-hidden="true" /> {relationship?.label || t('char.gettingToKnow')}</small>
           </span>
         </Link>
         <div className="relative">
           <button type="button" className="chat-header-button" aria-label={`Call ${name}`}
-            onClick={() => setError('Voice & video calls coming soon')}
+            onClick={() => void startVoiceCall()}
           >
             <Phone size={19} />
           </button>
@@ -648,20 +796,18 @@ export default function AIChatPage() {
           {headerMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
-              <div className="absolute right-0 top-12 z-20 glass rounded-xl p-1.5 min-w-[180px] shadow-xl border border-border-subtle">
+              <div className="chat-header-dropdown">
                 <button
                   onClick={() => { setHeaderMenuOpen(false); void updateMode('chat'); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
                 >
                   <MessageCircle size={14} />
-                  Switch to chat mode
+                  {t('chat.switchChat')}
                 </button>
                 <button
                   onClick={() => { setHeaderMenuOpen(false); void updateMode('roleplay'); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
                 >
                   <Sparkles size={14} />
-                  Switch to roleplay
+                  {t('chat.switchRoleplay')}
                 </button>
                 <button
                   onClick={() => {
@@ -669,10 +815,10 @@ export default function AIChatPage() {
                     if (conversationId) dispatch(deleteConv(conversationId) as any);
                     navigate('/chats');
                   }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                  className="text-danger"
                 >
                   <Trash2 size={14} />
-                  Delete conversation
+                  {t('chat.deleteConversation')}
                 </button>
               </div>
             </>
@@ -681,8 +827,8 @@ export default function AIChatPage() {
       </header>
 
       <nav className="conversation-mode" aria-label="Conversation mode">
-        <button type="button" aria-pressed={mode === 'chat'} onClick={() => void updateMode('chat')}>Chat</button>
-        <button type="button" aria-pressed={mode === 'roleplay'} onClick={() => void updateMode('roleplay')}>Roleplay</button>
+        <button type="button" aria-pressed={mode === 'chat'} onClick={() => void updateMode('chat')}>{t('char.chat')}</button>
+        <button type="button" aria-pressed={mode === 'roleplay'} onClick={() => void updateMode('roleplay')}>{t('char.roleplay')}</button>
       </nav>
 
       <section className="message-timeline" aria-live="polite" aria-busy={loading || busy}>
@@ -707,6 +853,8 @@ export default function AIChatPage() {
             characterName={name}
             characterId={characterId || undefined}
             creditBalance={creditBalance}
+            characterAvatarUrl={avatarUrl}
+            userAvatarUrl={userAvatar}
           />
         ))}
         {streaming && <div className="character-typing"><span /><span /><span /></div>}
@@ -727,6 +875,41 @@ export default function AIChatPage() {
               They need some space right now. Try again in a few minutes.
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* ── Voice Call Overlay ── */}
+      {callActive && (
+        <div className="voice-call-overlay">
+          <div className="voice-call-card">
+            <div className="voice-call-avatar">
+              <img src={avatarUrl} alt={name} />
+            </div>
+            <h2 className="voice-call-name">{name}</h2>
+            <p className="voice-call-status">
+              {callSpeaking ? 'Speaking...' : callMuted ? 'Muted' : 'Connected'}
+            </p>
+            <p className="voice-call-duration">{callDurationStr}</p>
+            {callTranscript && (
+              <p className="voice-call-transcript">{callTranscript}</p>
+            )}
+            <div className="voice-call-controls">
+              <button
+                className={`voice-call-btn ${callMuted ? 'voice-call-btn-active' : ''}`}
+                onClick={toggleCallMute}
+                aria-label={callMuted ? 'Unmute' : 'Mute'}
+              >
+                {callMuted ? '🔇 Muted' : '🎤 Mute'}
+              </button>
+              <button
+                className="voice-call-btn voice-call-btn-hangup"
+                onClick={endVoiceCall}
+                aria-label="End call"
+              >
+                📞 End
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

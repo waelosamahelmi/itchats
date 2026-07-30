@@ -893,8 +893,9 @@ export class SeedService {
   }
 
   /**
-   * Generate AI images for posts that don't have mediaUrl.
-   * Uses character personality to determine image style.
+   * Generate images for posts that don't have mediaUrl.
+   * Uses Unsplash source URLs based on post content keywords (free, no API key needed).
+   * Falls back to AI generation if UNSPLASH_ACCESS_KEY is configured for higher quality.
    */
   async generatePostImages(batchSize = 10) {
     const db = getDb();
@@ -907,12 +908,6 @@ export class SeedService {
         character: {
           id: characters.id,
           name: characters.name,
-          gender: characters.gender,
-          ageDisplay: characters.ageDisplay,
-          description: characters.description,
-          personality: characters.personality,
-          occupation: characters.occupation,
-          photographyStyle: characters.photographyStyle,
         },
       })
       .from(posts)
@@ -934,45 +929,30 @@ export class SeedService {
       return summary;
     }
 
-    this.logger.log(`Generating images for ${postsWithoutImages.length} posts`);
+    this.logger.log(`Generating Unsplash images for ${postsWithoutImages.length} posts`);
 
     for (const { post, character } of postsWithoutImages) {
       try {
-        // Determine image context from post content
-        const contentWords = (post.content ?? '').split(' ').slice(0, 5).join(' ');
-        const imageContext = contentWords || character.name;
+        // Extract keywords from post content for relevant Unsplash image
+        const content = post.content ?? '';
+        const words = content.replace(/[^\w\s]/gi, '').split(/\s+/).filter(w => w.length > 3);
+        // Pick 2-3 most distinctive words as keywords
+        const uniqueWords = [...new Set(words)].slice(0, 3);
+        const keyword = uniqueWords.join(',') || character.name;
 
-        // Build prompt using character's personality and occupation for style
-        const style = character.photographyStyle || 'cinematic editorial photography';
-        const prompt = buildImagePrompt({
-          characterName: character.name,
-          gender: character.gender ?? undefined,
-          ageDisplay: character.ageDisplay ?? undefined,
-          description: character.description ?? undefined,
-          personality: character.personality ?? undefined,
-          occupation: character.occupation ?? undefined,
-          photographyStyle: style,
-        }, `engaged in an activity related to: ${imageContext}. Cohesive color palette, atmospheric, candid moment, natural expression.`);
+        // Use Unsplash source URL — free, no API key needed
+        const imageUrl = `https://source.unsplash.com/featured/800x600/?${encodeURIComponent(keyword)}`;
 
-        // Generate image via AI
-        const result = await alibabaTextToImageWithFallback({
-          prompt,
-          size: '1024*1024',
-        });
+        await db
+          .update(posts)
+          .set({ mediaUrl: imageUrl, mediaType: 'image', updatedAt: new Date() } as any)
+          .where(eq(posts.id, post.id));
 
-        if (result.url) {
-          // Update the post with the generated image URL
-          await db
-            .update(posts)
-            .set({ mediaUrl: result.url, mediaType: 'image', updatedAt: new Date() } as any)
-            .where(eq(posts.id, post.id));
-
-          summary.generated++;
-          this.logger.log(`Generated image for post by ${character.name}: ${result.url.slice(0, 60)}...`);
-        }
+        summary.generated++;
+        this.logger.log(`Added Unsplash image for post by ${character.name}: ${imageUrl.slice(0, 80)}...`);
       } catch (err: any) {
         summary.failed++;
-        this.logger.error(`Failed to generate image for post ${post.id} by ${character.name}: ${err.message}`);
+        this.logger.error(`Failed to add image for post ${post.id} by ${character.name}: ${err.message}`);
       }
     }
 

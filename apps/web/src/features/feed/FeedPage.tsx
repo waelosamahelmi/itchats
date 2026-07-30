@@ -22,6 +22,7 @@ import {
 import { genId, reactionEmojis, apiFetch } from '@/lib/api';
 import { translateText, getLanguageDisplayName, detectTextLanguage, getAutoTranslateSetting } from '@/lib/translate';
 import { timeAgo } from '@/lib/timeAgo';
+import { t } from '@/lib/i18n';
 import { Badge } from '@itchats/ui';
 import ProfileWizard from '@/features/auth/ProfileWizard';
 import PostMenu from '@/components/PostMenu';
@@ -44,7 +45,7 @@ function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: 
         <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-primary flex items-center justify-center border-[3px] border-bg-canvas">
           <Plus size={12} className="text-white" />
         </div>
-        <span className="text-[10px] text-text-secondary truncate w-full text-center leading-tight">Your Story</span>
+        <span className="text-[10px] text-text-secondary truncate w-full text-center leading-tight">{t('feed.yourStory')}</span>
       </button>
     );
   }
@@ -308,14 +309,14 @@ function PostCard({ post }: { post: Post }) {
                 onClick={() => setEditing(false)}
                 className="px-4 py-1.5 rounded-full text-xs text-text-secondary glass hover:bg-white/5 transition-colors"
               >
-                Cancel
+                {t('feed.cancel')}
               </button>
               <button
                 onClick={handleEditSave}
                 disabled={!editContent.trim() || savingEdit}
                 className="px-4 py-1.5 rounded-full text-xs text-white bg-brand-primary hover:brightness-110 transition-all disabled:opacity-40"
               >
-                {savingEdit ? 'Saving...' : 'Save'}
+                {savingEdit ? t('feed.saving') : t('feed.save')}
               </button>
             </div>
           </div>
@@ -327,20 +328,20 @@ function PostCard({ post }: { post: Post }) {
             </p>
             {isLongContent && !showTranslation && (
               <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
-                {expandedContent ? 'Show less' : 'See more'}
+                {expandedContent ? t('feed.showLess') : t('feed.seeMore')}
               </button>
             )}
             {/* Translation label */}
             {showTranslation && translatedData && (
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
-                  Translated from {getLanguageDisplayName(translatedData.detectedLanguage)}
+                  {t('feed.translatedFrom', { lang: getLanguageDisplayName(translatedData.detectedLanguage) })}
                 </span>
                 <button
                   onClick={() => setShowTranslation(false)}
                   className="text-[10px] text-brand-primary hover:underline"
                 >
-                  Show original
+                  {t('feed.showOriginal')}
                 </button>
               </div>
             )}
@@ -365,8 +366,8 @@ function PostCard({ post }: { post: Post }) {
             <span>{likeCount}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span>{Math.max(post.commentCount, comments.length)} comments</span>
-            <span>{post.shares} shares</span>
+            <span>{Math.max(post.commentCount, comments.length)} {t('feed.comments')}</span>
+            <span>{post.shares} {t('feed.shares')}</span>
           </div>
         </div>
       )}
@@ -381,7 +382,7 @@ function PostCard({ post }: { post: Post }) {
             className={`flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-xs font-medium transition-colors ${liked ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5 hover:text-text-secondary'}`}
           >
             <Heart size={16} className={liked ? 'fill-current text-brand-primary' : ''} />
-            Like
+            {t('feed.like')}
           </button>
           <ReactionPicker onSelect={handleReaction} show={showReactionPicker} onClose={() => setShowReactionPicker(false)} />
         </div>
@@ -390,18 +391,18 @@ function PostCard({ post }: { post: Post }) {
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5 hover:text-text-secondary transition-colors"
         >
           <MessageCircle size={16} />
-          Comment
+          {t('feed.comment')}
         </button>
         <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5 hover:text-text-secondary transition-colors">
           <Share2 size={16} />
-          Share
+          {t('feed.share')}
         </button>
         <button
           onClick={handleTranslate}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${translatedData ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5 hover:text-text-secondary'}`}
         >
           <Globe size={16} className={isTranslating ? 'animate-spin' : ''} />
-          {isTranslating ? '...' : translatedData && showTranslation ? 'Original' : 'Translate'}
+          {isTranslating ? '...' : translatedData && showTranslation ? t('feed.original') : t('feed.translate')}
         </button>
       </div>
 
@@ -471,12 +472,12 @@ function PostCard({ post }: { post: Post }) {
             )}
             {hasMoreComments && !showAllComments && (
               <button onClick={() => setShowAllComments(true)} className="text-xs text-text-muted hover:text-brand-primary transition-colors pl-9">
-                View all {comments.length} comments
+                {t('feed.viewAllComments', { n: comments.length })}
               </button>
             )}
             {showAllComments && comments.length > 2 && (
               <button onClick={() => setShowAllComments(false)} className="text-xs text-text-muted hover:text-brand-primary transition-colors pl-9">
-                Show less
+                {t('feed.showLess')}
               </button>
             )}
           </div>
@@ -686,14 +687,14 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
           onClick={() => setExpanded(true)}
           className={`flex-1 text-left glass rounded-full px-4 py-2.5 text-sm text-text-muted hover:bg-white/8 transition-colors ${expanded ? 'hidden' : ''}`}
         >
-          What's on your mind{username ? `, ${username}` : ''}?
+          {t('feed.whatsOnYourMind', { name: username || '' })}
         </button>
         {expanded && (
           <textarea
             ref={textareaRef}
             value={text}
             onChange={e => handleTextChange(e.target.value)}
-            placeholder={`What's on your mind${username ? `, ${username}` : ''}?`}
+            placeholder={t('feed.whatsOnYourMind', { name: username || '' })}
             rows={3}
             autoFocus
             className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none"
@@ -738,14 +739,14 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
             <button
               onClick={() => fileRef.current?.click()}
               className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
-              title="Add photo"
+              title={t('feed.addPhoto')}
             >
               <Image size={18} />
             </button>
             <button
               onClick={() => onStoryCreate?.()}
               className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-social-warm transition-all"
-              title="Create story"
+              title={t('feed.createStory')}
             >
               <Camera size={18} />
             </button>
@@ -753,13 +754,13 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               <button
                 onClick={() => setShowFeelingPicker(!showFeelingPicker)}
                 className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
-                title="Add feeling"
+                title={t('feed.addFeeling')}
               >
                 <Smile size={18} />
               </button>
               {showFeelingPicker && (
                 <div className="absolute bottom-full left-0 mb-2 z-30 p-3 glass rounded-2xl shadow-xl max-w-[300px] animate-fade-in">
-                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">How are you feeling?</p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">{t('feed.howAreYouFeeling')}</p>
                   <div className="grid grid-cols-4 gap-1.5">
                     {FEELINGS.map(f => (
                       <button
@@ -779,7 +780,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               <button
                 onClick={() => setShowMentionPicker(!showMentionPicker)}
                 className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
-                title="Mention a character"
+                title={t('feed.mentionCharacter')}
               >
                 <AtSign size={18} />
               </button>
@@ -790,7 +791,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                     <div className="sticky top-0 p-2 border-b border-border-subtle bg-bg-canvas/90 backdrop-blur">
                       <input
                         type="text"
-                        placeholder="Search characters..."
+                        placeholder={t('feed.searchCharacters')}
                         value={mentionSearch}
                         onChange={e => setMentionSearch(e.target.value)}
                         autoFocus
@@ -816,7 +817,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                     ))}
                     {mentionSearch.trim() && filteredMentions.length === 0 && (
                       <div className="px-3 py-4 text-center text-xs text-text-muted">
-                        No characters found
+                        {t('feed.noCharactersFound')}
                       </div>
                     )}
                   </div>
@@ -829,7 +830,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
             disabled={(!text.trim() && !selectedMedia) || uploading}
             className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40"
           >
-            {uploading ? 'Posting...' : 'Post'}
+            {uploading ? t('feed.posting') : t('feed.post')}
           </button>
         </div>
       )}
@@ -905,7 +906,7 @@ function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPubl
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/5">
             <X size={20} className="text-text-secondary" />
           </button>
-          <h2 className="text-lg font-semibold text-text-primary">Create Story</h2>
+          <h2 className="text-lg font-semibold text-text-primary">{t('feed.createStory')}</h2>
           <button
             onClick={handlePublish}
             disabled={(!caption.trim() && !mediaFile) || publishing}
@@ -1057,9 +1058,9 @@ export default function FeedPage() {
         <div className="w-20 h-20 rounded-3xl glass flex items-center justify-center">
           <Home size={34} className="text-brand-secondary" />
         </div>
-        <p className="text-text-secondary text-sm font-medium">Welcome to the Feed</p>
-        <p className="text-text-muted text-xs text-center max-w-xs">Sign in to see what your AI characters are sharing</p>
-        <button onClick={() => nav('/auth')} className="rounded-full bg-brand-primary px-6 py-3 text-white text-sm font-medium">Sign In</button>
+        <p className="text-text-secondary text-sm font-medium">{t('feed.welcome')}</p>
+        <p className="text-text-muted text-xs text-center max-w-xs">{t('feed.signInPrompt')}</p>
+        <button onClick={() => nav('/auth')} className="rounded-full bg-brand-primary px-6 py-3 text-white text-sm font-medium">{t('feed.signIn')}</button>
       </div>
     );
   }
@@ -1069,7 +1070,7 @@ export default function FeedPage() {
       {/* Header */}
       <header className="safe-top px-5 pt-5 pb-2 shrink-0">
         <div className="flex items-center justify-between">
-          <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">Feed</h1>
+          <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">{t('feed.title')}</h1>
           <button
             onClick={() => nav('/notifications')}
             className="relative w-9 h-9 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center hover:bg-white/10 transition-colors"
@@ -1127,10 +1128,10 @@ export default function FeedPage() {
               <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
                 <Home size={28} className="text-text-muted opacity-50" />
               </div>
-              <p className="text-text-muted text-sm">Failed to load feed</p>
+              <p className="text-text-muted text-sm">{t('feed.loadFailed')}</p>
               <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
               <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">
-                Retry
+                {t('feed.retry')}
               </button>
             </div>
           ) : feedPosts.length === 0 ? (
@@ -1138,8 +1139,8 @@ export default function FeedPage() {
               <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
                 <Home size={28} className="text-text-muted opacity-50" />
               </div>
-              <p className="text-text-muted text-sm">No posts yet</p>
-              <p className="text-text-muted text-xs text-center max-w-[260px]">Your feed will fill up as AI characters start posting content</p>
+              <p className="text-text-muted text-sm">{t('feed.noPosts')}</p>
+              <p className="text-text-muted text-xs text-center max-w-[260px]">{t('feed.feedWillFill')}</p>
             </div>
           ) : (
             feedPosts.map(post => (

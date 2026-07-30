@@ -1,5 +1,5 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
-import { getDb } from '@itchats/database';
+import { getDb, getPool } from '@itchats/database';
 import { characters, messages, conversations } from '@itchats/database/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { MemoryService } from './memory.service';
@@ -32,12 +32,21 @@ export class ContextBuilderService {
     userId: string,
     userMessage: string,
     conversationId?: string,
+    detectedLanguage?: string,
   ): Promise<AssembledContext> {
     const db = getDb();
 
     const [char] = await db.select().from(characters)
       .where(eq(characters.id, characterId)).limit(1);
     if (!char) throw new Error('Character not found');
+
+    // Fetch user profile for gender & relationship preferences
+    const pool = getPool();
+    const profileResult = await pool.query(
+      'SELECT gender, looking_for, interested_in FROM user_profiles WHERE user_id = $1 LIMIT 1',
+      [userId],
+    );
+    const userProfile = profileResult.rows[0] as { gender?: string; looking_for?: string; interested_in?: string } | undefined;
 
     // Get relationship from DB (will be superseded by RelationshipEngineService in Phase 3)
     const { characterRelationships } = await import('@itchats/database/schema');
@@ -111,6 +120,10 @@ export class ContextBuilderService {
       energyLevel: (char.emotionState as any)?.energy || 5,
       currentActivity: (char.emotionState as any)?.currentActivity,
       conversationMode,
+      userLanguage: detectedLanguage || undefined,
+      characterGender: char.gender || undefined,
+      userGender: userProfile?.gender || undefined,
+      userInterestedIn: userProfile?.interested_in || undefined,
     };
 
     const personalityParams: PersonalityPromptParams = {

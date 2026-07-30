@@ -19,6 +19,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { translateText, getLanguageDisplayName, detectTextLanguage } from '@/lib/translate';
 import { timeAgo } from '@/lib/timeAgo';
+import { t } from '@/lib/i18n';
 import { Badge, Tabs } from '@itchats/ui';
 
 // ── Section wrapper ──
@@ -221,7 +222,7 @@ export default function ProfilePage() {
     setComposerText('');
   };
 
-  const profileData = profile ?? {
+    const profileData = profile ?? {
     id: user?.id ?? '',
     username: user?.username ?? '',
     email: '',
@@ -234,23 +235,26 @@ export default function ProfilePage() {
     score: 0,
     rank: '',
     friendCount: 0,
-    characterCount: myCharacters.length,
+    characterCount: 0,
     followerCount: 0,
   };
+
+  // Use characterCount and followerCount from API response
+  const charCount = profile?.characterCount ?? myCharacters.length ?? 0;
+  const followerCnt = profile?.followerCount ?? 0;
 
   if (!user) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
         <div className="w-20 h-20 rounded-3xl glass flex items-center justify-center"><User size={34} className="text-brand-secondary" /></div>
-        <p className="text-text-secondary text-sm font-medium">Your Profile</p>
-        <p className="text-text-muted text-xs text-center max-w-xs">Sign in to see your AI-powered profile</p>
-        <button onClick={() => nav('/auth')} className="rounded-full bg-brand-primary px-6 py-3 text-white text-sm font-medium">Sign In</button>
+        <p className="text-text-secondary text-sm font-medium">{t('profile.yourProfile')}</p>
+        <p className="text-text-muted text-xs text-center max-w-xs">{t('profile.signInPrompt')}</p>
+        <button onClick={() => nav('/auth')} className="rounded-full bg-brand-primary px-6 py-3 text-white text-sm font-medium">{t('profile.signIn')}</button>
       </div>
     );
   }
 
   const isLoading = profileLoading || loadingPosts;
-  const charCount = myCharacters.length || profileData.characterCount;
 
   return (
     <div className="flex flex-col h-full bg-bg-canvas">
@@ -286,7 +290,7 @@ export default function ProfilePage() {
               onClick={() => nav('/settings')}
               className="glass rounded-full px-4 py-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1.5"
             >
-              <Pencil size={13} /> Edit Profile
+              <Pencil size={13} /> {t('profile.editProfile')}
             </button>
           </div>
 
@@ -296,7 +300,7 @@ export default function ProfilePage() {
               <div className="flex items-center gap-1 text-xs">
                 <Star size={12} className="text-social-warm fill-current" />
                 <span className="font-semibold text-text-primary">{(profileData.score ?? 0).toLocaleString()}</span>
-                <span className="text-text-muted">points</span>
+                <span className="text-text-muted">{t('profile.points')}</span>
               </div>
               {profileData.rank && (
                 <>
@@ -321,21 +325,21 @@ export default function ProfilePage() {
               <span className="flex items-center gap-1"><Globe size={12} /> {profileData.website}</span>
             )}
             {profileData.joinDate && (
-              <span className="flex items-center gap-1"><Calendar size={12} /> Joined {new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+              <span className="flex items-center gap-1"><Calendar size={12} /> {t('profile.joined')} {new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
             )}
-            <span className="flex items-center gap-1"><Users2 size={12} /> {profileData.friendCount} friends</span>
+            <span className="flex items-center gap-1"><Users2 size={12} /> {profileData.friendCount} {t('profile.friends').toLowerCase()}</span>
           </div>
 
           {/* Stats */}
           <div className="flex gap-6 mt-4 pb-4 border-b border-border-subtle">
             {[
-              { label: 'Posts', value: posts.length },
-              { label: 'Friends', value: friends.length },
-              { label: 'Characters', value: charCount },
-              { label: 'Followers', value: profileData.followerCount },
+              { label: t('profile.posts'), value: posts.length },
+              { label: t('profile.friends'), value: friends.length },
+              { label: t('profile.characters'), value: charCount },
+              { label: t('profile.followers'), value: followerCnt },
             ].map(s => (
               <div key={s.label} className="text-center">
-                <p className="text-lg font-bold text-text-primary">{s.value}</p>
+                <p className="text-lg font-bold text-text-primary">{s.value.toLocaleString()}</p>
                 <p className="text-[10px] text-text-muted uppercase tracking-wider">{s.label}</p>
               </div>
             ))}
@@ -348,10 +352,10 @@ export default function ProfilePage() {
             value={tab}
             onValueChange={setTab}
             items={[
-              { value: 'posts', label: 'Posts' },
-              { value: 'about', label: 'About' },
-              { value: 'friends', label: 'Friends' },
-              { value: 'photos', label: 'Photos' },
+              { value: 'posts', label: t('profile.posts') },
+              { value: 'about', label: t('profile.about') },
+              { value: 'friends', label: t('profile.friends') },
+              { value: 'photos', label: t('profile.photos') },
             ]}
           />
         </div>
@@ -384,15 +388,15 @@ export default function ProfilePage() {
                   {postsError ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-4">
                       <Camera size={32} className="text-text-muted opacity-40" />
-                      <p className="text-text-muted text-sm">Failed to load posts</p>
+                      <p className="text-text-muted text-sm">{t('profile.loadFailed')}</p>
                       <p className="text-text-muted text-xs text-center max-w-[260px]">{postsError}</p>
-                      <button onClick={loadUserContent} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">Retry</button>
+                      <button onClick={loadUserContent} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">{t('feed.retry')}</button>
                     </div>
                   ) : posts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-3">
                       <Camera size={32} className="text-text-muted opacity-40" />
-                      <p className="text-text-muted text-sm">No posts yet</p>
-                      <p className="text-text-muted text-xs text-center">Share your first post with the world</p>
+                      <p className="text-text-muted text-sm">{t('profile.noPosts')}</p>
+                      <p className="text-text-muted text-xs text-center">{t('profile.shareFirst')}</p>
                     </div>
                   ) : (
                     posts.map(p => <ProfilePost key={p.id} post={p} />)
@@ -405,10 +409,10 @@ export default function ProfilePage() {
                 <div className="space-y-4">
                   <div className="glass rounded-2xl p-5 space-y-4">
                     {[
-                      ['Bio', profileData.bio || 'No bio yet'],
-                      ['Website', profileData.website || 'Not set'],
-                      ['Location', profileData.location || 'Not set'],
-                      ['Joined', profileData.joinDate ? new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Unknown'],
+                      [t('profile.bio'), profileData.bio || t('profile.noBio')],
+                      [t('profile.website'), profileData.website || t('profile.notSet')],
+                      [t('profile.location'), profileData.location || t('profile.notSet')],
+                      [t('profile.joined'), profileData.joinDate ? new Date(profileData.joinDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : t('common.unknown')],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between items-center">
                         <span className="text-xs text-text-muted">{k}</span>
@@ -418,17 +422,17 @@ export default function ProfilePage() {
                   </div>
 
                   <div className="glass rounded-2xl p-5 space-y-4">
-                    <h4 className="text-sm font-semibold text-text-primary">Character Stats</h4>
+                    <h4 className="text-sm font-semibold text-text-primary">{t('profile.characterStats')}</h4>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-text-muted">Characters Created</span>
-                      <span className="text-xs text-text-primary font-medium">{charCount}</span>
+                      <span className="text-xs text-text-muted">{t('profile.charactersCreated')}</span>
+                      <span className="text-xs text-text-primary font-medium">{charCount.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-text-muted">Total Followers</span>
-                      <span className="text-xs text-text-primary font-medium">{(profileData.followerCount ?? 0).toLocaleString()}</span>
+                      <span className="text-xs text-text-muted">{t('profile.totalFollowers')}</span>
+                      <span className="text-xs text-text-primary font-medium">{followerCnt.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-text-muted">Score</span>
+                      <span className="text-xs text-text-muted">{t('profile.score')}</span>
                       <span className="text-xs text-brand-primary font-bold">{(profileData.score ?? 0).toLocaleString()}</span>
                     </div>
                   </div>
@@ -441,7 +445,7 @@ export default function ProfilePage() {
                   {friends.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-3">
                       <Users2 size={32} className="text-text-muted opacity-40" />
-                      <p className="text-text-muted text-sm">No friends yet</p>
+                      <p className="text-text-muted text-sm">{t('profile.noFriends')}</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
@@ -457,7 +461,7 @@ export default function ProfilePage() {
                   {photos.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-3">
                       <Image size={32} className="text-text-muted opacity-40" />
-                      <p className="text-text-muted text-sm">No photos yet</p>
+                      <p className="text-text-muted text-sm">{t('profile.noPhotos')}</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-2">

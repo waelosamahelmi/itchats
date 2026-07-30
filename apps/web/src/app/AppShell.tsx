@@ -2,13 +2,14 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { MessageCircle, Compass, Home, Radio, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CookieBanner from '@/components/CookieBanner';
+import { t } from '@/lib/i18n';
 
 const tabs = [
-  { to: '/chats', icon: MessageCircle, label: 'Chats' },
-  { to: '/discover', icon: Compass, label: 'Discover' },
-  { to: '/', icon: Home, label: 'Feed', isMain: true },
-  { to: '/live', icon: Radio, label: 'Live' },
-  { to: '/profile', icon: User, label: 'Profile' },
+  { to: '/chats', icon: MessageCircle, labelKey: 'nav.chats' as const },
+  { to: '/discover', icon: Compass, labelKey: 'nav.discover' as const },
+  { to: '/', icon: Home, labelKey: 'nav.feed' as const, isMain: true },
+  { to: '/live', icon: Radio, labelKey: 'nav.live' as const },
+  { to: '/profile', icon: User, labelKey: 'nav.profile' as const },
 ];
 
 /** Compute which tab index is active based on the current path */
@@ -70,7 +71,7 @@ export default function AppShell() {
               />
             )}
 
-            {tabs.map(({ to, icon: Icon, label, isMain }) => {
+            {tabs.map(({ to, icon: Icon, labelKey, isMain }) => {
               const isActive = to === '/'
                 ? loc.pathname === '/' || loc.pathname === ''
                 : loc.pathname.startsWith(to);
@@ -112,7 +113,7 @@ export default function AppShell() {
                         transition={{ duration: 0.2, ease: 'easeOut' }}
                         className="text-[10px] font-semibold leading-none overflow-hidden"
                       >
-                        {label}
+                        {t(labelKey)}
                       </motion.span>
                     )}
                   </AnimatePresence>

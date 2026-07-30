@@ -52,6 +52,7 @@ export class AiService {
     message: string,
     conversationId?: string,
     imageBase64?: string,
+    detectedLanguage?: string,
   ) {
     const db = getDb();
     const clientKey = randomUUID();
@@ -83,7 +84,7 @@ export class AiService {
 
     let systemPrompt = 'You are a helpful AI assistant on ItChats. Keep responses friendly and concise.';
     if (characterId) {
-      const ctx = await this.contextBuilder.buildContext(characterId, userId, message, convId);
+      const ctx = await this.contextBuilder.buildContext(characterId, userId, message, convId, detectedLanguage);
       systemPrompt = ctx.systemPrompt;
 
       yield { type: 'context', characterName: ctx.characterName, relationship: this.contextBuilder.getRelationshipSummary(ctx.relationship) };
@@ -498,13 +499,12 @@ export class AiService {
 
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    if (!char.avatarUrl) throw new Error('Character profile picture is required');
-    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+    const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const [version] = await db.select().from(characterVersions)
       .where(eq(characterVersions.characterId, characterId)).orderBy(desc(characterVersions.version)).limit(1);
-    const prompt = buildSelfiePrompt({
+    const selfiePrompt = buildSelfiePrompt({
       characterName: char.name,
       gender: char.gender || undefined,
       ageDisplay: char.ageDisplay || undefined,
@@ -519,18 +519,18 @@ export class AiService {
       facialFeatures: char.facialFeatures || undefined,
     }, context || 'casual_front_camera');
 
-    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
-    const result = await alibabaImageToImage({ prompt, imageBase64: referenceBase64 });
+    const result = await alibabaTextToImageWithFallback({ prompt: selfiePrompt, size: '1024*1024' });
+    if (!result?.url) throw new Error('Selfie generation failed');
     if (!result?.url) throw new Error('Selfie generation failed');
 
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, generationType: 'image_to_image', routeKey: 'image.edit.private',
-      idempotencyKey: randomUUID(), requestJson: { prompt, style: context, referenceUrl: char.avatarUrl },
-      responseJson: { url: result.url, model: result.model }, status: 'succeeded', completedAt: new Date(),
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt: selfiePrompt, style: context },
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
     }).returning();
 
     await db.insert(usageEvents).values({
-      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
       imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
       pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
     });
@@ -805,5 +805,70 @@ Rules:
       affinity: Number(rel.affinity) || 0,
       tension: Number(rel.tension) || 0,
     };
+  }
+
+  /**
+   * Translate text using the LLM to the target language.
+   */
+  async translateText(userId: string, text: string, targetLanguage: string) {
+    if (!text.trim()) return { translatedText: text, detectedSourceLanguage: 'en' };
+
+    const languageNames: Record<string, string> = {
+      en: 'English', ar: 'Arabic', fi: 'Finnish', sv: 'Swedish',
+      de: 'German', fr: 'French', zh: 'Chinese',
+    };
+    const targetName = languageNames[targetLanguage] || targetLanguage;
+
+    const prompt = `Translate the following text to ${targetName}. Return ONLY the translated text, no explanations, no quotes, no markdown. Preserve emojis and formatting line breaks exactly.
+
+Text to translate:
+${text}`;
+
+    try {
+      const result = await alibabaChat({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'qwen-flash',
+        temperature: 0.1,
+        maxTokens: Math.max(text.length * 2, 100),
+      });
+
+      const translatedText = result.content?.trim() || text;
+
+      // Detect source language
+      const detectedSourceLanguage = this.detectLanguage(text);
+
+      // Deduct minimal credit cost for translation
+      const db = getDb();
+      const cost = Math.max(getCreditCost('qwen-flash', 'llm_chat', { inputTokens: 200, outputTokens: 100 }), 1);
+      const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+      const balance = wallet[0]?.balance ?? 0;
+
+      if (balance >= cost) {
+        await db.update(creditWallets).set({
+          balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+          lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+          updatedAt: new Date(),
+        }).where(eq(creditWallets.userId, userId));
+      }
+
+      return { translatedText, detectedSourceLanguage };
+    } catch {
+      return { translatedText: text, detectedSourceLanguage: 'en' };
+    }
+  }
+
+  private detectLanguage(text: string): string {
+    if (!text?.trim()) return 'en';
+    let arabicCount = 0, chineseCount = 0, total = 0;
+    for (const ch of text) {
+      const c = ch.charCodeAt(0);
+      if (c >= 0x0600 && c <= 0x06FF) { arabicCount++; total++; }
+      else if (c >= 0x4E00 && c <= 0x9FFF) { chineseCount++; total++; }
+      else if ((c >= 0x0041 && c <= 0x007A) || (c >= 0x00C0 && c <= 0x00FF)) total++;
+    }
+    if (total === 0) return 'en';
+    if (arabicCount / total > 0.3) return 'ar';
+    if (chineseCount / total > 0.2) return 'zh';
+    return 'en';
   }
 }

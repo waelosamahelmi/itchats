@@ -20,7 +20,7 @@ export class AuthService {
   }
   async verifyPassword(hash: string, password: string) { return argon2.verify(hash, password); }
 
-  async register(email: string, username: string, password: string, dateOfBirth?: string, agreedToTerms?: boolean) {
+  async register(email: string, username: string, password: string, dateOfBirth?: string, agreedToTerms?: boolean, gender?: string, lookingFor?: string, interestedIn?: string) {
     const pool = getPool();
     const eCheck = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
     if (eCheck.rows.length > 0) throw new UnauthorizedException('Email already registered');
@@ -37,8 +37,8 @@ export class AuthService {
 
     // Create user profile with metadata
     await pool.query(
-      `INSERT INTO user_profiles (user_id, display_name, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
-      [user.id, username],
+      `INSERT INTO user_profiles (user_id, display_name, gender, looking_for, interested_in, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [user.id, username, gender || null, lookingFor || null, interestedIn || null],
     );
 
     // Store terms agreement timestamp in user metadata (we use a separate query)

@@ -13,8 +13,11 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() body: unknown) {
-    const { email, username, password, dateOfBirth, agreedToTerms } = RegisterSchema.parse(body);
-    return this.authService.register(email, username, password, dateOfBirth, agreedToTerms);
+    const data = RegisterSchema.parse(body);
+    return this.authService.register(
+      data.email, data.username, data.password, data.dateOfBirth, data.agreedToTerms,
+      (data as any).gender, (data as any).lookingFor, (data as any).interestedIn,
+    );
   }
 
   @Post('login')

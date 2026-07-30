@@ -54,6 +54,9 @@ interface WizardData {
   autoTranslate: boolean;
   theme: 'dark' | 'light';
   followedCharacterIds: string[];
+  gender: string;
+  lookingFor: string;
+  interestedIn: string;
 }
 
 const TOTAL_STEPS = 6;
@@ -77,6 +80,9 @@ export default function ProfileWizard({ onComplete }: { onComplete: () => void }
     autoTranslate: true,
     theme: 'dark',
     followedCharacterIds: [],
+    gender: '',
+    lookingFor: '',
+    interestedIn: '',
   });
 
   useEffect(() => {
@@ -192,6 +198,9 @@ export default function ProfileWizard({ onComplete }: { onComplete: () => void }
         theme: data.theme,
         followedCharacterIds: data.followedCharacterIds,
         wizardCompleted: true,
+        gender: data.gender || undefined,
+        lookingFor: data.lookingFor || undefined,
+        interestedIn: data.interestedIn || undefined,
       })).unwrap();
     } catch { /* best effort */ }
     setSaving(false);
@@ -316,6 +325,72 @@ export default function ProfileWizard({ onComplete }: { onComplete: () => void }
                   </select>
                 </div>
               </div>
+
+              {/* ── Gender ── */}
+              <div>
+                <label className="text-xs text-text-muted mb-1.5 block font-medium">I am</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'male', label: 'Male' },
+                    { value: 'female', label: 'Female' },
+                    { value: 'non_binary', label: 'Non-binary' },
+                    { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => update({ gender: data.gender === opt.value ? '' : opt.value })}
+                      className={`rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                        data.gender === opt.value
+                          ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                          : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                      }`}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Looking for ── */}
+              <div>
+                <label className="text-xs text-text-muted mb-1.5 block font-medium">Looking for</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'friends', label: 'Friends' },
+                    { value: 'relationships', label: 'Relationships' },
+                    { value: 'both', label: 'Open to both' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => update({ lookingFor: data.lookingFor === opt.value ? '' : opt.value })}
+                      className={`flex-1 rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                        data.lookingFor === opt.value
+                          ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                          : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                      }`}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Interested in (only if looking for relationships or both) ── */}
+              {(data.lookingFor === 'relationships' || data.lookingFor === 'both') && (
+                <div>
+                  <label className="text-xs text-text-muted mb-1.5 block font-medium">Interested in</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: 'men', label: 'Men' },
+                      { value: 'women', label: 'Women' },
+                      { value: 'everyone', label: 'Everyone' },
+                    ].map(opt => (
+                      <button key={opt.value} type="button"
+                        onClick={() => update({ interestedIn: data.interestedIn === opt.value ? '' : opt.value })}
+                        className={`flex-1 rounded-xl py-2.5 text-xs font-medium transition-all border ${
+                          data.interestedIn === opt.value
+                            ? 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                            : 'border-border-subtle glass text-text-muted hover:text-text-secondary'
+                        }`}
+                      >{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -9,6 +9,9 @@ export const RegisterSchema = z.object({
   password: z.string().min(8).max(128),
   dateOfBirth: z.string().optional(),
   agreedToTerms: z.boolean().optional(),
+  gender: z.enum(['male', 'female', 'non_binary', 'prefer_not_to_say']).optional(),
+  lookingFor: z.enum(['friends', 'relationships', 'both']).optional(),
+  interestedIn: z.enum(['men', 'women', 'everyone']).optional(),
 });
 
 export const WizardSaveSchema = z.object({
@@ -21,6 +24,9 @@ export const WizardSaveSchema = z.object({
   theme: z.enum(['dark', 'light']).optional(),
   followedCharacterIds: z.array(z.string().uuid()).optional(),
   wizardCompleted: z.boolean().optional(),
+  gender: z.enum(['male', 'female', 'non_binary', 'prefer_not_to_say']).optional(),
+  lookingFor: z.enum(['friends', 'relationships', 'both']).optional(),
+  interestedIn: z.enum(['men', 'women', 'everyone']).optional(),
 });
 
 export const LoginSchema = z.object({

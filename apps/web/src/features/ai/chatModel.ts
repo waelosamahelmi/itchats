@@ -80,6 +80,8 @@ const deliveryStates = new Set<DeliveryState>(['sending', 'sent', 'delivered', '
 export function stripJsonContent(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return text;
+
+  // Try full parse first
   try {
     const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     const value = JSON.parse(cleaned);
@@ -99,13 +101,44 @@ export function stripJsonContent(text: string): string {
       return value.content;
     }
   } catch {
-    // Partial JSON — try to extract speech content
-    const speechMatch = trimmed.match(/\{"type":"speech","content":"([^"]*(?:\\.[^"]*)*)"/);
-    if (speechMatch) {
-      try { return JSON.parse(`"${speechMatch[1]}"`); } catch { /* fall through */ }
-    }
+    // Not valid JSON — try to extract any partial JSON speech content
   }
-  return text;
+
+  // Handle incomplete/streaming JSON by extracting speech blocks
+  const speechMatches = trimmed.match(/\{"type":"speech","content":"((?:[^"\\]|\\.)*)"/g);
+  if (speechMatches && speechMatches.length > 0) {
+    const parts: string[] = [];
+    for (const match of speechMatches) {
+      try {
+        const obj = JSON.parse(match);
+        if (obj.content) parts.push(obj.content);
+      } catch { /* skip malformed */ }
+    }
+    if (parts.length > 0) return parts.join('\n');
+  }
+
+  // Also try action/thought extraction
+  const allMatches = trimmed.match(/\{"type":"(speech|action|thought)","content":"((?:[^"\\]|\\.)*)"/g);
+  if (allMatches && allMatches.length > 0) {
+    const parts: string[] = [];
+    for (const match of allMatches) {
+      try {
+        const obj = JSON.parse(match);
+        if (!obj.content) continue;
+        if (obj.type === 'action') parts.push(`*${obj.content}*`);
+        else if (obj.type === 'thought') parts.push(`_${obj.content}_`);
+        else parts.push(obj.content);
+      } catch { /* skip malformed */ }
+    }
+    if (parts.length > 0) return parts.join('\n');
+  }
+
+  // Strip leading JSON array bracket patterns
+  let cleaned = trimmed;
+  // Remove leading [{"type": patterns that look like raw JSON
+  cleaned = cleaned.replace(/^\s*\[\s*\{/, '').replace(/\}\s*\]\s*$/, '');
+
+  return cleaned === '' ? text : cleaned;
 }
 
 export function normalizeHistoryMessage(message: HistoryMessage): ChatMessage {
