@@ -57,11 +57,12 @@ export class AuthController {
   }
 
   @Get('google')
-  async googleAuth(@Res() res: FastifyReply) {
+  async googleAuth(@Res({ passthrough: false }) res: FastifyReply) {
     const config = getConfig();
     const clientId = config.GOOGLE_CLIENT_ID;
     if (!clientId) {
-      return res.status(400).send({ message: 'Google OAuth not configured' });
+      res.status(400).send({ message: 'Google OAuth not configured' });
+      return;
     }
     const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
     const scope = 'email profile';
@@ -70,7 +71,7 @@ export class AuthController {
   }
 
   @Get('google/callback')
-  async googleCallback(@Req() req: any, @Res() res: FastifyReply) {
+  async googleCallback(@Req() req: any, @Res({ passthrough: false }) res: FastifyReply) {
     try {
       const config = getConfig();
       const { code } = req.query;
