@@ -27,9 +27,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallbackDenylist: [/^\/v1\//],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/api\.itchats\.ai\/v1\/.*/i,
+            urlPattern: /^https:\/\/itchats\.helmies\.fi\/v1\/.*/i,
             handler: 'NetworkFirst',
             options: { cacheName: 'api-cache', expiration: { maxEntries: 100, maxAgeSeconds: 300 } },
           },
