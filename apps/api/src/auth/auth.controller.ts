@@ -5,7 +5,7 @@ import { RegisterSchema, LoginSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from './jwt.guard';
 import { getConfig } from '@itchats/config';
 import type { OAuthProfile } from './google.strategy';
-import type { Response } from 'express';
+import type { FastifyReply } from 'fastify';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -13,8 +13,8 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() body: unknown) {
-    const { email, username, password } = RegisterSchema.parse(body);
-    return this.authService.register(email, username, password);
+    const { email, username, password, dateOfBirth, agreedToTerms } = RegisterSchema.parse(body);
+    return this.authService.register(email, username, password, dateOfBirth, agreedToTerms);
   }
 
   @Post('login')
@@ -57,18 +57,61 @@ export class AuthController {
   }
 
   @Get('google')
-  @UseGuards(AuthGuard('google'))
-  googleAuth() {
-    // Initiates Google OAuth flow — redirects to Google
+  async googleAuth(@Res() res: FastifyReply) {
+    const config = getConfig();
+    const clientId = config.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(400).send({ message: 'Google OAuth not configured' });
+    }
+    const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
+    const scope = 'email profile';
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+    res.redirect(url);
   }
 
   @Get('google/callback')
-  @UseGuards(AuthGuard('google'))
-  async googleCallback(@Req() req: any, @Res() res: Response) {
-    const oauth = req.user as OAuthProfile;
-    const result = await this.authService.oauthLogin(oauth);
-    const frontend = getConfig().CORS_ORIGIN;
-    res.redirect(`${frontend}/auth/callback?token=${result.accessToken}&refresh=${result.refreshToken}`);
+  async googleCallback(@Req() req: any, @Res() res: FastifyReply) {
+    try {
+      const config = getConfig();
+      const { code } = req.query;
+      if (!code) {
+        return res.redirect(`${config.CORS_ORIGIN}/auth?error=no_code`);
+      }
+      // Exchange code for tokens
+      const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: config.GOOGLE_CLIENT_ID,
+          client_secret: config.GOOGLE_CLIENT_SECRET,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        }).toString(),
+      });
+      const tokens = await tokenRes.json() as any;
+      if (!tokens.access_token) {
+        return res.redirect(`${config.CORS_ORIGIN}/auth?error=token_exchange_failed`);
+      }
+      // Get user info
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      const googleUser = await userRes.json() as any;
+      const oauth: OAuthProfile = {
+        provider: 'google',
+        providerId: googleUser.id,
+        email: googleUser.email,
+        name: googleUser.name,
+        avatarUrl: googleUser.picture,
+      };
+      const result = await this.authService.oauthLogin(oauth);
+      res.redirect(`${config.CORS_ORIGIN}/auth/callback?token=${result.accessToken}&refresh=${result.refreshToken}`);
+    } catch (err: any) {
+      const config = getConfig();
+      res.redirect(`${config.CORS_ORIGIN}/auth?error=oauth_failed`);
+    }
   }
 
   @Post('link/google')
