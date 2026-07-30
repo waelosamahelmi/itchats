@@ -10,7 +10,7 @@ let _stripe: Stripe | null = null;
 function getStripe(): Stripe | null {
   const config = getConfig();
   if (!config.STRIPE_SECRET_KEY || config.STRIPE_SECRET_KEY === 'sk_test_...') return null;
-  if (!_stripe) _stripe = new Stripe(config.STRIPE_SECRET_KEY, { apiVersion: '2025-06-15.basil' as any });
+  if (!_stripe) _stripe = new Stripe(config.STRIPE_SECRET_KEY);
   return _stripe;
 }
 
