@@ -653,10 +653,23 @@ export default function AIChatPage() {
 
       recognition.onresult = (event: any) => {
         let transcript = '';
+        let isFinal = false;
         for (let i = event.resultIndex; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) isFinal = true;
         }
         setCallTranscript(transcript);
+        // When speech is final, send it as a chat message
+        if (isFinal && transcript.trim()) {
+          const now = Date.now();
+          const userMsg: ChatMessage = {
+            id: `call-u-${now}`, sender: 'user', text: transcript.trim(),
+            kind: 'text', createdAt: new Date(now).toISOString(), delivery: 'sent', reactions: [],
+          };
+          setMessages(prev => [...prev, userMsg]);
+          sendVoiceCallMessage(transcript.trim());
+          setCallTranscript('');
+        }
       };
 
       recognition.onerror = () => { /* silently retry */ };
@@ -669,8 +682,8 @@ export default function AIChatPage() {
       try { recognition.start(); } catch { /* not supported */ }
     }
 
-    // Send initial greeting
-    await sendVoiceCallMessage('Hello?');
+    // Don't send initial greeting - wait for user to speak
+    setCallTranscript('Listening...');
   }
 
   async function sendVoiceCallMessage(text: string) {
@@ -706,6 +719,15 @@ export default function AIChatPage() {
               }
               const parts = parseAssistantResponse(fullResponse);
               const speechText = parts.filter(p => p.type === 'speech').map(p => p.content).join('\n');
+              // Add character response as chat message
+              if (speechText.trim()) {
+                const now = Date.now();
+                const charMsg: ChatMessage = {
+                  id: `call-c-${now}`, sender: 'character', text: speechText.trim(),
+                  kind: 'text', createdAt: new Date(now).toISOString(), delivery: 'sent', reactions: [],
+                };
+                setMessages(prev => [...prev, charMsg]);
+              }
               if (speechText && !callMuted) {
                 try {
                   const ttsRes = await fetch(`${API}/ai/tts`, {
