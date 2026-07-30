@@ -4,7 +4,9 @@ import { Worker } from 'bullmq';
 import {
   videoQueue, imageQueue, memoryQueue, storyQueue,
   moderationQueue, mediaQueue, notificationQueue,
-  cleanupQueue, costReconciliationQueue, QUEUES, getAllQueues,
+  cleanupQueue, costReconciliationQueue,
+  characterAutonomyQueue, aiPostReactionsQueue,
+  QUEUES, getAllQueues,
 } from './queues';
 import { videoGenerationProcessor } from './processors/video-processor';
 import { imageGenerationProcessor } from './processors/image-processor';
@@ -12,6 +14,7 @@ import { memoryExtractionProcessor } from './processors/memory-processor';
 import { mediaProcessingProcessor } from './processors/media-processor';
 import { notificationProcessor } from './processors/notification-processor';
 import { cleanupProcessor } from './processors/cleanup-processor';
+import { characterAutonomyProcessor, aiPostReactionsProcessor } from './processors/autonomy.processor';
 
 const config = getConfig();
 const connection = { url: config.REDIS_URL };
@@ -57,8 +60,10 @@ async function main() {
   const mediaWorker = createWorker(QUEUES.MEDIA_PROCESSING, mediaProcessingProcessor, 2);
   const notificationWorker = createWorker(QUEUES.NOTIFICATIONS, notificationProcessor, 10);
   const cleanupWorker = createWorker(QUEUES.CLEANUP, cleanupProcessor, 1);
+  const autonomyWorker = createWorker(QUEUES.CHARACTER_AUTONOMY, characterAutonomyProcessor, 1);
+  const aiReactionsWorker = createWorker(QUEUES.AI_POST_REACTIONS, aiPostReactionsProcessor, 3);
 
-  const workers = [videoWorker, imageWorker, memoryWorker, mediaWorker, notificationWorker, cleanupWorker];
+  const workers = [videoWorker, imageWorker, memoryWorker, mediaWorker, notificationWorker, cleanupWorker, autonomyWorker, aiReactionsWorker];
 
   // Scheduled cleanup jobs
   await cleanupQueue.add('daily-cleanup', { task: 'expired_stories' } as any, {
@@ -69,6 +74,11 @@ async function main() {
   });
   await cleanupQueue.add('weekly-orphan-cleanup', { task: 'orphaned_media' } as any, {
     repeat: { pattern: '0 5 * * 0' },
+  });
+
+  // Scheduled autonomy check every 15 minutes
+  await characterAutonomyQueue.add('autonomy-check', { processAll: true } as any, {
+    repeat: { every: 15 * 60 * 1000 },
   });
 
   console.log(`✅ ${workers.length} workers initialized`);

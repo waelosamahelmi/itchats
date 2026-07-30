@@ -23,6 +23,116 @@ export class BillingService {
     return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.active, true as any)).orderBy(subscriptionPlans.sortOrder ?? desc(subscriptionPlans.createdAt));
   }
 
+  /**
+   * Seed the default subscription plans into the database.
+   * Idempotent: skips plans that already exist.
+   * Called on app startup or via admin endpoint.
+   */
+  async seedDefaultPlans() {
+    const db = getDb();
+    const defaultPlans = [
+      {
+        id: 'free',
+        name: 'Free',
+        monthlyPriceUsd: '0.0000',
+        monthlyCredits: 500,
+        maxPrivateCharacters: 2,
+        maxPublicCharacters: 0,
+        maxAutoStoryCharacters: 0,
+        capabilities: {
+          basicChat: true,
+          imageGeneration: 'limited',
+          voiceMessages: true,
+          feedPosting: true,
+          discover: true,
+        },
+        sortOrder: 1,
+      },
+      {
+        id: 'starter',
+        name: 'Starter',
+        monthlyPriceUsd: '7.9900',
+        monthlyCredits: 3000,
+        maxPrivateCharacters: 5,
+        maxPublicCharacters: 2,
+        maxAutoStoryCharacters: 1,
+        capabilities: {
+          basicChat: true,
+          imageGeneration: true,
+          voiceMessages: true,
+          feedPosting: true,
+          discover: true,
+          characterAutonomy: true,
+          nsfwFilter: true,
+        },
+        sortOrder: 2,
+      },
+      {
+        id: 'pro',
+        name: 'Pro',
+        monthlyPriceUsd: '19.9900',
+        monthlyCredits: 15000,
+        maxPrivateCharacters: 20,
+        maxPublicCharacters: 10,
+        maxAutoStoryCharacters: 5,
+        capabilities: {
+          basicChat: true,
+          imageGeneration: true,
+          voiceMessages: true,
+          feedPosting: true,
+          discover: true,
+          characterAutonomy: true,
+          nsfwFilter: true,
+          roleplay: true,
+          prioritySupport: true,
+          customVoices: true,
+        },
+        sortOrder: 3,
+      },
+      {
+        id: 'unlimited',
+        name: 'Unlimited',
+        monthlyPriceUsd: '49.9900',
+        monthlyCredits: 75000,
+        maxPrivateCharacters: 100,
+        maxPublicCharacters: 50,
+        maxAutoStoryCharacters: 20,
+        capabilities: {
+          basicChat: true,
+          imageGeneration: true,
+          voiceMessages: true,
+          feedPosting: true,
+          discover: true,
+          characterAutonomy: true,
+          nsfwFilter: true,
+          roleplay: true,
+          prioritySupport: true,
+          customVoices: true,
+          apiAccess: true,
+          analytics: true,
+        },
+        sortOrder: 4,
+      },
+    ];
+
+    let seeded = 0;
+    for (const plan of defaultPlans) {
+      const [existing] = await db
+        .select()
+        .from(subscriptionPlans)
+        .where(eq(subscriptionPlans.id, plan.id as any))
+        .limit(1);
+      if (!existing) {
+        await db.insert(subscriptionPlans).values(plan as any);
+        seeded++;
+      }
+    }
+    if (seeded > 0) {
+      this.logger.log(`Seeded ${seeded} new subscription plans`);
+    }
+    return { seeded, total: defaultPlans.length };
+  }
+
   async getUserSubscription(userId: string) {
     const db = getDb();
     const [sub] = await db.select().from(userSubscriptions).where(eq(userSubscriptions.userId, userId)).limit(1);

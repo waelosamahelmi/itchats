@@ -229,3 +229,97 @@ html.light ::-webkit-scrollbar-thumb {
 .composer-error { margin:0 0 .4rem .25rem; color:#df8b82; font-size:.74rem; }
 .chat-auth-required { display:grid; place-items:center; height:100%; color:#938d88; }
 @media (min-width:900px) { .real-chat-shell { max-width:56rem; margin:0 auto; border-inline:1px solid rgba(255,255,255,.05); } }
+
+/* ── Media request confirmation card ── */
+.media-request-card {
+  padding: .85rem 1rem;
+  border-radius: 1rem .3rem 1rem 1rem;
+  background: #1b1a1d;
+  color: #eeeae5;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  animation: fade-in .24s ease-out;
+  font-size: .88rem;
+}
+.media-request-header {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin-bottom: .45rem;
+  line-height: 1.4;
+}
+.media-request-emoji {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+.media-request-header strong {
+  color: #f8f5f1;
+}
+.media-request-cost {
+  margin: 0 0 .55rem;
+  color: #b0a9a5;
+  font-size: .82rem;
+}
+.media-request-insufficient {
+  color: #fbbf24;
+}
+.media-request-insufficient::before {
+  content: '⚠️ ';
+}
+.media-request-actions {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: .55rem;
+}
+.media-request-button {
+  padding: .45rem .85rem;
+  border-radius: .55rem;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: .15s;
+  border: none;
+}
+.media-request-generate {
+  background: #d97965;
+  color: #171113;
+}
+.media-request-generate:hover {
+  background: #e58a77;
+  transform: translateY(-1px);
+}
+.media-request-generate:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+  transform: none;
+}
+.media-request-buy {
+  background: #fbbf24;
+  color: #1a1112;
+}
+.media-request-buy:hover {
+  background: #fcd34d;
+  transform: translateY(-1px);
+}
+.media-request-skip {
+  background: #2a282d;
+  color: #a09a95;
+}
+.media-request-skip:hover {
+  background: #363339;
+}
+.media-request-skip:disabled {
+  opacity: .5;
+}
+.media-request-dontask {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .76rem;
+  color: #7d7772;
+  cursor: pointer;
+}
+.media-request-dontask input {
+  accent-color: #d97965;
+  width: .9rem;
+  height: .9rem;
+}

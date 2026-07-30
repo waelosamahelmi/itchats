@@ -3,6 +3,7 @@ import { getDb } from '@itchats/database';
 import {
   characters, characterVersions, characterVoiceProfiles, characterLocations,
   characterReferenceAssets, mediaAssets, creditWallets, generationJobs, usageEvents,
+  characterAutonomy, creditLedger,
 } from '@itchats/database/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { CreateCharacterSchema, type CreateCharacterInput } from '@itchats/contracts';
@@ -23,7 +24,6 @@ const CharacterAutofillSchema = z.object({
   occupation: z.string().max(100).optional(),
   interests: z.array(z.string().max(100)).max(20).optional(),
   speakingStyle: z.string().max(500).optional(),
-  // Identity fields
   nationality: z.string().max(100).optional(),
   ethnicity: z.string().max(100).optional(),
   height: z.string().max(20).optional(),
@@ -47,14 +47,12 @@ export class CharacterCreationService {
   async createCharacter(input: CreateCharacterInput, ownerUserId: string) {
     const parsed = CreateCharacterSchema.parse(input);
 
-    // Check plan limits
     const db = getDb();
     const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.userId, ownerUserId)).limit(1);
     const balance = wallet?.balance ?? 0;
 
-    // Public characters require credits for reference pack generation
     if (parsed.visibility === 'public') {
-      const estimatedCost = 1600; // 4-image reference pack
+      const estimatedCost = 1600;
       if (balance < estimatedCost) {
         throw new BadRequestException(`Insufficient credits for public character creation. Need ${estimatedCost}, have ${balance}`);
       }
@@ -84,7 +82,6 @@ export class CharacterCreationService {
       autonomyConfig: parsed.autonomyLevel ? { level: parsed.autonomyLevel, cadence: parsed.storyCadence } : {},
     }).returning();
 
-    // Save location (non-fatal if table mismatch)
     if (parsed.city || parsed.countryCode) {
       try {
         await db.insert(characterLocations).values({
@@ -97,16 +94,80 @@ export class CharacterCreationService {
       } catch { /* location table may have schema mismatch — non-fatal */ }
     }
 
+    // Store voice selection if provided (from raw body, not in contract schema)
+    const voiceKey = (input as any).voiceKey;
+    if (voiceKey) {
+      try {
+        await db.insert(characterVoiceProfiles).values({
+          characterId: character!.id,
+          voiceKey: voiceKey,
+          providerId: 'alibaba',
+          active: 'true',
+        } as any);
+      } catch { /* non-fatal */ }
+    }
+
+    // ── Media Budget ──
+    const mbType = parsed.mediaBudgetType ?? 'monthly';
+    const maxImages = parsed.maxImagesPerPeriod ?? 0;
+    const maxVideos = parsed.maxVideosPerPeriod ?? 0;
+    const mbCredits = parsed.mediaBudgetCredits ?? 0;
+    const budgetActive = (maxImages > 0 || maxVideos > 0);
+
+    if (budgetActive && mbCredits > 0) {
+      // Validate balance before committing
+      if (balance < mbCredits) {
+        throw new BadRequestException(
+          `Insufficient credits for media budget. Need ${mbCredits} credits, have ${balance}. Reduce images/videos or add credits.`,
+        );
+      }
+
+      // Deduct initial period credits
+      await db.update(creditWallets).set({
+        balance: sql`GREATEST(0, ${creditWallets.balance} - ${mbCredits})`,
+        lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${mbCredits}`,
+        updatedAt: new Date(),
+      }).where(eq(creditWallets.userId, ownerUserId));
+
+      const [updatedWallet] = await db.select({ balance: creditWallets.balance })
+        .from(creditWallets).where(eq(creditWallets.userId, ownerUserId)).limit(1);
+
+      await db.insert(creditLedger).values({
+        userId: ownerUserId,
+        delta: -mbCredits,
+        balanceAfter: updatedWallet?.balance ?? 0,
+        reason: `Media budget initial deduction: ${maxImages} images, ${maxVideos} videos (${mbType})`,
+        referenceType: 'character_media_budget',
+        referenceId: character!.id,
+        metadata: { imagesPerPeriod: maxImages, videosPerPeriod: maxVideos, periodType: mbType },
+      } as any);
+    }
+
+    const now = new Date();
+    const periodMs = mbType === 'weekly' ? 7 * 86400000 : 30 * 86400000;
+    const nextRenewal = new Date(now.getTime() + periodMs);
+
+    try {
+      await db.insert(characterAutonomy).values({
+        characterId: character!.id,
+        mediaBudgetType: mbType,
+        maxImagesPerPeriod: maxImages,
+        maxVideosPerPeriod: maxVideos,
+        mediaBudgetCredits: mbCredits,
+        mediaBudgetActive: budgetActive,
+        mediaBudgetStartAt: budgetActive ? now : undefined,
+        mediaBudgetNextRenewalAt: budgetActive ? nextRenewal : undefined,
+      } as any);
+    } catch { /* autonomy insert may fail if using older schema — non-fatal */ }
+
     return character;
   }
 
   async autofillCharacter(name: string, concept: string) {
     const isRandom = !name || concept === 'random character';
-    // Pre-generate truly random attributes in code to force diversity
     const seed = Date.now().toString(36) + Math.random().toString(36).slice(2, 10) + randomUUID().slice(0, 8);
 
     if (isRandom) {
-      // Force variety by picking random starting attributes in code
       const genders = ['Female', 'Male', 'Non-binary'];
       const ages = ['early 20s', 'mid 20s', 'late 20s', 'early 30s', 'mid 30s', 'late 30s', 'early 40s', 'mid 40s'];
       const cultures = ['Japanese', 'Nigerian', 'Brazilian', 'Indian', 'Korean', 'Egyptian', 'Mexican', 'Swedish', 'Moroccan', 'Thai', 'Turkish', 'Italian', 'Polish', 'Vietnamese', 'Colombian', 'Ethiopian', 'Greek', 'Malaysian'];
@@ -182,7 +243,6 @@ Return ONLY valid JSON, nothing else:
       };
     }
 
-    // Non-random: use the provided concept
     const prompt = `Character: "${name}". Concept: "${concept}". Return ONLY valid JSON:\n{"description":"Short 1-line bio","appearance":"Physical look 1 sentence","personality":"Vibe 1 sentence","backstory":"Origin 1 sentence"}`;
 
     const result = await alibabaChat({
@@ -232,14 +292,12 @@ Return ONLY valid JSON, nothing else:
       .limit(1);
     if (!char) throw new BadRequestException('Character not found');
 
-    // Build a detailed image prompt from character attributes
     const gender = char.gender || '';
     const ageDisplay = char.ageDisplay || 'young adult';
     const appearance = char.description || '';
     const personality = char.personality || '';
     const occupation = char.occupation || '';
 
-    // Build a highly specific image prompt for character portrait
     const genderLabel = gender || 'person';
     const ageLabel = ageDisplay || 'young adult';
     const appearanceDesc = appearance ? appearance.substring(0, 200) : (char.description || '').substring(0, 200);
@@ -255,7 +313,6 @@ Return ONLY valid JSON, nothing else:
       'neutral warm-toned background, 8K quality, ultra-detailed skin texture',
     ].filter(Boolean).join('. ');
 
-    // Update character status to generating
     await db.update(characters).set({ status: 'generating_identity' as any })
       .where(eq(characters.id, characterId));
 
@@ -273,7 +330,6 @@ Return ONLY valid JSON, nothing else:
         updatedAt: new Date(),
       }).where(eq(characters.id, characterId));
 
-      // Record usage
       await db.insert(usageEvents).values({
         userId: ownerUserId,
         characterId,
@@ -285,7 +341,6 @@ Return ONLY valid JSON, nothing else:
         pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0-pro', credits: cost },
       } as any);
 
-      // Debit wallet
       await db.update(creditWallets).set({
         balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
         lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
@@ -294,11 +349,80 @@ Return ONLY valid JSON, nothing else:
 
       return { url: result.url, model: result.usedModel, status: 'ready' };
     } catch {
-      // Revert to draft on failure
       await db.update(characters).set({ status: 'draft' as any })
         .where(eq(characters.id, characterId));
       throw new BadRequestException('Image generation failed. Please try again.');
     }
+  }
+
+  /**
+   * Generate AI profile picture for a character, with NSFW filter for public characters.
+   */
+  async generateProfilePicture(characterId: string) {
+    const db = getDb();
+    const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!char) throw new BadRequestException('Character not found');
+
+    const isPublic = char.visibility === 'public';
+
+    const nsfwFilter = isPublic
+      ? 'safe for work, appropriate, professional, no nudity, no explicit content, fully clothed, modest attire'
+      : '';
+
+    const imagePrompt = [
+      `A photorealistic portrait of ${char.name}, a ${char.gender || 'person'} in their ${char.ageDisplay || 'prime'}`,
+      char.description || '',
+      char.occupation ? `dressed as a ${char.occupation}` : '',
+      char.personality ? `expressing: ${char.personality.substring(0, 100)}` : '',
+      'professional portrait photography, studio lighting, sharp focus',
+      nsfwFilter,
+    ].filter(Boolean).join('. ');
+
+    try {
+      const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
+      const [wallet] = await db.select().from(creditWallets)
+        .where(eq(creditWallets.userId, char.ownerUserId)).limit(1);
+      if ((wallet?.balance ?? 0) < cost) throw new Error(`Insufficient credits: need ${cost}`);
+
+      const result = await alibabaTextToImageWithFallback({ prompt: imagePrompt, size: '1024*1024' });
+
+      await db.update(characters).set({
+        avatarUrl: result.url,
+        updatedAt: new Date(),
+      }).where(eq(characters.id, characterId));
+
+      // Deduct credits
+      await db.update(creditWallets).set({
+        balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+        lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+        updatedAt: new Date(),
+      }).where(eq(creditWallets.userId, char.ownerUserId));
+
+      return { url: result.url, model: result.usedModel };
+    } catch (err: any) {
+      throw new BadRequestException(`Profile picture generation failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * Upload custom profile picture for private characters.
+   */
+  async uploadProfilePicture(characterId: string, fileBuffer: Buffer) {
+    const db = getDb();
+    const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!char) throw new BadRequestException('Character not found');
+
+    // In production, upload to S3/cloud storage and get URL
+    // For now, accept as base64 or URL
+    const base64 = fileBuffer.toString('base64');
+    const url = `data:image/png;base64,${base64}`;
+
+    await db.update(characters).set({
+      avatarUrl: url,
+      updatedAt: new Date(),
+    }).where(eq(characters.id, characterId));
+
+    return { url };
   }
 
   async publishCharacter(characterId: string, ownerUserId: string) {
@@ -313,7 +437,6 @@ Return ONLY valid JSON, nothing else:
       throw new BadRequestException('Characters with private-uploaded identity must regenerate their visual identity before publishing');
     }
 
-    // Check for approved reference assets
     const refs = await db.select().from(characterReferenceAssets)
       .where(and(eq(characterReferenceAssets.characterId, characterId), eq(characterReferenceAssets.approved, true as any)))
       .limit(1);
@@ -330,11 +453,6 @@ Return ONLY valid JSON, nothing else:
     return { published: true, characterId };
   }
 
-  /**
-   * Section 2.3 / 13.4: Regenerate public-safe visual identity for a private character
-   * whose identity originated from an uploaded reference or image-to-image.
-   * Preserves personality/backstory, creates new text-generated identity lineage.
-   */
   async regeneratePublicIdentity(characterId: string, ownerUserId: string) {
     const db = getDb();
     const [char] = await db.select().from(characters)
@@ -347,7 +465,6 @@ Return ONLY valid JSON, nothing else:
       throw new BadRequestException('This character already has a text-generated identity — no regeneration needed');
     }
 
-    // Build a text-based visual description from existing character attributes
     const genderText = char.gender || '';
     const ageText = char.ageDisplay || 'young adult';
     const descText = char.description || char.personality || '';
@@ -360,14 +477,12 @@ Return ONLY valid JSON, nothing else:
       'professional headshot, studio lighting, sharp focus, neutral background',
     ].filter(Boolean).join(' ');
 
-    // Generate the new public-safe identity image
     const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
     const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.userId, ownerUserId)).limit(1);
     if ((wallet?.balance ?? 0) < cost) throw new BadRequestException(`Insufficient credits: need ${cost}, have ${wallet?.balance ?? 0}`);
 
     const result = await alibabaTextToImageWithFallback({ prompt: visualPrompt, size: '1024*1024' });
 
-    // Update character with regenerated public-safe identity
     await db.update(characters).set({
       avatarUrl: result.url,
       identityOrigin: 'public_regenerated_from_private_metadata',
@@ -376,7 +491,6 @@ Return ONLY valid JSON, nothing else:
       updatedAt: new Date(),
     }).where(eq(characters.id, characterId));
 
-    // Record usage
     await db.insert(usageEvents).values({
       userId: ownerUserId,
       characterId,
@@ -388,7 +502,6 @@ Return ONLY valid JSON, nothing else:
       pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0-pro', credits: cost, reason: 'public_identity_regeneration' },
     } as any);
 
-    // Debit wallet
     await db.update(creditWallets).set({
       balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
       lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,

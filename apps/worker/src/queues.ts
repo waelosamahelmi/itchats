@@ -15,6 +15,8 @@ export const QUEUES = {
   NOTIFICATIONS: 'notifications',
   CLEANUP: 'cleanup',
   COST_RECONCILIATION: 'cost-reconciliation',
+  CHARACTER_AUTONOMY: 'character-autonomy',
+  AI_POST_REACTIONS: 'ai-post-reactions',
 } as const;
 
 // ── Queue instances ──
@@ -27,6 +29,8 @@ export const mediaQueue = new Queue(QUEUES.MEDIA_PROCESSING, { connection });
 export const notificationQueue = new Queue(QUEUES.NOTIFICATIONS, { connection });
 export const cleanupQueue = new Queue(QUEUES.CLEANUP, { connection });
 export const costReconciliationQueue = new Queue(QUEUES.COST_RECONCILIATION, { connection });
+export const characterAutonomyQueue = new Queue(QUEUES.CHARACTER_AUTONOMY, { connection });
+export const aiPostReactionsQueue = new Queue(QUEUES.AI_POST_REACTIONS, { connection });
 
 // ── Job type definitions ──
 export interface VideoGenerationJob {
@@ -85,11 +89,23 @@ export interface CostReconciliationJob {
   date: string;
 }
 
+export interface CharacterAutonomyJob {
+  characterId?: string;
+  /** If true, processes all autonomous characters */
+  processAll?: boolean;
+}
+
+export interface AiPostReactionsJob {
+  postId: string;
+  characterId?: string;
+}
+
 /** Get all queues for health checks */
 export function getAllQueues(): Queue[] {
   return [
     videoQueue, imageQueue, memoryQueue, storyQueue,
     moderationQueue, mediaQueue, notificationQueue,
     cleanupQueue, costReconciliationQueue,
+    characterAutonomyQueue, aiPostReactionsQueue,
   ];
 }

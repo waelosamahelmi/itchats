@@ -29,6 +29,11 @@ export class BillingController {
     return this.billingService.createCheckoutSession(req.user.userId, body.planId, req.user.email ?? '');
   }
 
+  @Post('seed-plans')
+  async seedPlans() {
+    return this.billingService.seedDefaultPlans();
+  }
+
   @Post('webhook')
   async webhook(@Body() body: any, @Req() req: any) {
     return this.billingService.handleStripeWebhook(body, req.headers?.['stripe-signature']);

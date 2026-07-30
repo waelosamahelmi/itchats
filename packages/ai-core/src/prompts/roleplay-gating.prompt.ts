@@ -176,6 +176,8 @@ Your message should be IN CHARACTER and feel like a real person responding:
 - "you know what, i could really use the company right now" (vulnerable yes)
 
 Never sound like a system or a bot. You're a PERSON deciding whether to hang out.`;
+
+  return prompt;
 }
 
 /**

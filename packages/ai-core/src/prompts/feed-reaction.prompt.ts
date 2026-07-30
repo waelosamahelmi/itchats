@@ -135,6 +135,8 @@ DELAY LOGIC:
 - "short_delay" — you saw it but reacted a bit later (most common)
 - "later" — you reacted hours later, maybe catching up on your feed
 - "next_day" — you're the kind of person who catches up the next day`;
+
+  return prompt;
 }
 
 /**

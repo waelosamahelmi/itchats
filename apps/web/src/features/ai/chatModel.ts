@@ -8,7 +8,8 @@ export type MessageKind =
   | 'video'
   | 'audio'
   | 'voice_note'
-  | 'system';
+  | 'system'
+  | 'media_request';
 export type DeliveryState = 'sending' | 'sent' | 'delivered' | 'seen' | 'failed';
 
 export interface MessageReaction {
@@ -26,6 +27,11 @@ export interface ChatMessage {
   createdAt: string;
   delivery: DeliveryState;
   reactions: MessageReaction[];
+  /** Media request metadata (when kind === 'media_request') */
+  mediaRequestId?: string;
+  estimatedCredits?: number;
+  mediaPrompt?: string;
+  mediaRequestType?: 'selfie' | 'image';
 }
 
 export interface HistoryMessage {
@@ -65,7 +71,7 @@ export function parseAssistantResponse(content: string): ResponsePart[] {
 }
 
 const messageKinds = new Set<MessageKind>([
-  'text', 'thought', 'action', 'image', 'video', 'audio', 'voice_note', 'system',
+  'text', 'thought', 'action', 'image', 'video', 'audio', 'voice_note', 'system', 'media_request',
 ]);
 const deliveryStates = new Set<DeliveryState>(['sending', 'sent', 'delivered', 'seen', 'failed']);
 

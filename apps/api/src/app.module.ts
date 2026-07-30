@@ -17,6 +17,11 @@ import { UsageModule } from './usage/usage.module';
 import { ProvidersModule } from './providers/providers.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
+import { PostsModule } from './posts/posts.module';
+import { VoicesModule } from './voices/voices.module';
+import { RoleplayModule } from './roleplay/roleplay.module';
+import { RelationshipModule } from './relationship/relationship.module';
+import { AutonomyModule } from './autonomy/autonomy.module';
 
 @Module({
   imports: [
@@ -38,6 +43,11 @@ import { HealthModule } from './health/health.module';
     UsageModule,
     ProvidersModule,
     AdminModule,
+    PostsModule,
+    VoicesModule,
+    RoleplayModule,
+    RelationshipModule,
+    AutonomyModule,
   ],
 })
 export class AppModule {}

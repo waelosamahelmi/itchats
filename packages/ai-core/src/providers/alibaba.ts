@@ -234,7 +234,7 @@ interface AudioResult {
   format: string;
 }
 
-const TTS_VOICES: Record<string, { label: string; gender: string; style: string; desc: string }> = {
+export const TTS_VOICES: Record<string, { label: string; gender: string; style: string; desc: string }> = {
   longanlingxi: { label: 'Emily',    gender: 'female', style: 'Warm',    desc: 'Soft, natural — warm companion' },
   longxiaochun:  { label: 'Claire',  gender: 'female', style: 'Gentle',  desc: 'Calm, tender — close listener' },
   longxiaoxia:   { label: 'Maya',   gender: 'female', style: 'Bright',   desc: 'Cheerful, lively — social spark' },
@@ -468,6 +468,24 @@ export async function alibabaTTSWithFallback(request: TTSRequest): Promise<Audio
     }
   }
   throw new Error(`All TTS models exhausted. Tried: ${tried.join(' | ')}`);
+}
+
+/**
+ * Legacy TTS via WebSocket — used for pre-generating voice samples
+ * with the original longanlingxi/longxiaochun/... voice set.
+ */
+export async function alibabaTTSLegacy(request: TTSRequest): Promise<AudioResult & { usedModel: string }> {
+  const config = getConfig();
+  const tried: string[] = [];
+  for (const model of ['qwen3-tts-flash', 'qwen-tts']) {
+    try {
+      const result = await callTTS(model, request, config.ALIBABA_API_KEY, '');
+      return { ...result, usedModel: model };
+    } catch (err: any) {
+      tried.push(`${model}: ${err.message.slice(0, 80)}`);
+    }
+  }
+  throw new Error(`All legacy TTS models exhausted. Tried: ${tried.join(' | ')}`);
 }
 
 /** Try chat models in fallback order until one succeeds */

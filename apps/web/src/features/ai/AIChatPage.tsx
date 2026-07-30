@@ -46,6 +46,8 @@ export default function AIChatPage() {
 
   const [recording, setRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [creditBalance, setCreditBalance] = useState(0);
+  const conversationIdRef = useRef<string | null>(null);
 
   const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
@@ -53,6 +55,18 @@ export default function AIChatPage() {
   }, []);
 
   useEffect(scrollToBottom, [messages, streaming, scrollToBottom]);
+
+  // Keep conversationId ref in sync for async callbacks
+  useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+
+  // Fetch credit balance
+  useEffect(() => {
+    if (!auth.token) return;
+    fetch(`${API}/billing/wallet`, { headers: headers() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setCreditBalance(data.balance ?? 0); })
+      .catch(() => {});
+  }, [auth.token, headers]);
 
   useEffect(() => {
     if (!auth.token || !characterId) return;
@@ -295,6 +309,10 @@ export default function AIChatPage() {
             setStreaming(fullResponse);
           }
           if (payload.type === 'done') {
+            if (payload.conversationId && !conversationId) {
+              setConversationId(payload.conversationId);
+              conversationIdRef.current = payload.conversationId;
+            }
             const parts = parseAssistantResponse(fullResponse);
             setMessages((current) => [
               ...current.map((message) => message.id === optimisticId ? { ...message, delivery: 'delivered' as const } : message),
@@ -311,6 +329,32 @@ export default function AIChatPage() {
               mediaUrl: payload.url, createdAt: new Date().toISOString(),
               delivery: 'delivered', reactions: [],
             }]);
+          }
+          if (payload.type === 'media_request') {
+            // Check if user has auto-approve enabled for this character
+            const autoApproveKey = `media_auto_approve_${characterId}`;
+            const autoApprove = localStorage.getItem(autoApproveKey) === 'true';
+            if (autoApprove) {
+              // Auto-approve: call the approve endpoint immediately using the conversationId from the event
+              const reqId = payload.requestId as string;
+              const cid = (payload.conversationId as string) || conversationIdRef.current;
+              if (cid) {
+                approveMediaRequest(reqId, true, cid).catch(() => {});
+              }
+            } else {
+              // Show confirmation card in chat
+              setMessages((current) => [...current, {
+                id: crypto.randomUUID(), sender: 'character', kind: 'media_request',
+                text: payload.mediaType === 'selfie'
+                  ? `📸 ${name} wants to send you a selfie`
+                  : `📸 ${name} wants to send an image: "${payload.mediaPrompt ?? ''}"`,
+                createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+                mediaRequestId: payload.requestId as string,
+                estimatedCredits: payload.estimatedCredits as number,
+                mediaPrompt: payload.mediaPrompt as string,
+                mediaRequestType: payload.mediaType as 'selfie' | 'image',
+              }]);
+            }
           }
           if (payload.type === 'video') {
             setMessages((current) => [...current, {
@@ -378,6 +422,52 @@ export default function AIChatPage() {
     audioRef.current.onended = () => setPlayingId(undefined);
   }
 
+  async function approveMediaRequest(requestId: string, approved: boolean, overrideConversationId?: string) {
+    const cid = overrideConversationId || conversationIdRef.current;
+    if (!cid || !characterId) return;
+    try {
+      const response = await fetch(`${API}/ai/chat/media/approve`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characterId, conversationId: cid, requestId, approved }),
+      });
+      if (!response.ok) throw new Error('Media approval failed.');
+      const result = await response.json();
+
+      if (result.status === 'generated' && result.url) {
+        setMessages((current) => [...current, {
+          id: crypto.randomUUID(), sender: 'character', kind: 'image',
+          text: result.mediaType === 'selfie' ? `${name} sent a selfie` : `${name} sent an image`,
+          mediaUrl: result.url, createdAt: new Date().toISOString(),
+          delivery: 'delivered', reactions: [],
+        }]);
+        // Update credit balance after deduction
+        if (result.creditsUsed) {
+          setCreditBalance((b) => Math.max(0, b - result.creditsUsed));
+        }
+      } else if (result.status === 'failed') {
+        setError(result.message || 'Media generation failed. Please try again.');
+      }
+      // If denied, nothing additional to show — the request card is just removed
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Media approval failed.');
+    }
+  }
+
+  function handleApproveMedia(msg: ChatMessage) {
+    if (!msg.mediaRequestId) return;
+    // Remove the media request card from messages
+    setMessages((current) => current.filter((m) => m.id !== msg.id));
+    approveMediaRequest(msg.mediaRequestId, true);
+  }
+
+  function handleDenyMedia(msg: ChatMessage) {
+    if (!msg.mediaRequestId) return;
+    // Remove the media request card from messages
+    setMessages((current) => current.filter((m) => m.id !== msg.id));
+    approveMediaRequest(msg.mediaRequestId, false);
+  }
+
   if (!auth.token) return <main className="chat-auth-required">Sign in to continue this conversation.</main>;
 
   return (
@@ -413,7 +503,17 @@ export default function AIChatPage() {
           </div>
         )}
         {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} onReact={react} onPlay={playVoice} playing={playingId === message.id} />
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onReact={react}
+            onPlay={playVoice}
+            playing={playingId === message.id}
+            onApproveMedia={handleApproveMedia}
+            onDenyMedia={handleDenyMedia}
+            characterName={name}
+            creditBalance={creditBalance}
+          />
         ))}
         {streaming && <div className="character-typing"><span /><span /><span /></div>}
         <div ref={bottomRef} />

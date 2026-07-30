@@ -47,6 +47,80 @@ export function getEstimatedCost(model: string, capability: string, params: Cost
       const outputTokens = Number(params.outputTokens ?? 300);
       return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
     }
+
+    // Lightweight LLM calls — minimal tokens
+    case 'feed_reaction': {
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 80);
+      const outputTokens = Number(params.outputTokens ?? 30);
+      return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+    }
+
+    // Relationship delta evaluation per message exchange
+    case 'relationship_eval': {
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 200);
+      const outputTokens = Number(params.outputTokens ?? 60);
+      return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+    }
+
+    // Autonomous character posting (LLM call + optional image)
+    case 'autonomous_post': {
+      // LLM portion
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 400);
+      const outputTokens = Number(params.outputTokens ?? 250);
+      const llmCost = (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+      // Optional image attachment
+      const hasImage = Boolean(params.hasImage ?? false);
+      if (hasImage) {
+        const imageModel = String(params.imageModel ?? 'qwen-image-2.0');
+        const imageCost = PRICING[imageModel as keyof typeof PRICING] as number ?? 0.035;
+        return llmCost + imageCost;
+      }
+      return llmCost;
+    }
+
+    // Autonomous story generation (LLM + optional image/video)
+    case 'autonomous_story': {
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 800);
+      const outputTokens = Number(params.outputTokens ?? 500);
+      const llmCost = (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+      const hasImage = Boolean(params.hasImage ?? true);
+      if (hasImage) {
+        const imageModel = String(params.imageModel ?? 'qwen-image-2.0-pro');
+        const imageCost = PRICING[imageModel as keyof typeof PRICING] as number ?? 0.075;
+        return llmCost + imageCost;
+      }
+      return llmCost;
+    }
+
+    // Roleplay chat session — higher token usage for richer context
+    case 'roleplay_session': {
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 1200);
+      const outputTokens = Number(params.outputTokens ?? 600);
+      return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+    }
+
+    // AI profile picture generation
+    case 'profile_picture_gen': {
+      const imageModel = String(params.imageModel ?? 'qwen-image-2.0-pro');
+      const imageCost = PRICING[imageModel as keyof typeof PRICING] as number;
+      if (typeof imageCost === 'number') return imageCost;
+      // Fallback to standard image pricing
+      return PRICING['qwen-image-2.0-pro'] as number ?? 0.075;
+    }
+
+    // Character searching for news / current events
+    case 'news_search': {
+      const p = pricing as { input: number; output: number };
+      const inputTokens = Number(params.inputTokens ?? 300);
+      const outputTokens = Number(params.outputTokens ?? 200);
+      return (p.input * inputTokens + p.output * outputTokens) / 1_000_000;
+    }
+
     case 'text_to_image':
     case 'image_to_image':
       return (pricing as number);

@@ -5,6 +5,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { MemoryService } from './memory.service';
 import { buildFullChatPrompt } from '@itchats/ai-core';
 import type { SystemPromptParams } from '@itchats/ai-core';
+import type { EmotionPromptParams } from '@itchats/ai-core';
 import type { PersonalityPromptParams } from '@itchats/ai-core';
 import type { MessagingPromptParams } from '@itchats/ai-core';
 import type { MemoryPromptParams } from '@itchats/ai-core';
@@ -153,6 +154,16 @@ export class ContextBuilderService {
       recentExchange: recentExchange || undefined,
     };
 
+    const emotionParams: EmotionPromptParams = {
+      currentMood: (char.emotionState as any)?.mood || 'neutral',
+      moodIntensity: (char.emotionState as any)?.moodIntensity ?? 5,
+      moodReason: (char.emotionState as any)?.moodReason || undefined,
+      emotionalBaseline: char.emotionalBaseline || (char.emotionState as any)?.mood || 'neutral',
+      energyLevel: (char.emotionState as any)?.energy ?? 5,
+      timeOfDay: (char.emotionState as any)?.timeOfDay || 'afternoon',
+      recentEvents: (char.emotionState as any)?.recentEvents || [],
+    };
+
     const relationshipParams: RelationshipPromptParams = {
       relationshipLabel,
       relationshipLevel: level,
@@ -170,6 +181,7 @@ export class ContextBuilderService {
 
     const systemPrompt = buildFullChatPrompt({
       system: systemParams,
+      emotion: emotionParams,
       personality: personalityParams,
       messaging: messagingParams,
       memory: memoryParams,

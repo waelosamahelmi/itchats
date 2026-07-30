@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Check, CheckCheck, Pause, Play } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { ChatMessage } from './chatModel';
 import { ReactionBar } from './ReactionBar';
 
@@ -10,14 +11,25 @@ export function MessageBubble({
   onReact,
   onPlay,
   playing = false,
+  onApproveMedia,
+  onDenyMedia,
+  characterName = 'Character',
+  creditBalance = 0,
 }: {
   message: ChatMessage;
   onReact: (messageId: string, emoji: string) => void;
   onPlay?: (message: ChatMessage) => void;
   playing?: boolean;
+  onApproveMedia?: (message: ChatMessage) => void;
+  onDenyMedia?: (message: ChatMessage) => void;
+  characterName?: string;
+  creditBalance?: number;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [dontAsk, setDontAsk] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigate = useNavigate();
   const isUser = message.sender === 'user';
   const selected = message.reactions.find((reaction) => reaction.actorType === 'user')?.emoji;
   const cleanText = message.kind === 'thought'
@@ -31,6 +43,80 @@ export function MessageBubble({
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
   };
+
+  // ── Media request card ──
+  if (message.kind === 'media_request') {
+    const isSelfie = message.mediaRequestType === 'selfie';
+    const creditsNeeded = message.estimatedCredits ?? 0;
+    const hasEnoughCredits = creditBalance >= creditsNeeded;
+
+    const handleGenerate = () => {
+      setMediaLoading(true);
+      if (dontAsk) {
+        const key = `media_auto_approve_${message.sender}`;
+        localStorage.setItem(key, 'true');
+      }
+      onApproveMedia?.(message);
+    };
+
+    return (
+      <article className="chat-message chat-message-character">
+        <div className="message-stack">
+          <div className="media-request-card" role="alert">
+            <div className="media-request-header">
+              <span className="media-request-emoji">📸</span>
+              <span>
+                <strong>{characterName}</strong> wants to send you {isSelfie ? 'a selfie' : `an image: "${message.mediaPrompt ?? ''}"`}
+              </span>
+            </div>
+            {hasEnoughCredits ? (
+              <p className="media-request-cost">This will cost <strong>{creditsNeeded} credits</strong></p>
+            ) : (
+              <p className="media-request-cost media-request-insufficient">
+                ⚠️ You need {creditsNeeded} credits but only have {creditBalance}
+              </p>
+            )}
+            <div className="media-request-actions">
+              {hasEnoughCredits ? (
+                <button
+                  type="button"
+                  className="media-request-button media-request-generate"
+                  disabled={mediaLoading}
+                  onClick={handleGenerate}
+                >
+                  {mediaLoading ? 'Generating...' : `Generate (${creditsNeeded})`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="media-request-button media-request-buy"
+                  onClick={() => navigate('/billing')}
+                >
+                  Get More Credits →
+                </button>
+              )}
+              <button
+                type="button"
+                className="media-request-button media-request-skip"
+                disabled={mediaLoading}
+                onClick={() => onDenyMedia?.(message)}
+              >
+                Skip
+              </button>
+            </div>
+            <label className="media-request-dontask">
+              <input
+                type="checkbox"
+                checked={dontAsk}
+                onChange={(e) => setDontAsk(e.target.checked)}
+              />
+              Don't ask me again for {characterName}
+            </label>
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <article className={`chat-message ${isUser ? 'chat-message-user' : 'chat-message-character'}`}>

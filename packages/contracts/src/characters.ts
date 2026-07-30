@@ -42,6 +42,12 @@ export const CreateCharacterSchema = z.object({
   timezone: z.string().max(50).optional(),
   autonomyLevel: z.enum(['off', 'low', 'normal', 'high']).optional(),
   storyCadence: z.enum(['manual', 'daily', 'every_2_days', 'every_3_days']).optional(),
+  // ── Media Budget ──
+  mediaBudgetType: z.enum(['weekly', 'monthly']).optional(),
+  maxImagesPerPeriod: z.number().int().min(0).max(50).optional(),
+  maxVideosPerPeriod: z.number().int().min(0).max(10).optional(),
+  mediaBudgetCredits: z.number().int().min(0).optional(),
+  agreeToDeductions: z.boolean().optional(),
 });
 
 export type CreateCharacterInput = z.infer<typeof CreateCharacterSchema>;

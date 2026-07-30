@@ -3,6 +3,9 @@ import { AiService } from './ai.service';
 import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { alibabaTTS, alibabaTextToImageWithFallback } from '@itchats/ai-core';
+import { RoleplayService } from '../roleplay/roleplay.service';
+import { RelationshipService } from '../relationship/relationship.service';
+import { CharacterCreationService } from '../characters/character-creation.service';
 import { Readable } from 'node:stream';
 
 const ttsCache = new Map<string, { audioBase64: string; format: string }>();
@@ -17,6 +20,9 @@ export class AiController {
   constructor(
     @Inject(AiService) private readonly aiService: AiService,
     @Inject(MemoryService) private readonly memoryService: MemoryService,
+    @Inject(RoleplayService) private readonly roleplayService: RoleplayService,
+    @Inject(RelationshipService) private readonly relationshipService: RelationshipService,
+    @Inject(CharacterCreationService) private readonly characterCreationService: CharacterCreationService,
   ) {}
 
   @Post('chat/stream')
@@ -47,6 +53,25 @@ export class AiController {
     })();
 
     return readable;
+  }
+
+  @Post('chat/media/approve')
+  @UseGuards(JwtAuthGuard)
+  async approveMedia(
+    @Body() body: { characterId: string; conversationId: string; requestId: string; approved: boolean },
+    @Req() req: any,
+  ) {
+    try {
+      return await this.aiService.approveMediaRequest(
+        req.user.userId,
+        body.characterId,
+        body.conversationId,
+        body.requestId,
+        body.approved,
+      );
+    } catch (err: any) {
+      return { status: 'error', message: err.message || 'Media approval failed' };
+    }
   }
 
   @Post('chat')
@@ -166,6 +191,7 @@ export class AiController {
   async clearMemories(@Param('characterId') characterId: string, @Req() req: any) {
     return this.aiService.clearMemories(characterId, req.user.userId);
   }
+
   @Post('image-to-image')
   @UseGuards(JwtAuthGuard)
   async imageToImage(@Body() body: { prompt: string; imageBase64: string }, @Req() req: any) {
@@ -208,4 +234,35 @@ export class AiController {
       const result = await this.aiService.transcribeVoice(req.user.userId, body.audioBase64);
       return result;
     } catch { return safeAiError('Transcription failed. Please try again.'); }
-  }}
+  }
+
+  // ── New endpoints ──
+
+  @Post('character/:characterId/generate-avatar')
+  @UseGuards(JwtAuthGuard)
+  async generateCharacterAvatar(@Param('characterId') characterId: string, @Req() req: any) {
+    try {
+      return await this.characterCreationService.generateProfilePicture(characterId);
+    } catch {
+      return safeAiError('Avatar generation failed. Please try again.');
+    }
+  }
+
+  @Get('character/:characterId/relationship')
+  @UseGuards(JwtAuthGuard)
+  async getCharacterRelationship(@Param('characterId') characterId: string, @Req() req: any) {
+    return this.relationshipService.getRelationship(characterId, req.user.userId);
+  }
+
+  @Post('character/:characterId/roleplay/request')
+  @UseGuards(JwtAuthGuard)
+  async requestRoleplay(@Param('characterId') characterId: string, @Req() req: any) {
+    return this.roleplayService.requestRoleplay(characterId, req.user.userId);
+  }
+
+  @Get('character/:characterId/roleplay/status')
+  @UseGuards(JwtAuthGuard)
+  async getRoleplayStatus(@Param('characterId') characterId: string, @Req() req: any) {
+    return this.roleplayService.getStatus(characterId, req.user.userId);
+  }
+}

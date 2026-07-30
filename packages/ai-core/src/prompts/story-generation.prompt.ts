@@ -64,7 +64,7 @@ ${currentActivity ? `Doing: ${currentActivity}` : ''}
     playful: "Silly stories. Goofy selfies with weird filters. Jokes. You're not being serious right now.",
     thoughtful: "A sunrise, a quote that hit different, a quiet moment. Something that makes people pause and think.",
     loving: "Soft stories. Appreciation posts. Sunset pics with heartfelt captions. You're in your feelings in a good way.",
-    bored: "Random thoughts, polls for no reason, "what should I do?" energy. You're looking for engagement.",
+    bored: "Random thoughts, polls for no reason, 'what should I do?' energy. You're looking for engagement.",
     anxious: "You might overthink posting — or post anyway as a subtle way of reaching out. Seeking connection without saying it.",
   };
 
@@ -158,6 +158,8 @@ When useExistingPhoto is false and imageGenerationNeeded is true, provide a deta
 - Camera style: smartphone-quality, vertical 9:16 aspect ratio, natural
 - "Consistent character identity, same person as reference images, photorealistic"
 `;
+
+  return prompt;
 }
 
 /**

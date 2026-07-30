@@ -132,9 +132,12 @@ export class AiService {
       return;
     }
 
+    // Strip media markers before storing the text message
+    const cleanContent = fullResponse.replace(/\[SELFIE\]|\[IMAGE:\s*.*?\]|\[VIDEO:\s*.*?\]/gi, '').trim();
+
     const [aiMsg] = await db.insert(messages).values({
       conversationId: convId, senderType: 'character', senderCharacterId: characterId,
-      type: 'text', content: fullResponse,
+      type: 'text', content: cleanContent || fullResponse,
     }).returning();
 
     await db.update(generationJobs).set({
@@ -171,17 +174,28 @@ export class AiService {
       this.autoReact(convId, characterId, message).catch(() => {});
     }
 
-    yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost };
+    yield { type: 'done', messageId: aiMsg!.id, creditsUsed: actualCost, conversationId: convId };
 
-    // ── Detect and generate media markers ──
-    yield* this.generateMediaFromMarkers(userId, characterId, convId, fullResponse);
+    // ── Detect media markers: [SELFIE] / [IMAGE:...] yield media_request; [VIDEO:...] auto-generates ──
+    yield* this.detectMediaMarkers(userId, characterId, convId, fullResponse);
   }
 
+  // In-memory storage for pending media requests awaiting user approval.
+  // Key: requestId → value: { userId, characterId, conversationId, mediaType, mediaPrompt, estimatedCredits }
+  private readonly pendingMediaRequests = new Map<string, {
+    userId: string;
+    characterId: string;
+    conversationId: string;
+    mediaType: 'selfie' | 'image' | 'video';
+    mediaPrompt: string;
+    estimatedCredits: number;
+  }>();
+
   /**
-   * Detects [SELFIE], [IMAGE: ...], [VIDEO: ...] markers in the AI response
-   * and generates the corresponding media. Yields SSE events for each media item.
+   * Detects [SELFIE], [IMAGE: ...] markers in the AI response and yields media_request events.
+   * [VIDEO: ...] markers still auto-generate (unchanged behavior).
    */
-  private async *generateMediaFromMarkers(
+  private async *detectMediaMarkers(
     userId: string,
     characterId: string | null,
     conversationId: string,
@@ -193,33 +207,29 @@ export class AiService {
     const imageMatch = aiResponse.match(/\[IMAGE:\s*(.+?)\]/i);
     const videoMatch = aiResponse.match(/\[VIDEO:\s*(.+?)\]/i);
 
-    // Only generate one media item per response (first match wins)
     if (selfieMatch) {
-      yield { type: 'status', message: 'Generating selfie...' };
-      try {
-        const result = await this.generateSelfie(userId, characterId, 'casual_front_camera');
-        if (result?.url) {
-          const selfie = result!;
-          await this.saveMediaMessage(conversationId, characterId, 'image', selfie.url);
-          yield { type: 'image', url: selfie.url, model: selfie.model, creditsUsed: selfie.creditsUsed };
-        }
-      } catch (err: any) {
-        yield { type: 'media_error', message: `Couldn't take a selfie right now: ${String(err.message).slice(0, 100)}` };
-      }
+      const requestId = randomUUID();
+      const estimatedCredits = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+
+      this.pendingMediaRequests.set(requestId, {
+        userId, characterId, conversationId, mediaType: 'selfie',
+        mediaPrompt: 'casual_front_camera', estimatedCredits,
+      });
+
+      yield { type: 'media_request', mediaType: 'selfie', mediaPrompt: 'casual_front_camera', estimatedCredits, requestId, conversationId };
     } else if (imageMatch) {
       const description = imageMatch[1]!.trim();
-      yield { type: 'status', message: `Generating image: ${description}` };
-      try {
-        const result = await this.generateImage(userId, description);
-        if (result?.url) {
-          const img = result!;
-          await this.saveMediaMessage(conversationId, characterId, 'image', img.url);
-          yield { type: 'image', url: img.url, description, model: img.model, creditsUsed: img.creditsUsed };
-        }
-      } catch (err: any) {
-        yield { type: 'media_error', message: `Couldn't generate that image: ${String(err.message).slice(0, 100)}` };
-      }
+      const requestId = randomUUID();
+      const estimatedCredits = getCreditCost('qwen-image-2.0', 'text_to_image');
+
+      this.pendingMediaRequests.set(requestId, {
+        userId, characterId, conversationId, mediaType: 'image',
+        mediaPrompt: description, estimatedCredits,
+      });
+
+      yield { type: 'media_request', mediaType: 'image', mediaPrompt: description, estimatedCredits, requestId, conversationId };
     } else if (videoMatch) {
+      // [VIDEO:...] still auto-generates without confirmation
       const description = videoMatch[1]!.trim();
       yield { type: 'status', message: `Generating video: ${description}` };
       try {
@@ -235,6 +245,50 @@ export class AiService {
         yield { type: 'media_error', message: `Couldn't generate that video: ${String(err.message).slice(0, 100)}` };
       }
     }
+  }
+
+  /**
+   * Approve or deny a pending media request.
+   * If approved: generates the image/selfie, saves message, returns URL and credits used.
+   * If denied: returns status 'denied'.
+   */
+  async approveMediaRequest(
+    userId: string,
+    characterId: string,
+    conversationId: string,
+    requestId: string,
+    approved: boolean,
+  ) {
+    const pending = this.pendingMediaRequests.get(requestId);
+    if (!pending) throw new Error('Media request not found or already processed');
+    if (pending.userId !== userId) throw new Error('Unauthorized');
+    if (pending.characterId !== characterId) throw new Error('Character mismatch');
+
+    this.pendingMediaRequests.delete(requestId);
+
+    if (!approved) {
+      return { status: 'denied' as const };
+    }
+
+    let result: { url: string; model: string; creditsUsed: number } | undefined;
+    if (pending.mediaType === 'selfie') {
+      result = await this.generateSelfie(userId, pending.characterId, pending.mediaPrompt);
+    } else if (pending.mediaType === 'image') {
+      result = await this.generateImage(userId, pending.mediaPrompt);
+    }
+
+    if (result?.url) {
+      await this.saveMediaMessage(pending.conversationId, pending.characterId, 'image', result.url);
+    }
+
+    return {
+      status: result?.url ? 'generated' as const : 'failed' as const,
+      url: result?.url,
+      model: result?.model,
+      creditsUsed: result?.creditsUsed,
+      mediaType: pending.mediaType,
+      mediaPrompt: pending.mediaPrompt,
+    };
   }
 
   private async saveMediaMessage(
