@@ -12,8 +12,12 @@ import {
   logout, useAppDispatch,
   fetchProfile, fetchFriendsThunk,
   setUserPosts,
+  setTranslatedPost,
+  setTranslating,
+  clearTranslation,
 } from '@/app/store';
 import { apiFetch } from '@/lib/api';
+import { translateText, getLanguageDisplayName, detectTextLanguage } from '@/lib/translate';
 import { Badge, Tabs } from '@itchats/ui';
 
 // ── Section wrapper ──
@@ -28,6 +32,7 @@ function Section({ title, children, className }: { title?: string; children: Rea
 
 // ── Post Card (simplified, same design as feed) ──
 function ProfilePost({ post }: { post: Post }) {
+  const dispatch = useAppDispatch();
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.likes);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
@@ -35,6 +40,32 @@ function ProfilePost({ post }: { post: Post }) {
   const isLongContent = post.content.length > 200;
   const [expanded, setExpanded] = useState(false);
   const displayContent = expanded ? post.content : post.content.slice(0, 200);
+
+  // Translation
+  const { language: userLang, translatedPosts, translating: transMap } = useSelector((s: RootState) => s.translation);
+  const isTranslating = transMap[post.id] ?? false;
+  const translatedData = translatedPosts[post.id];
+  const [showTranslation, setShowTranslation] = useState(false);
+
+  const handleTranslate = async () => {
+    if (isTranslating) return;
+    if (translatedData) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+    dispatch(setTranslating(post.id));
+    try {
+      const result = await translateText(post.content, userLang);
+      dispatch(setTranslatedPost({
+        postId: post.id,
+        translatedText: result.translatedText,
+        detectedLanguage: result.detectedSourceLanguage || detectTextLanguage(post.content),
+      }));
+      setShowTranslation(true);
+    } catch {
+      dispatch(clearTranslation(post.id));
+    }
+  };
 
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -65,13 +96,26 @@ function ProfilePost({ post }: { post: Post }) {
       {post.content && (
         <div className="px-4 pb-3">
           <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-            {displayContent}
-            {isLongContent && !expanded && '...'}
+            {showTranslation && translatedData ? translatedData.translatedText : displayContent}
+            {isLongContent && !expanded && !showTranslation && '...'}
           </p>
-          {isLongContent && (
+          {isLongContent && !showTranslation && (
             <button onClick={() => setExpanded(!expanded)} className="text-xs text-brand-primary mt-1 hover:underline">
               {expanded ? 'Show less' : 'See more'}
             </button>
+          )}
+          {showTranslation && translatedData && (
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
+                Translated from {getLanguageDisplayName(translatedData.detectedLanguage)}
+              </span>
+              <button
+                onClick={() => setShowTranslation(false)}
+                className="text-[10px] text-brand-primary hover:underline"
+              >
+                Show original
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -92,6 +136,13 @@ function ProfilePost({ post }: { post: Post }) {
         </button>
         <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
           <Share2 size={16} /> Share
+        </button>
+        <button
+          onClick={handleTranslate}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${translatedData ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5'}`}
+        >
+          <Globe size={16} className={isTranslating ? 'animate-spin' : ''} />
+          {isTranslating ? '...' : translatedData && showTranslation ? 'Original' : 'Translate'}
         </button>
       </div>
       {/* Copied toast */}

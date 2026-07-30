@@ -1,6 +1,8 @@
 export type RouteKey =
   | 'chat.standard'
   | 'chat.premium'
+  | 'chat.translate'
+  | 'chat.detectLanguage'
   | 'character.autofill'
   | 'character.memory.extract'
   | 'character.story.plan'
@@ -20,6 +22,8 @@ export type RouteKey =
 export const ROUTE_MODELS: Record<RouteKey, string[]> = {
   'chat.standard': ['qwen3.5-flash', 'deepseek-v4-flash', 'qwen-flash'],
   'chat.premium': ['qwen3.6-flash', 'qwen3.5-flash'],
+  'chat.translate': ['qwen3.5-flash', 'qwen-flash'],
+  'chat.detectLanguage': ['qwen3.5-flash', 'qwen-flash'],
   'character.autofill': ['qwen3.5-flash', 'qwen3.6-flash'],
   'character.memory.extract': ['qwen3.5-flash', 'qwen-flash'],
   'character.story.plan': ['qwen3.5-flash'],

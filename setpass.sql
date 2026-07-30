@@ -1,0 +1,1 @@
+UPDATE users SET password_hash = '$argon2id$v=19$m=65536,p=4,t=3$MlvpmiZZ9khhmCcLF2oohw$W+307kRzPpZS1VS1TTtqlHoegV1zTrhZQLKD9MKWULo' WHERE email = 'wael@helmies.fi' RETURNING id;

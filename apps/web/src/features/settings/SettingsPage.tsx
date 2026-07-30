@@ -5,12 +5,13 @@ import {
   ArrowLeft, CreditCard, Bell, Lock, Shield, Globe, Smartphone,
   User, Mail, Camera, Mic, Info, Trash2, LogOut, ChevronRight,
   ToggleLeft, ToggleRight, Sparkles, ExternalLink, AlertTriangle,
-  Cookie, HelpCircle, FileText, Sun, Moon, X, Check,
+  Cookie, HelpCircle, FileText, Sun, Moon, X, Check, Languages,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
-import { logout, useAppDispatch } from '@/app/store';
+import { logout, useAppDispatch, setLanguage, setAutoTranslate, initLanguageSettings } from '@/app/store';
 import { apiFetch } from '@/lib/api';
 import { getStoredTheme, toggleAndNotify, type Theme } from '@/app/theme';
+import { LANGUAGES, applyLanguage } from '@/lib/i18n';
 
 // ── Settings Row ──
 function SettingsRow({
@@ -90,6 +91,10 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordChanging, setPasswordChanging] = useState(false);
   const [passwordResult, setPasswordResult] = useState<{ success?: boolean; message?: string } | null>(null);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+
+  // Translation / language preferences from Redux
+  const { language: currentLang, autoTranslate } = useSelector((s: RootState) => s.translation);
 
   // Real wallet / subscription data
   const [wallet, setWallet] = useState<{ balance: number } | null>(null);
@@ -98,6 +103,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadBilling();
+    dispatch(initLanguageSettings());
     // Load notification preferences from localStorage
     try {
       const stored = localStorage.getItem('itchats-notifs');
@@ -242,6 +248,20 @@ export default function SettingsPage() {
             toggled={theme === 'dark'}
             onToggle={() => setTheme(toggleAndNotify())}
           />
+          <SettingsRow
+            icon={Languages}
+            label="Language"
+            value={LANGUAGES.find(l => l.code === currentLang)?.nativeName || 'English'}
+            onClick={() => setShowLangPicker(true)}
+          />
+          <SettingsRow
+            icon={Globe}
+            label="Auto-translate posts"
+            value={autoTranslate ? 'On — all posts translated to your language' : 'Off'}
+            toggle
+            toggled={autoTranslate}
+            onToggle={() => dispatch(setAutoTranslate(!autoTranslate))}
+          />
         </div>
 
         {/* Billing */}
@@ -372,6 +392,44 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Language Picker Modal */}
+      {showLangPicker && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={() => setShowLangPicker(false)}>
+          <div className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => setShowLangPicker(false)} className="p-1.5 rounded-full hover:bg-white/5">
+                <X size={20} className="text-text-secondary" />
+              </button>
+              <h2 className="text-lg font-semibold text-text-primary">Language</h2>
+              <div className="w-8" />
+            </div>
+            <p className="text-xs text-text-muted mb-4 px-1">Choose your preferred language. The app will restart in the selected language.</p>
+            <div className="space-y-1">
+              {LANGUAGES.map(lang => (
+                <button
+                  key={lang.code}
+                  onClick={() => {
+                    dispatch(setLanguage(lang.code));
+                    applyLanguage(lang.code);
+                    setShowLangPicker(false);
+                    // Persist to localStorage directly as well
+                    try { localStorage.setItem('itchats-language', lang.code); } catch {}
+                  }}
+                  className={`flex w-full items-center gap-4 px-4 py-3 rounded-xl transition-colors text-left ${currentLang === lang.code ? 'bg-brand-primary/10 text-brand-primary font-semibold' : 'glass hover:bg-white/5 text-text-primary'}`}
+                >
+                  <span className="text-xl">{lang.flag || '🌐'}</span>
+                  <div className="flex-1">
+                    <span className="text-sm">{lang.nativeName}</span>
+                    <span className="text-xs text-text-muted ml-2">{lang.englishName}</span>
+                  </div>
+                  {currentLang === lang.code && <Check size={18} className="text-brand-primary shrink-0" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Password Change Modal */}
       {showPasswordModal && (

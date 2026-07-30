@@ -60,6 +60,9 @@ export {
   type StoryGenerationPromptParams,
 } from './story-generation.prompt';
 
+// ── Egyptian Arabic ─────────────────────────────────────────────────
+export { buildEgyptianArabicStylePrompt, isArabic, type EgyptianArabicParams } from './egyptian-arabic.prompt';
+
 // ── Legacy / image / voice ──────────────────────────────────────────
 export { buildStoryPrompt, buildStoryImagePrompt, type StoryPromptParams } from './story.prompt';
 export { buildImagePrompt, buildSelfiePrompt, buildReferenceImagePrompt, type ImagePromptParams } from './image.prompt';

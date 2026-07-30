@@ -57,7 +57,7 @@ export class AuthController {
   }
 
   @Get('google')
-  async googleAuth(@Res({ passthrough: false }) res: FastifyReply) {
+  async googleAuth(@Res({ passthrough: false }) res: FastifyReply): Promise<void> {
     const config = getConfig();
     const clientId = config.GOOGLE_CLIENT_ID;
     if (!clientId) {
@@ -67,24 +67,24 @@ export class AuthController {
     const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
     const scope = 'email profile';
     const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
-    res.redirect(url);
+    res.redirect(url, 302);
   }
 
   @Get('google/callback')
-  async googleCallback(@Req() req: any, @Res({ passthrough: false }) res: FastifyReply) {
+  async googleCallback(@Req() req: any, @Res({ passthrough: false }) res: FastifyReply): Promise<void> {
+    const config = getConfig();
+    const { code } = req.query;
+    if (!code) {
+      res.redirect(`${config.CORS_ORIGIN}/auth?error=no_code`, 302);
+      return;
+    }
     try {
-      const config = getConfig();
-      const { code } = req.query;
-      if (!code) {
-        return res.redirect(`${config.CORS_ORIGIN}/auth?error=no_code`);
-      }
-      // Exchange code for tokens
       const redirectUri = `${config.CORS_ORIGIN}/v1/auth/google/callback`;
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          code,
+          code: String(code),
           client_id: config.GOOGLE_CLIENT_ID,
           client_secret: config.GOOGLE_CLIENT_SECRET,
           redirect_uri: redirectUri,
@@ -93,9 +93,9 @@ export class AuthController {
       });
       const tokens = await tokenRes.json() as any;
       if (!tokens.access_token) {
-        return res.redirect(`${config.CORS_ORIGIN}/auth?error=token_exchange_failed`);
+        res.redirect(`${config.CORS_ORIGIN}/auth?error=token_exchange_failed`, 302);
+        return;
       }
-      // Get user info
       const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
       });
@@ -108,10 +108,9 @@ export class AuthController {
         avatarUrl: googleUser.picture,
       };
       const result = await this.authService.oauthLogin(oauth);
-      res.redirect(`${config.CORS_ORIGIN}/auth/callback?token=${result.accessToken}&refresh=${result.refreshToken}`);
+      res.redirect(`${config.CORS_ORIGIN}/auth/callback?token=${result.accessToken}&refresh=${result.refreshToken}`, 302);
     } catch (err: any) {
-      const config = getConfig();
-      res.redirect(`${config.CORS_ORIGIN}/auth?error=oauth_failed`);
+      res.redirect(`${config.CORS_ORIGIN}/auth?error=oauth_failed`, 302);
     }
   }
 

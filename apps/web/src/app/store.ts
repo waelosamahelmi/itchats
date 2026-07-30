@@ -45,7 +45,7 @@ export interface Msg {
 }
 
 // ── Auth ──
-export const registerUser = createAsyncThunk('auth/register', async (d: { email: string; username: string; password: string }) => {
+export const registerUser = createAsyncThunk('auth/register', async (d: { email: string; username: string; password: string; dateOfBirth?: string; agreedToTerms?: boolean }) => {
   const data = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(d) });
   localStorage.setItem('accessToken', data.accessToken); localStorage.setItem('refreshToken', data.refreshToken);
   return data;
@@ -64,9 +64,22 @@ const auth = createSlice({
     b.addCase(registerUser.rejected, (s, a) => { s.error = a.error.message || 'Register failed'; });
     b.addCase(loginUser.rejected, (s, a) => { s.error = a.error.message || 'Login failed'; });
     b.addCase(fetchMe.fulfilled, (s, a) => { s.user = a.payload; });
+    b.addCase(saveWizard.fulfilled, (s, a) => {
+      if (s.user) s.user = { ...s.user, wizardCompleted: (a.payload as any).wizardCompleted, firstLogin: false };
+    });
   },
 });
 export const fetchMe = createAsyncThunk('auth/me', async () => await apiFetch('/users/me'));
+export const saveWizard = createAsyncThunk('auth/saveWizard', async (data: {
+  displayName?: string; country?: string; referrer?: string; avatarUrl?: string;
+  preferredLanguage?: string; autoTranslate?: boolean; theme?: string;
+  followedCharacterIds?: string[]; wizardCompleted?: boolean;
+}) => {
+  return await apiFetch('/users/me/wizard', { method: 'PATCH', body: JSON.stringify(data) });
+});
+export const fetchSuggestedCharacters = createAsyncThunk('chars/suggested', async (limit?: number) => {
+  return (await apiFetch(`/characters/suggested?limit=${limit ?? 8}`)) as Character[];
+});
 export const { logout } = auth.actions;
 
 // ── Characters (updated) ──
@@ -86,8 +99,9 @@ const chars = createSlice({
   initialState: {
     mine: [] as Character[],
     discover: [] as Character[],
-    discoverCharacters: [] as Character[],  // for the new grid discover
-    myCharacters: [] as Character[],        // for the new my-characters page
+    discoverCharacters: [] as Character[],
+    myCharacters: [] as Character[],
+    suggestedCharacters: [] as Character[],
     currentCharacter: null as Character | null,
     followers: {} as Record<string, number>,
     discoverPage: 1,
@@ -111,6 +125,7 @@ const chars = createSlice({
       const char = s.discoverCharacters.find(c => c.id === id.payload);
       if (char && char.followersCount) char.followersCount = Math.max(0, char.followersCount - 1);
     });
+    b.addCase(fetchSuggestedCharacters.fulfilled, (s, a) => { s.suggestedCharacters = a.payload; });
   },
 });
 export const { setDiscoverCharacters, appendDiscoverCharacters, setMyCharacters, setCurrentCharacter, setFollowers } = chars.actions;
@@ -282,6 +297,61 @@ const camera = createSlice({
 });
 export const { addPhoto, toggleCameraMode } = camera.actions;
 
+// ── Translation / Language Settings ──
+interface TranslatedPost {
+  postId: string;
+  translatedText: string;
+  detectedLanguage: string;
+}
+const translation = createSlice({
+  name: 'translation',
+  initialState: {
+    language: 'en',
+    autoTranslate: false,
+    translatedPosts: {} as Record<string, TranslatedPost>,
+    translating: {} as Record<string, boolean>,
+  },
+  reducers: {
+    setLanguage(s, a) {
+      s.language = a.payload;
+      try { localStorage.setItem('itchats-language', a.payload); } catch {}
+      // RTL support
+      const langDir = a.payload === 'ar' ? 'rtl' : 'ltr';
+      document.documentElement.dir = langDir;
+      document.documentElement.lang = a.payload;
+    },
+    setAutoTranslate(s, a) {
+      s.autoTranslate = a.payload;
+      try { localStorage.setItem('itchats-auto-translate', String(a.payload)); } catch {}
+    },
+    setTranslatedPost(s, a) {
+      const { postId, translatedText, detectedLanguage } = a.payload;
+      s.translatedPosts[postId] = { postId, translatedText, detectedLanguage };
+      delete s.translating[postId];
+    },
+    setTranslating(s, a) {
+      s.translating[a.payload] = true;
+    },
+    clearTranslation(s, a) {
+      delete s.translatedPosts[a.payload];
+      delete s.translating[a.payload];
+    },
+    initLanguageSettings(s) {
+      try {
+        s.language = localStorage.getItem('itchats-language') || navigator.language?.split('-')[0] || 'en';
+        s.autoTranslate = localStorage.getItem('itchats-auto-translate') === 'true';
+        // Validate language is in our supported set
+        const supported = ['en', 'ar', 'fi', 'sv', 'de', 'fr', 'zh'];
+        if (!supported.includes(s.language)) s.language = 'en';
+      } catch {
+        s.language = 'en';
+        s.autoTranslate = false;
+      }
+    },
+  },
+});
+export const { setLanguage, setAutoTranslate, setTranslatedPost, setTranslating, clearTranslation, initLanguageSettings } = translation.actions;
+
 // ── Store ──
 export const store = configureStore({
   reducer: {
@@ -293,6 +363,7 @@ export const store = configureStore({
     stories: stories.reducer,
     chat: chat.reducer,
     camera: camera.reducer,
+    translation: translation.reducer,
   },
 });
 export type RootState = ReturnType<typeof store.getState>;

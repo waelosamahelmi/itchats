@@ -78,6 +78,29 @@ export class CharactersService {
     ).limit(Math.min(limit, 50)).offset((page - 1) * limit);
   }
 
+  async findSuggested(limit = 8) {
+    const db = getDb();
+    // Return popular public characters, ordered by follower count
+    return db.select({
+      id: characters.id,
+      name: characters.name,
+      avatarUrl: characters.avatarUrl,
+      description: characters.description,
+      mood: characters.mood,
+      followerCount: characters.followerCount,
+      characterScore: characters.characterScore,
+      gender: characters.gender,
+      ageDisplay: characters.ageDisplay,
+    }).from(characters).where(
+      and(
+        eq(characters.visibility, 'public'),
+        eq(characters.status, 'published'),
+        sql`${characters.deletedAt} IS NULL`,
+      )
+    ).orderBy(sql`${characters.followerCount} DESC NULLS LAST`)
+    .limit(Math.min(limit, 20));
+  }
+
   async findById(id: string, viewerUserId?: string) {
     const db = getDb();
     const [character] = await db.select().from(characters).where(eq(characters.id, id)).limit(1);

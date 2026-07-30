@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { users, userProfiles, userFriends, userScores, posts, mediaAssets } from '@itchats/database/schema';
+import { users, userProfiles, userFriends, userScores, posts, mediaAssets, characterFollows } from '@itchats/database/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
 @Injectable()
@@ -347,5 +347,63 @@ export class UsersService {
       weeklyActivity: score.weeklyActivity,
       rank: score.rank,
     };
+  }
+
+  async saveWizard(
+    userId: string,
+    data: {
+      displayName?: string;
+      country?: string;
+      referrer?: string;
+      avatarUrl?: string;
+      preferredLanguage?: string;
+      autoTranslate?: boolean;
+      theme?: 'dark' | 'light';
+      followedCharacterIds?: string[];
+      wizardCompleted?: boolean;
+    },
+  ) {
+    const db = getDb();
+
+    // Update profile fields
+    const profileUpdate: Record<string, any> = { updatedAt: new Date() };
+    if (data.displayName !== undefined) profileUpdate.displayName = data.displayName;
+    if (data.country !== undefined) profileUpdate.location = data.country;
+
+    if (Object.keys(profileUpdate).length > 1) {
+      await db
+        .insert(userProfiles)
+        .values({ userId, ...profileUpdate })
+        .onConflictDoUpdate({
+          target: userProfiles.userId,
+          set: profileUpdate,
+        });
+    }
+
+    // Update user-level fields (locale, theme_id on profile)
+    if (data.preferredLanguage !== undefined) {
+      await db.update(users).set({ locale: data.preferredLanguage, updatedAt: new Date() }).where(eq(users.id, userId));
+    }
+    if (data.theme !== undefined) {
+      await db
+        .insert(userProfiles)
+        .values({ userId, themeId: data.theme === 'light' ? 'light' : 'midnight', updatedAt: new Date() } as any)
+        .onConflictDoUpdate({
+          target: userProfiles.userId,
+          set: { themeId: data.theme === 'light' ? 'light' : 'midnight', updatedAt: new Date() } as any,
+        });
+    }
+
+    // Follow suggested characters
+    if (data.followedCharacterIds && data.followedCharacterIds.length > 0) {
+      for (const charId of data.followedCharacterIds) {
+        await db
+          .insert(characterFollows)
+          .values({ userId, characterId: charId })
+          .onConflictDoNothing();
+      }
+    }
+
+    return { saved: true, wizardCompleted: data.wizardCompleted ?? true };
   }
 }

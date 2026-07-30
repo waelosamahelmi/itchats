@@ -20,7 +20,7 @@ export class AuthService {
   }
   async verifyPassword(hash: string, password: string) { return argon2.verify(hash, password); }
 
-  async register(email: string, username: string, password: string) {
+  async register(email: string, username: string, password: string, dateOfBirth?: string, agreedToTerms?: boolean) {
     const pool = getPool();
     const eCheck = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
     if (eCheck.rows.length > 0) throw new UnauthorizedException('Email already registered');
@@ -29,15 +29,39 @@ export class AuthService {
     const pw = await this.hashPassword(password);
 
     const result = await pool.query(
-      `INSERT INTO users (email, username, password_hash, status) VALUES ($1, $2, $3, 'active') RETURNING id, email, username, role`,
-      [email, username, pw],
+      `INSERT INTO users (email, username, password_hash, status, date_of_birth) VALUES ($1, $2, $3, 'active', $4) RETURNING id, email, username, role`,
+      [email, username, pw, dateOfBirth || null],
     );
     const user = result.rows[0] as { id: string; email: string; username: string; role: string };
     if (!user) throw new Error('Failed to create user');
 
+    // Create user profile with metadata
+    await pool.query(
+      `INSERT INTO user_profiles (user_id, display_name, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [user.id, username],
+    );
+
+    // Store terms agreement timestamp in user metadata (we use a separate query)
+    if (agreedToTerms) {
+      await pool.query(
+        `UPDATE users SET updated_at = NOW() WHERE id = $1`,
+        [user.id],
+      );
+    }
+
     await pool.query('INSERT INTO credit_wallets (user_id, balance) VALUES ($1, 1000) ON CONFLICT DO NOTHING', [user.id]);
     const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, ...tokens };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        firstLogin: true,
+        agreedToTerms: agreedToTerms || false,
+      },
+      ...tokens,
+    };
   }
 
   async login(email: string, password: string, deviceInfo?: { userAgent?: string; ip?: string }) {

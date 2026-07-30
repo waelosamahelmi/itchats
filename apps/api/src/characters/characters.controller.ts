@@ -45,6 +45,11 @@ export class CharactersController {
     return this.charactersService.findPublic(Number(page), Number(limit));
   }
 
+  @Get('suggested')
+  async suggested(@Query('limit') limit = '8') {
+    return this.charactersService.findSuggested(Number(limit));
+  }
+
   @Get('search')
   async search(@Query('q') q: string, @Query('page') page = '1', @Query('limit') limit = '20') {
     if (!q || q.trim().length < 2) return { results: [], query: q };

@@ -12,6 +12,7 @@ import {
   type ChatMessage,
   type ConversationMode,
 } from './chatModel';
+import { detectTextLanguage, getCharacterCooldown, setCharacterCooldown, clearCharacterCooldown } from '@/lib/translate';
 
 const API = '/v1';
 
@@ -82,6 +83,11 @@ export default function AIChatPage() {
   const [creditBalance, setCreditBalance] = useState(0);
   const conversationIdRef = useRef<string | null>(null);
 
+  // Language detection & cooldown
+  const [detectedLang, setDetectedLang] = useState<string>('en');
+  const [cooldownUntil, setCooldownUntil] = useState<Date | null>(null);
+  const [cooldownMessage, setCooldownMessage] = useState<string | null>(null);
+
   const headers = useCallback(() => ({ Authorization: `Bearer ${auth.token}` }), [auth.token]);
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
@@ -91,6 +97,29 @@ export default function AIChatPage() {
 
   // Keep conversationId ref in sync for async callbacks
   useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+
+  // Check conversation cooldown
+  useEffect(() => {
+    if (!characterId) return;
+    const cd = getCharacterCooldown(characterId);
+    if (cd) setCooldownUntil(cd);
+  }, [characterId]);
+
+  // Clear expired cooldowns
+  useEffect(() => {
+    if (!cooldownUntil || !characterId) return;
+    if (new Date() >= cooldownUntil) {
+      setCooldownUntil(null);
+      clearCharacterCooldown(characterId);
+    }
+    const interval = setInterval(() => {
+      if (new Date() >= (cooldownUntil)) {
+        setCooldownUntil(null);
+        clearCharacterCooldown(characterId);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [cooldownUntil, characterId]);
 
   // Fetch credit balance
   useEffect(() => {
@@ -283,7 +312,7 @@ export default function AIChatPage() {
 
       // 6. If transcribed, trigger AI response
       if (transcription && characterId) {
-        await sendWithContent(transcription, optimisticId);
+        await sendWithContent(transcription, optimisticId, detectTextLanguage(transcription));
       }
     } catch (err: any) {
       setMessages((current) => current.map((message) =>
@@ -298,13 +327,27 @@ export default function AIChatPage() {
   async function send() {
     const content = input.trim();
     if (!content || !auth.token || busy) return;
+
+    // Check cooldown
+    if (cooldownUntil && new Date() < cooldownUntil) {
+      const mins = Math.ceil((cooldownUntil.getTime() - Date.now()) / 60000);
+      setCooldownMessage(`They need some space. Try again in about ${mins} minute${mins > 1 ? 's' : ''}.`);
+      setTimeout(() => setCooldownMessage(null), 4000);
+      return;
+    }
+
+    // Detect language from user's message
+    const lang = detectTextLanguage(content);
+    setDetectedLang(lang);
+
     setInput('');
-    await sendWithContent(content);
+    await sendWithContent(content, undefined, lang);
   }
 
-  async function sendWithContent(content: string, existingOptimisticId?: string) {
+  async function sendWithContent(content: string, existingOptimisticId?: string, language?: string) {
     if (!auth.token || busy) return;
     const optimisticId = existingOptimisticId ?? crypto.randomUUID();
+    const lang = language || detectTextLanguage(content);
 
     if (!existingOptimisticId) {
       setMessages((current) => [...current, {
@@ -321,7 +364,7 @@ export default function AIChatPage() {
       const response = await fetch(`${API}/ai/chat/stream`, {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ characterId, conversationId, message: content }),
+        body: JSON.stringify({ characterId, conversationId, message: content, detectedLanguage: lang }),
       });
       if (!response.ok || !response.body) throw new Error('Message could not be sent.');
       const reader = response.body.getReader();
@@ -615,10 +658,26 @@ export default function AIChatPage() {
       </section>
 
       <input ref={uploadRef} type="file" accept="image/*" hidden />
+
+      {/* Cooldown message */}
+      {(cooldownMessage || cooldownUntil) && (
+        <div className="px-4 pt-3 pb-1">
+          {cooldownMessage ? (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 text-sm text-amber-400 text-center animate-fade-in">
+              {cooldownMessage}
+            </div>
+          ) : cooldownUntil && new Date() < cooldownUntil ? (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 text-sm text-amber-400 text-center animate-fade-in">
+              They need some space right now. Try again in a few minutes.
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <ChatComposer
         characterName={name}
         value={input}
-        disabled={busy}
+        disabled={busy || (cooldownUntil !== null && new Date() < cooldownUntil)}
         error={error}
         recording={recording}
         recordingDuration={recordingDuration}

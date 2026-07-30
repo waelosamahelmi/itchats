@@ -14,9 +14,14 @@ import {
   createNewPost,
   reactToPostThunk,
   addCommentThunk,
+  setTranslatedPost,
+  setTranslating,
+  clearTranslation,
 } from '@/app/store';
 import { genId, reactionEmojis } from '@/lib/api';
+import { translateText, getLanguageDisplayName, detectTextLanguage, getAutoTranslateSetting } from '@/lib/translate';
 import { Badge } from '@itchats/ui';
+import ProfileWizard from '@/features/auth/ProfileWizard';
 
 // ── Time ago helper ──
 function timeAgo(dateStr: string): string {
@@ -129,6 +134,12 @@ function PostCard({ post }: { post: Post }) {
   const [avatarFailed, setAvatarFailed] = useState(false);
   const nav = useNavigate();
 
+  // Translation state
+  const { language: userLang, autoTranslate, translatedPosts, translating } = useSelector((s: RootState) => s.translation);
+  const isTranslating = translating[post.id] ?? false;
+  const translatedData = translatedPosts[post.id];
+  const [showTranslation, setShowTranslation] = useState(false);
+
   const avatarSrc = avatarFailed || !post.authorAvatar
     ? `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(post.authorName)}`
     : post.authorAvatar;
@@ -193,6 +204,33 @@ function PostCard({ post }: { post: Post }) {
     ));
   };
 
+  const handleTranslate = async () => {
+    if (isTranslating) return;
+    if (translatedData) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+    dispatch(setTranslating(post.id));
+    try {
+      const result = await translateText(post.content, userLang);
+      dispatch(setTranslatedPost({
+        postId: post.id,
+        translatedText: result.translatedText,
+        detectedLanguage: result.detectedSourceLanguage || detectTextLanguage(post.content),
+      }));
+      setShowTranslation(true);
+    } catch {
+      dispatch(clearTranslation(post.id));
+    }
+  };
+
+  // Auto-translate when posts load
+  useEffect(() => {
+    if (autoTranslate && !translatedData && !isTranslating && post.content) {
+      handleTranslate();
+    }
+  }, [autoTranslate, post.id]);
+
   const visibleComments = showAllComments ? comments : comments.slice(0, 2);
   const hasMoreComments = comments.length > 2;
 
@@ -227,13 +265,27 @@ function PostCard({ post }: { post: Post }) {
       {/* Post Content */}
       <div className="px-4 pb-3">
         <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-          {displayContent}
-          {isLongContent && !expandedContent && '...'}
+          {showTranslation && translatedData ? translatedData.translatedText : displayContent}
+          {isLongContent && !expandedContent && !showTranslation && '...'}
         </p>
-        {isLongContent && (
+        {isLongContent && !showTranslation && (
           <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
             {expandedContent ? 'Show less' : 'See more'}
           </button>
+        )}
+        {/* Translation label */}
+        {showTranslation && translatedData && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
+              Translated from {getLanguageDisplayName(translatedData.detectedLanguage)}
+            </span>
+            <button
+              onClick={() => setShowTranslation(false)}
+              className="text-[10px] text-brand-primary hover:underline"
+            >
+              Show original
+            </button>
+          </div>
         )}
       </div>
 
@@ -284,6 +336,13 @@ function PostCard({ post }: { post: Post }) {
         <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5 hover:text-text-secondary transition-colors">
           <Share2 size={16} />
           Share
+        </button>
+        <button
+          onClick={handleTranslate}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${translatedData ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5 hover:text-text-secondary'}`}
+        >
+          <Globe size={16} className={isTranslating ? 'animate-spin' : ''} />
+          {isTranslating ? '...' : translatedData && showTranslation ? 'Original' : 'Translate'}
         </button>
       </div>
 
@@ -739,6 +798,7 @@ export default function FeedPage() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [showStoryCreator, setShowStoryCreator] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -746,6 +806,14 @@ export default function FeedPage() {
       dispatch(fetchStoriesThunk());
     }
   }, [dispatch, user]);
+
+  // Check if wizard should be shown (first login after registration)
+  useEffect(() => {
+    const wizardCompleted = localStorage.getItem('wizardCompleted');
+    if (user?.firstLogin && !wizardCompleted) {
+      setShowWizard(true);
+    }
+  }, [user]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -779,6 +847,20 @@ export default function FeedPage() {
       console.error('Failed to create story:', err);
     }
   };
+
+  // ── Profile Wizard on first login ──
+  if (showWizard) {
+    return (
+      <ProfileWizard
+        onComplete={() => {
+          localStorage.setItem('wizardCompleted', 'true');
+          setShowWizard(false);
+          // Reload user to get updated state
+          dispatch({ type: 'auth/me/pending' } as any);
+        }}
+      />
+    );
+  }
 
   if (!user) {
     return (

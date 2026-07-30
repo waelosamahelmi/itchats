@@ -46,6 +46,8 @@ export interface PersonalityPromptParams {
   loveLanguage?: string; // words of affirmation, physical touch, acts of service, gifts, quality time
   /** Attachment patterns in relationships */
   attachmentStyle?: string; // secure, anxious, avoidant, disorganized/fearful
+  /** Language style for Egyptian Arabic speakers */
+  languageStyle?: 'mixed' | 'arabic_script' | 'franco';
 }
 
 export function buildPersonalityPrompt(params: PersonalityPromptParams): string {

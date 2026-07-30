@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Delete, Post, Param, Body, Req, UseGuards, Inje
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
 import { UsersService } from './users.service';
 import { PostsService } from '../posts/posts.service';
+import { WizardSaveSchema } from '@itchats/contracts';
 
 @Controller('v1/users')
 export class UsersController {
@@ -132,5 +133,13 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   async getFriends(@Param('id') userId: string) {
     return this.usersService.getUserFriends(userId);
+  }
+
+  // ── Profile Wizard ──
+  @Patch('me/wizard')
+  @UseGuards(JwtAuthGuard)
+  async saveWizard(@Req() req: any, @Body() body: unknown) {
+    const data = WizardSaveSchema.parse(body);
+    return this.usersService.saveWizard(req.user.userId, data);
   }
 }

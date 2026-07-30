@@ -1,12 +1,29 @@
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, ArrowLeft, Calendar } from 'lucide-react';
 import { loginUser, registerUser, useAppDispatch } from '@/app/store';
 import type { RootState } from '@/app/store';
 import AnimatedLogo from '@/components/AnimatedLogo';
 
 const API = (import.meta as any).env?.VITE_API_URL || '/v1';
+
+function isAtLeast13(dd: string, mm: string, yyyy: string): boolean {
+  const day = parseInt(dd, 10);
+  const month = parseInt(mm, 10);
+  const year = parseInt(yyyy, 10);
+  if (!day || !month || !year) return false;
+  const dob = new Date(year, month - 1, day);
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age >= 13;
+}
+
+function openLegal(path: string) {
+  window.open(`${window.location.origin}${path}`, '_blank', 'noopener,noreferrer');
+}
 
 export default function AuthPage() {
   const dispatch = useAppDispatch();
@@ -23,6 +40,14 @@ export default function AuthPage() {
   const [localError, setLocalError] = useState('');
   const [googleAvailable, setGoogleAvailable] = useState(false);
 
+  // Birthdate fields
+  const [dobDay, setDobDay] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobYear, setDobYear] = useState('');
+
+  // Terms agreement
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
   useEffect(() => { if (token && user) nav('/', { replace: true }); }, [token, user, nav]);
 
   // Check if Google OAuth is configured
@@ -35,8 +60,21 @@ export default function AuthPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setLocalError('');
-    if (isLogin) { dispatch(loginUser({ email, password })); }
-    else { dispatch(registerUser({ email, username, password })); }
+    if (isLogin) {
+      dispatch(loginUser({ email, password }));
+    } else {
+      // Validate birthdate
+      if (!isAtLeast13(dobDay, dobMonth, dobYear)) {
+        setLocalError('You must be at least 13 years old to sign up');
+        return;
+      }
+      if (!agreedToTerms) {
+        setLocalError('You must agree to the Terms of Service and Privacy Policy');
+        return;
+      }
+      const dateOfBirth = `${dobYear}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`;
+      dispatch(registerUser({ email, username, password, dateOfBirth, agreedToTerms }));
+    }
   };
 
   const handleForgot = async (e: React.FormEvent) => {
@@ -133,10 +171,41 @@ export default function AuthPage() {
             <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="Email" className="flex-1 bg-transparent py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none" required />
           </div>
           {!isLogin && (
-            <div className="glass rounded-2xl flex items-center gap-3 px-4 animate-slide-up focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
-              <User size={17} className="text-text-muted shrink-0" />
-              <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" className="flex-1 bg-transparent py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none" required minLength={3} />
-            </div>
+            <>
+              <div className="glass rounded-2xl flex items-center gap-3 px-4 animate-slide-up focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
+                <User size={17} className="text-text-muted shrink-0" />
+                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" className="flex-1 bg-transparent py-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none" required minLength={3} />
+              </div>
+              <div className="animate-slide-up">
+                <label className="text-xs text-text-muted mb-1.5 block font-medium">Date of Birth</label>
+                <div className="flex gap-2">
+                  <div className="glass rounded-2xl flex items-center px-3 flex-1 focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
+                    <Calendar size={15} className="text-text-muted shrink-0 mr-1.5" />
+                    <input value={dobDay} onChange={e => setDobDay(e.target.value.replace(/\D/g, '').slice(0, 2))} placeholder="DD" className="flex-1 bg-transparent py-3 text-sm text-text-primary placeholder:text-text-muted outline-none text-center" required maxLength={2} />
+                  </div>
+                  <div className="glass rounded-2xl flex items-center px-3 flex-1 focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
+                    <input value={dobMonth} onChange={e => setDobMonth(e.target.value.replace(/\D/g, '').slice(0, 2))} placeholder="MM" className="flex-1 bg-transparent py-3 text-sm text-text-primary placeholder:text-text-muted outline-none text-center" required maxLength={2} />
+                  </div>
+                  <div className="glass rounded-2xl flex items-center px-3 flex-1 focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
+                    <input value={dobYear} onChange={e => setDobYear(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="YYYY" className="flex-1 bg-transparent py-3 text-sm text-text-primary placeholder:text-text-muted outline-none text-center" required maxLength={4} />
+                  </div>
+                </div>
+              </div>
+              <label className="flex items-start gap-2.5 cursor-pointer group animate-slide-up">
+                <input
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={e => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-border-subtle bg-bg-elevated accent-brand-primary cursor-pointer"
+                />
+                <span className="text-xs text-text-muted leading-relaxed">
+                  I agree to the{' '}
+                  <button type="button" onClick={() => openLegal('/legal/terms')} className="text-brand-primary hover:underline font-medium">Terms of Service</button>
+                  {' '}and{' '}
+                  <button type="button" onClick={() => openLegal('/legal/privacy')} className="text-brand-primary hover:underline font-medium">Privacy Policy</button>
+                </span>
+              </label>
+            </>
           )}
           <div className="glass rounded-2xl flex items-center gap-3 px-4 focus-within:ring-2 focus-within:ring-brand-primary/50 transition-all">
             <Lock size={17} className="text-text-muted shrink-0" />
@@ -145,7 +214,7 @@ export default function AuthPage() {
           {isLogin && (
             <button type="button" onClick={() => setForgotMode(true)} className="text-xs text-brand-primary hover:underline ml-1">Forgot password?</button>
           )}
-          <button type="submit" disabled={loading} className="w-full rounded-2xl bg-brand-primary py-3.5 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all accent-glow disabled:opacity-50">
+          <button type="submit" disabled={loading || (!isLogin && !agreedToTerms)} className="w-full rounded-2xl bg-brand-primary py-3.5 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all accent-glow disabled:opacity-50">
             {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
             {!loading && <ArrowRight size={17} />}
           </button>
