@@ -28,7 +28,7 @@ export class AdminDashboardController {
         .from(users).orderBy(sql`${users.createdAt} DESC`).limit(10),
       db.select({ id: characters.id, name: characters.name, createdAt: characters.createdAt, avatarUrl: characters.avatarUrl })
         .from(characters).orderBy(sql`${characters.createdAt} DESC`).limit(10),
-      db.select().from(reports).where(eq(reports.status, 'open')).orderBy(sql`${reports.createdAt} DESC`).limit(5),
+      db.select({ id: reports.id, entityType: reports.entityType, entityId: reports.entityId, reason: reports.reason, status: reports.status, createdAt: reports.createdAt }).from(reports).where(eq(reports.status, 'open')).orderBy(sql`${reports.createdAt} DESC`).limit(5),
       db.select({ id: characters.id, name: characters.name, followerCount: characters.followerCount, avatarUrl: characters.avatarUrl })
         .from(characters).orderBy(sql`${characters.followerCount} DESC`).limit(10),
       db.select({ date: sql<string>`DATE(${users.createdAt})`, cnt: count() })
