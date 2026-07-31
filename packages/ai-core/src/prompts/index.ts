@@ -22,6 +22,7 @@ export { buildSystemPrompt, type SystemPromptParams } from './system.prompt';
 export { buildEmotionPrompt, type EmotionPromptParams } from './emotion.prompt';
 export { buildPersonalityPrompt, type PersonalityPromptParams } from './personality.prompt';
 export { buildMessagingPrompt, type MessagingPromptParams } from './messaging.prompt';
+export { buildRoleplayPrompt, type RoleplayPromptParams } from './roleplay.prompt';
 export { buildMemoryPrompt, buildMemoryExtractionPrompt, type MemoryPromptParams } from './memory.prompt';
 export {
   buildRelationshipPrompt,
@@ -74,6 +75,7 @@ import { buildSystemPrompt, type SystemPromptParams } from './system.prompt';
 import { buildEmotionPrompt, type EmotionPromptParams } from './emotion.prompt';
 import { buildPersonalityPrompt, type PersonalityPromptParams } from './personality.prompt';
 import { buildMessagingPrompt, type MessagingPromptParams } from './messaging.prompt';
+import { buildRoleplayPrompt, type RoleplayPromptParams } from './roleplay.prompt';
 import { buildMemoryPrompt, type MemoryPromptParams } from './memory.prompt';
 import { buildRelationshipPrompt, type RelationshipPromptParams } from './relationship.prompt';
 
@@ -84,15 +86,29 @@ export interface FullChatPromptParams {
   messaging: MessagingPromptParams;
   memory: MemoryPromptParams;
   relationship: RelationshipPromptParams;
+  /** Conversation mode. 'roleplay' swaps the texting-style layer for the immersive roleplay layer. */
+  mode?: 'chat' | 'roleplay';
+  /** Extra params for the roleplay style layer (used when mode === 'roleplay'). */
+  roleplay?: RoleplayPromptParams;
 }
 
 export function buildFullChatPrompt(params: FullChatPromptParams): string {
+  const isRoleplay = (params.mode ?? params.system.conversationMode) === 'roleplay';
+  const styleLayer = isRoleplay
+    ? buildRoleplayPrompt({
+        characterName: params.system.characterName,
+        currentMood: params.system.currentMood,
+        speakingStyle: params.messaging.speakingStyle,
+        ...params.roleplay,
+      })
+    : buildMessagingPrompt(params.messaging);
+
   return [
     buildSystemPrompt(params.system),
     buildEmotionPrompt(params.emotion),
     buildPersonalityPrompt(params.personality),
     buildRelationshipPrompt(params.relationship),
     buildMemoryPrompt(params.memory),
-    buildMessagingPrompt(params.messaging),
+    styleLayer,
   ].join('\n');
 }
