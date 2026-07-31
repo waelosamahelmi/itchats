@@ -70,6 +70,11 @@ async function bootstrap() {
   // webhook route (only there, to avoid double memory for every request) and
   // still hands parsed JSON to the rest of the app.
   const STRIPE_WEBHOOK_PATH = '/v1/billing/webhook';
+  // Fastify ships a built-in application/json parser; it must be removed
+  // before ours can be registered (FST_ERR_CTP_ALREADY_PRESENT otherwise).
+  if (fastify.hasContentTypeParser('application/json')) {
+    fastify.removeContentTypeParser('application/json');
+  }
   fastify.addContentTypeParser(
     'application/json',
     { parseAs: 'buffer' },
