@@ -678,7 +678,15 @@ export async function alibabaImageToImage(request: ImageToImageRequest): Promise
   }
   // Phase 3: Fallback to pure TTI when all ITI models are blocked (e.g. content filter)
   try {
-    const ttiResult = await alibabaTextToImageWithFallback({ prompt: request.prompt, size: '1024*1024' });
+    // Strip ITI-specific reference-image instructions — meaningless for TTI.
+    // The prompt already contains detailed identity descriptions from the character DNA.
+    const ttiPrompt = request.prompt
+      .replace(/use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age across all images[.,]?\s*/gi, '')
+      .replace(/use the reference image[.,]?\s*/gi, '')
+      .trim();
+    const enrichedTtiPrompt = `${ttiPrompt}. photorealistic, consistent identity, same person as described, natural skin texture, one person only, no text, no watermark`;
+
+    const ttiResult = await alibabaTextToImageWithFallback({ prompt: enrichedTtiPrompt, size: '1024*1024' });
     return { url: ttiResult.url, model: `tti-fallback:${ttiResult.usedModel}` };
   } catch (ttiErr: any) {
     tried.push(`tti-fallback: ${ttiErr.message.slice(0, 80)}`);
@@ -779,5 +787,17 @@ export async function alibabaImageToVideo(request: ImageToVideoRequest): Promise
       tried.push(`${m}: no task_id`);
     } catch (err: any) { tried.push(`${m}: ${err.message.slice(0, 80)}`); }
   }
+  // Phase 2: Fallback to pure TTV when all ITV models fail
+  try {
+    const ttvPrompt = request.prompt
+      .replace(/preserve the exact identity, facial geometry, hair, skin tone, and apparent age from the reference image[.,]?\s*/gi, '')
+      .replace(/use the reference image[.,]?\s*/gi, '')
+      .trim();
+    const enrichedTtvPrompt = `${ttvPrompt}. consistent identity, same person as described, natural movement, one person only, no face morphing`;
+    return await alibabaTextToVideo({ prompt: enrichedTtvPrompt });
+  } catch (ttvErr: any) {
+    tried.push(`ttv-fallback: ${ttvErr.message.slice(0, 80)}`);
+  }
+
   throw new Error(`All ITV models exhausted. Tried: ${tried.join(' | ')}`);
 }
