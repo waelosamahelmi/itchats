@@ -6,6 +6,7 @@ export const mediaVisibilityEnum = pgEnum('media_visibility', ['private', 'publi
 export const mediaAssets = pgTable('media_assets', {
   id: uuid('id').primaryKey().defaultRandom(),
   ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+  url: text('url').notNull().default(''),
   visibility: mediaVisibilityEnum('visibility').notNull(),
   storageProvider: text('storage_provider').notNull(),
   bucket: text('bucket').notNull(),
