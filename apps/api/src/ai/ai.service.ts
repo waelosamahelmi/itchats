@@ -670,11 +670,10 @@ export class AiService {
     const db = getDb();
     const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
     if (!char) throw new Error('Character not found');
-    if (!char.avatarUrl) throw new Error('Character has no reference image for selfie generation');
 
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const [version] = await db.select().from(characterVersions)
@@ -694,20 +693,19 @@ export class AiService {
       facialFeatures: char.facialFeatures || undefined,
     }, context || 'casual_front_camera');
 
-    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
-    const result = await alibabaImageToImage({ prompt: selfiePrompt, imageBase64: referenceBase64 });
+    const result = await alibabaTextToImageWithFallback({ prompt: selfiePrompt, size: '1024*1024' });
     if (!result?.url) throw new Error('Selfie generation failed');
 
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, generationType: 'image_to_image', routeKey: 'image.standard',
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
       idempotencyKey: randomUUID(), requestJson: { prompt: selfiePrompt, style: context },
-      responseJson: { url: result.url, model: result.model }, status: 'succeeded', completedAt: new Date(),
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
     }).returning();
 
     await db.insert(usageEvents).values({
-      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
-      imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
-      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
+      imageCount: 1, providerCostUsd: '0.0350', creditsDebited: cost,
+      pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0', credits: cost },
     });
 
     await db.update(creditWallets).set({
@@ -727,11 +725,10 @@ export class AiService {
     const db = getDb();
     const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
     if (!char) throw new Error('Character not found');
-    if (!char.avatarUrl) throw new Error('Character has no reference image for scene selfie generation');
 
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     const [version] = await db.select().from(characterVersions)
@@ -752,20 +749,19 @@ export class AiService {
       facialFeatures: char.facialFeatures || undefined,
     }, sceneDescription);
 
-    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
-    const result = await alibabaImageToImage({ prompt: selfiePrompt, imageBase64: referenceBase64 });
+    const result = await alibabaTextToImageWithFallback({ prompt: selfiePrompt, size: '1024*1024' });
     if (!result?.url) throw new Error('Selfie generation failed');
 
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, generationType: 'image_to_image', routeKey: 'image.standard',
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
       idempotencyKey: randomUUID(), requestJson: { prompt: selfiePrompt, scene: sceneDescription },
-      responseJson: { url: result.url, model: result.model }, status: 'succeeded', completedAt: new Date(),
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
     }).returning();
 
     await db.insert(usageEvents).values({
-      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
-      imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
-      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
+      imageCount: 1, providerCostUsd: '0.0350', creditsDebited: cost,
+      pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0', credits: cost },
     });
 
     await db.update(creditWallets).set({
@@ -786,11 +782,10 @@ export class AiService {
     const db = getDb();
     const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
     if (!char) throw new Error('Character not found');
-    if (!char.avatarUrl) throw new Error('Character has no reference image for enriched image generation');
 
     const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
     const balance = wallet[0]?.balance ?? 0;
-    const cost = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image');
     if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
 
     // Get relationship context
@@ -826,20 +821,19 @@ export class AiService {
       timeOfDay: (char.emotionState as any)?.timeOfDay || undefined,
     });
 
-    const referenceBase64 = await this.fetchReferenceImage(char.avatarUrl);
-    const result = await alibabaImageToImage({ prompt: enrichedPrompt, imageBase64: referenceBase64 });
+    const result = await alibabaTextToImageWithFallback({ prompt: enrichedPrompt, size: '1024*1024' });
     if (!result?.url) throw new Error('Image generation failed — no URL returned');
 
     const [job] = await db.insert(generationJobs).values({
-      userId, characterId, generationType: 'image_to_image', routeKey: 'image.standard',
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
       idempotencyKey: randomUUID(), requestJson: { prompt: enrichedPrompt, rawDescription },
-      responseJson: { url: result.url, model: result.model }, status: 'succeeded', completedAt: new Date(),
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
     }).returning();
 
     await db.insert(usageEvents).values({
-      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'image_to_image',
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
       imageCount: 1, providerCostUsd: '0.035', creditsDebited: cost,
-      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
+      pricingSnapshot: { model: result.usedModel || 'qwen-image-2.0', credits: cost },
     });
 
     await db.update(creditWallets).set({
@@ -858,7 +852,7 @@ export class AiService {
     const prompt = [
       `Short realistic phone video of ${char.name}`,
       style === 'mirror_selfie' ? 'filmed through a mirror, phone naturally visible' : 'front-camera video message, natural handheld motion',
-      'preserve the exact identity, facial geometry, hair, skin tone, and apparent age from the reference image',
+      'consistent identity — same face, facial geometry, hair, skin tone as described',
       char.selfieStyle || char.cameraStyle || 'casual practical lighting',
       'subtle blinking and breathing, natural expression, one person only, no face morphing, no cuts, no text, five seconds',
     ].join(', ');

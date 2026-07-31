@@ -167,7 +167,7 @@ export function buildEnrichedImagePrompt(params: EnrichedImageParams): string {
 
   parts.push(
     'photorealistic, one real person only',
-    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age across all images',
+    'consistent identity — same face, facial geometry, hair, skin tone, and apparent age as described above',
     'natural skin texture with visible pores and slight imperfections',
     'no beauty-filter plastic skin, no text, no watermark, no AI smoothness',
     'anatomically correct, professional photography quality',
@@ -205,7 +205,7 @@ export function buildSelfiePrompt(params: ImagePromptParams, context?: string): 
     selfieStyle || 'casual, natural lighting, looking at camera, modern smartphone selfie quality, slightly grainy',
     wardrobe ? `wearing ${wardrobe}` : '',
     'vertical 9:16 aspect ratio, social media story format, candid authentic feel, no studio lighting, real phone camera quality',
-    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age across all images',
+    'consistent identity — same face, facial geometry, hair, skin tone, and apparent age as described above',
     'one real person only, photorealistic, anatomically correct hands holding phone, natural skin texture with visible pores and slight imperfections, no beauty-filter plastic skin, no text, no watermark, no AI smoothness',
   ].filter(Boolean).join(', ');
 }
@@ -243,7 +243,7 @@ export function buildSceneSelfiePrompt(params: ImagePromptParams, sceneDescripti
     selfieStyle || 'casual, natural lighting, modern smartphone selfie quality',
     wardrobe ? `wearing ${wardrobe}` : '',
     'vertical 9:16 aspect ratio, social media story format, candid authentic feel, no studio lighting, real phone camera quality',
-    'use the supplied reference image as the identity source; preserve the exact same face, facial geometry, hair, skin tone, and apparent age across all images',
+    'consistent identity — same face, facial geometry, hair, skin tone, and apparent age as described above',
     'one real person only, photorealistic, anatomically correct hands holding phone, natural skin texture, no beauty-filter plastic skin, no text, no watermark',
   ].filter(Boolean).join(', ');
 }
