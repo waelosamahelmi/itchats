@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PostsController } from './posts.controller';
+import { SocialShareController } from './social-share.controller';
 import { PostsService } from './posts.service';
 import { LinkPreviewController } from './link-preview.controller';
 import { LinkPreviewService } from './link-preview.service';
@@ -10,7 +11,7 @@ import { HashtagsModule } from '../hashtags/hashtags.module';
 
 @Module({
   imports: [AuthModule, NotificationsModule, AiModule, HashtagsModule],
-  controllers: [PostsController, LinkPreviewController],
+  controllers: [PostsController, SocialShareController, LinkPreviewController],
   providers: [PostsService, LinkPreviewService],
   exports: [PostsService, LinkPreviewService],
 })

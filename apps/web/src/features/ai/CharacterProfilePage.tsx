@@ -4,234 +4,17 @@ import { useSelector } from 'react-redux';
 import {
   ArrowLeft, MessageCircle, Heart, Share2, Flag, MapPin, Sparkles,
   Globe, Lock, Pencil, Ban, Camera, Clock, Users, Star, Image, Plus, Loader2, AlertTriangle,
-  Send, MoreHorizontal,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
-import { reactToPostThunk, addCommentThunk } from '@/app/store';
 import { Badge } from '@itchats/ui';
-import { apiFetch, genId } from '@/lib/api';
-import { timeAgo } from '@/lib/timeAgo';
+import { apiFetch } from '@/lib/api';
+import PostCard from '@/components/PostCard';
+import type { Post } from '@/app/store';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3092/v1';
 
-// ── Character cache for mention rendering ──
-let _charCacheForProfile: Map<string, { id: string; name: string }> | null = null;
-
-async function getCharCache(): Promise<Map<string, { id: string; name: string }>> {
-  if (_charCacheForProfile) return _charCacheForProfile;
-  try {
-    const chars = await apiFetch<any[]>('/characters/discover?page=1&limit=200');
-    _charCacheForProfile = new Map();
-    for (const c of chars) {
-      const handle = (c.handle || c.name.toLowerCase().replace(/\s+/g, '_')).toLowerCase();
-      _charCacheForProfile.set(handle, { id: c.id, name: c.name });
-      const nameKey = c.name.toLowerCase();
-      if (!_charCacheForProfile.has(nameKey)) {
-        _charCacheForProfile.set(nameKey, { id: c.id, name: c.name });
-      }
-    }
-  } catch {
-    _charCacheForProfile = new Map();
-  }
-  return _charCacheForProfile;
-}
-
-function MentionText({ text, className = '' }: { text: string; className?: string }) {
-  const nav = useNavigate();
-  const [cache, setCache] = useState<Map<string, { id: string; name: string }> | null>(null);
-
-  useEffect(() => {
-    getCharCache().then(setCache);
-  }, []);
-
-  const parts = text.split(/(@[\w]+)/g);
-
-  return (
-    <span className={className}>
-      {parts.map((part, i) => {
-        if (part.startsWith('@') && part.length > 1) {
-          const handle = part.slice(1).toLowerCase();
-          const char = cache?.get(handle);
-          if (char) {
-            return (
-              <button
-                key={i}
-                onClick={(e) => { e.stopPropagation(); nav(`/ai/profile/${char.id}`); }}
-                className="text-brand-primary hover:underline cursor-pointer"
-              >
-                @{char.name}
-              </button>
-            );
-          }
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </span>
-  );
-}
-
-// ── Character Post Card (interactive, like feed) ──
-function CharacterPostCard({ post, characterName, characterAvatar }: { post: any; characterName: string; characterAvatar?: string }) {
-  const dispatch = useAppDispatch();
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(post.likeCount || 0);
-  const [comments, setComments] = useState<any[]>([]);
-  const [showComments, setShowComments] = useState(false);
-  const [commentText, setCommentText] = useState('');
-  const [showReactions, setShowReactions] = useState(false);
-  const [expandedContent, setExpandedContent] = useState(false);
-
-  const isLongContent = (post.content?.length || 0) > 200;
-  const displayContent = expandedContent ? post.content : (post.content || '').slice(0, 200);
-
-  const handleLike = () => {
-    const newLiked = !liked;
-    setLiked(newLiked);
-    setLikeCount((c: number) => c + (newLiked ? 1 : -1));
-    dispatch(reactToPostThunk({ postId: post.id, emoji: '❤️' }));
-  };
-
-  const handleAddComment = () => {
-    if (!commentText.trim()) return;
-    dispatch(addCommentThunk({ postId: post.id, content: commentText.trim() }));
-    setComments(c => [...c, {
-      id: genId(), authorName: 'You', authorAvatar: '',
-      content: commentText.trim(), createdAt: new Date().toISOString(),
-      likes: 0, liked: false,
-    }]);
-    setCommentText('');
-  };
-
-  const toggleComments = async () => {
-    if (!showComments && comments.length === 0) {
-      try {
-        const data = await apiFetch<any[]>(`/posts/${post.id}/comments`);
-        setComments(data || []);
-      } catch { }
-    }
-    setShowComments(!showComments);
-  };
-
-  const handleShare = async () => {
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}/ai/profile/${post.authorCharacterId}`);
-    } catch { /* fallback */ }
-  };
-
-  return (
-    <div className="glass rounded-2xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 p-4">
-        <div className="w-10 h-10 rounded-full overflow-hidden bg-bg-elevated shrink-0">
-          {characterAvatar ? (
-            <img src={characterAvatar} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-brand-primary/20">
-              <span className="text-brand-primary font-bold text-sm">{characterName?.[0]}</span>
-            </div>
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-text-primary truncate">{characterName}</span>
-            <Badge variant="ai" className="text-[9px] px-1.5">AI</Badge>
-          </div>
-          <span className="text-[11px] text-text-muted">{post.createdAt ? timeAgo(post.createdAt) : ''}</span>
-        </div>
-        <button className="p-1.5 rounded-full hover:bg-white/5">
-          <MoreHorizontal size={16} className="text-text-muted" />
-        </button>
-      </div>
-
-      {/* Content */}
-      {post.content && (
-        <div className="px-4 pb-3">
-          <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-            <MentionText text={displayContent} />
-            {isLongContent && !expandedContent && '...'}
-          </p>
-          {isLongContent && (
-            <button onClick={() => setExpandedContent(!expandedContent)} className="text-xs text-brand-primary mt-1 hover:underline">
-              {expandedContent ? 'Show less' : 'See more'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Media */}
-      {post.mediaUrl && (
-        <div className="mx-4 mb-3 rounded-xl overflow-hidden">
-          <img src={post.mediaUrl} alt="" className="w-full object-cover max-h-[400px] rounded-xl" />
-        </div>
-      )}
-
-      {/* Stats */}
-      {(likeCount > 0 || (post.commentCount ?? 0) > 0) && (
-        <div className="flex items-center justify-between px-4 py-2 text-[11px] text-text-muted">
-          <span>{likeCount} likes</span>
-          <span>{(post.commentCount ?? 0) + comments.length} comments</span>
-        </div>
-      )}
-
-      {/* Action Bar */}
-      <div className="flex items-center border-t border-border-subtle mx-4 py-1">
-        <button
-          onClick={handleLike}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${liked ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5'}`}
-        >
-          <Heart size={16} className={liked ? 'fill-current text-brand-primary' : ''} />
-          Like
-        </button>
-        <button onClick={toggleComments} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
-          <MessageCircle size={16} />
-          Comment
-        </button>
-        <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
-          <Share2 size={16} />
-          Share
-        </button>
-      </div>
-
-      {/* Comments */}
-      {showComments && (
-        <div className="px-4 pb-3">
-          <div className="border-t border-border-subtle pt-3 space-y-3">
-            {comments.slice(0, 3).map((c: any) => (
-              <div key={c.id} className="flex gap-2.5">
-                <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="rounded-2xl px-3 py-2 bg-bg-elevated inline-block max-w-full">
-                    <span className="text-xs font-semibold text-text-primary">{c.authorName || 'User'}</span>
-                    <p className="text-xs text-text-secondary"><MentionText text={c.content || c.text} /></p>
-                  </div>
-                  <span className="text-[10px] text-text-muted ml-1">{c.createdAt ? timeAgo(c.createdAt) : ''}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2.5 mt-3">
-            <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
-            <div className="flex-1 flex items-center gap-2 glass rounded-full px-3 py-2">
-              <input
-                type="text"
-                placeholder="Write a comment..."
-                value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddComment()}
-                className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted outline-none"
-              />
-              <button onClick={handleAddComment} disabled={!commentText.trim()} className="text-brand-primary disabled:opacity-30">
-                <Send size={14} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+// ── Main CharacterProfilePage ──
 export default function CharacterProfilePage() {
   const { characterId } = useParams<{ characterId: string }>();
   const nav = useNavigate();
@@ -551,11 +334,11 @@ export default function CharacterProfilePage() {
 
             {/* Stats Row */}
             <div className="flex gap-6 mt-3 pb-4 border-b border-border-subtle">
-              {[
+              {([
                 { label: 'Followers', value: stats.followers, icon: Users },
                 { label: 'Posts', value: stats.posts, icon: Image },
-                { label: 'Score', value: stats.score, icon: Star },
-              ].map(s => (
+                ...(stats.score > 0 ? [{ label: 'Score', value: stats.score, icon: Star }] : []),
+              ] as any[]).map(s => (
                 <div key={s.label} className="text-center">
                   <p className="text-lg font-bold text-text-primary">{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</p>
                   <p className="text-[10px] text-text-muted uppercase tracking-wider">{s.label}</p>
@@ -665,7 +448,7 @@ export default function CharacterProfilePage() {
               ) : (
                 <div className="space-y-4">
                   {posts.map((post: any) => (
-                    <CharacterPostCard key={post.id} post={post} characterName={char.name} characterAvatar={char.avatarUrl} />
+                    <PostCard key={post.id} post={post as Post} characterName={char.name} characterAvatar={char.avatarUrl} />
                   ))}
                 </div>
               )}

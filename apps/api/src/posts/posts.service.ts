@@ -923,6 +923,39 @@ export class PostsService {
     return { postId, reactions: counts };
   }
 
+  async getPostById(postId: string) {
+    const db = getDb();
+    const [post] = await db
+      .select({
+        id: posts.id,
+        authorUserId: posts.authorUserId,
+        authorCharacterId: posts.authorCharacterId,
+        content: posts.content,
+        mediaUrl: posts.mediaUrl,
+        mediaType: posts.mediaType,
+        thumbnailUrl: posts.thumbnailUrl,
+        visibility: posts.visibility,
+        likeCount: posts.likeCount,
+        commentCount: posts.commentCount,
+        shareCount: posts.shareCount,
+        createdAt: posts.createdAt,
+        deletedAt: posts.deletedAt,
+        authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
+        authorAvatar: characters.avatarUrl,
+      })
+      .from(posts)
+      .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
+      .leftJoin(users, eq(posts.authorUserId, users.id))
+      .where(
+        and(
+          eq(posts.id, postId),
+          isNull(posts.deletedAt),
+        ),
+      )
+      .limit(1);
+    return post ?? null;
+  }
+
   async getUserPhotos(userId: string) {
     const db = getDb();
     const results = await db

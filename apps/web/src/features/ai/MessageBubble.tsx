@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Check, CheckCheck, Pause, Play } from 'lucide-react';
+import { Check, CheckCheck, Pause, Play, AlertCircle, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ChatMessage } from './chatModel';
 import { ReactionBar } from './ReactionBar';
@@ -13,6 +13,7 @@ export function MessageBubble({
   playing = false,
   onApproveMedia,
   onDenyMedia,
+  onRetry,
   characterName = 'Character',
   characterId,
   creditBalance = 0,
@@ -25,6 +26,7 @@ export function MessageBubble({
   playing?: boolean;
   onApproveMedia?: (message: ChatMessage) => void;
   onDenyMedia?: (message: ChatMessage) => void;
+  onRetry?: (message: ChatMessage) => void;
   characterName?: string;
   characterId?: string;
   creditBalance?: number;
@@ -220,8 +222,26 @@ export function MessageBubble({
         )}
         {isUser && (
           <span className={`delivery-state delivery-${message.delivery}`} aria-label={message.delivery}>
-            {message.delivery === 'seen' || message.delivery === 'delivered'
-              ? <CheckCheck size={13} /> : <Check size={13} />}
+            {message.delivery === 'failed' ? (
+              <button
+                onClick={() => onRetry?.(message)}
+                className="text-danger hover:text-red-400 transition-colors flex items-center gap-1"
+                title="Tap to retry"
+              >
+                <AlertCircle size={13} />
+                <span className="text-[10px]">Retry</span>
+              </button>
+            ) : message.delivery === 'seen' ? (
+              <CheckCheck size={13} className="text-brand-primary" />
+            ) : message.delivery === 'delivered' ? (
+              <CheckCheck size={13} className="text-text-muted" />
+            ) : message.delivery === 'sent' ? (
+              <Check size={13} className="text-text-muted" />
+            ) : message.delivery === 'sending' ? (
+              <span className="w-3 h-3 rounded-full border border-text-muted animate-pulse" />
+            ) : (
+              <Check size={13} className="text-text-muted" />
+            )}
           </span>
         )}
       </div>

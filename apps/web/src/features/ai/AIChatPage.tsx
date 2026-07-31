@@ -97,6 +97,8 @@ export default function AIChatPage() {
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [creditBalance, setCreditBalance] = useState(0);
   const conversationIdRef = useRef<string | null>(null);
+  const retryCountRef = useRef<Map<string, number>>(new Map());
+  const MAX_RETRIES = 3;
 
   // Language detection & cooldown
   const [detectedLang, setDetectedLang] = useState<string>('en');
@@ -232,6 +234,33 @@ export default function AIChatPage() {
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [auth.token, characterId, headers]);
+
+  // Mark conversation as read when opened
+  useEffect(() => {
+    if (!conversationId || !auth.token) return;
+    fetch(`${API}/conversations/${conversationId}/read`, {
+      method: 'POST',
+      headers: headers(),
+    }).catch(() => {});
+  }, [conversationId, auth.token, headers]);
+
+  // ── Retry failed message ──
+  const handleRetry = useCallback((msg: ChatMessage) => {
+    const retries = retryCountRef.current.get(msg.id) ?? 0;
+    if (retries >= MAX_RETRIES) return;
+
+    retryCountRef.current.set(msg.id, retries + 1);
+
+    // Reset delivery to sending and re-send
+    setMessages((current) =>
+      current.map((m) => (m.id === msg.id ? { ...m, delivery: 'sending' as const } : m)),
+    );
+
+    // Re-send the message content
+    if (msg.kind === 'text' && msg.text) {
+      void sendWithContent(msg.text, msg.id, detectedLang);
+    }
+  }, [detectedLang]);
 
   async function updateMode(nextMode: ConversationMode) {
     const previous = mode;
@@ -442,6 +471,10 @@ export default function AIChatPage() {
         body: JSON.stringify({ characterId, conversationId, message: content, detectedLanguage: lang }),
       });
       if (!response.ok || !response.body) throw new Error('Message could not be sent.');
+      // Transition to 'sent' once API accepts the message
+      setMessages((current) =>
+        current.map((m) => (m.id === optimisticId ? { ...m, delivery: 'sent' as const } : m)),
+      );
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -969,6 +1002,7 @@ export default function AIChatPage() {
             playing={playingId === message.id}
             onApproveMedia={handleApproveMedia}
             onDenyMedia={handleDenyMedia}
+            onRetry={handleRetry}
             characterName={name}
             characterId={characterId || undefined}
             creditBalance={creditBalance}

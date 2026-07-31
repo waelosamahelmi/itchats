@@ -268,9 +268,10 @@ export class AiController {
   @UseGuards(JwtAuthGuard)
   async generateCharacterAvatar(@Param('characterId') characterId: string, @Req() req: any) {
     try {
-      return await this.characterCreationService.generateProfilePicture(characterId);
-    } catch {
-      return safeAiError('Avatar generation failed. Please try again.');
+      const result = await this.characterCreationService.generateProfilePicture(characterId);
+      return result;
+    } catch (err: any) {
+      return safeAiError(err?.message || 'Avatar generation failed. Please try again.');
     }
   }
 

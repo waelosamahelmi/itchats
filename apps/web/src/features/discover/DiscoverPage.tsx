@@ -40,11 +40,13 @@ function CharacterCard({ char, index }: { char: Character; index: number }) {
             <span className="text-[9px] font-medium text-text-primary">Online</span>
           </div>
         )}
-        {/* Score badge */}
-        <div className="absolute top-3 left-3 glass rounded-full px-2 py-0.5 flex items-center gap-1">
-          <Star size={10} className="text-social-warm fill-current" />
-          <span className="text-[9px] font-bold text-text-primary">{char.score ?? '—'}</span>
-        </div>
+        {/* Score badge — only show if score is available */}
+        {(char.score != null && Number(char.score) > 0) && (
+          <div className="absolute top-3 left-3 glass rounded-full px-2 py-0.5 flex items-center gap-1" title="Character score based on community engagement">
+            <Star size={10} className="text-social-warm fill-current" />
+            <span className="text-[9px] font-bold text-text-primary">{char.score}</span>
+          </div>
+        )}
       </div>
 
       {/* Info */}
