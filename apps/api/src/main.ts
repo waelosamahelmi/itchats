@@ -37,7 +37,12 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ logger: config.NODE_ENV !== 'production', bodyLimit: 50 * 1024 * 1024 }),
-    { logger: config.LOG_LEVEL === 'debug' ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error', 'warn', 'log'] },
+    {
+      logger: config.LOG_LEVEL === 'debug' ? ['error', 'warn', 'log', 'debug', 'verbose'] : ['error', 'warn', 'log'],
+      // Nest registers the JSON body parser itself during init; rawBody:true makes
+      // it keep the raw buffer on req.rawBody (needed for Stripe webhook HMAC).
+      rawBody: true,
+    },
   );
 
   const { default: helmet } = await import('@fastify/helmet');
@@ -65,30 +70,10 @@ async function bootstrap() {
   // Manual CORS — handles all requests including SSE raw writes
   const fastify = app.getHttpAdapter().getInstance();
 
-  // Stripe webhook signature verification requires the RAW request body.
-  // Replace the default JSON parser with one that keeps the raw buffer for the
-  // webhook route (only there, to avoid double memory for every request) and
-  // still hands parsed JSON to the rest of the app.
-  const STRIPE_WEBHOOK_PATH = '/v1/billing/webhook';
-  // Fastify ships a built-in application/json parser; it must be removed
-  // before ours can be registered (FST_ERR_CTP_ALREADY_PRESENT otherwise).
-  if (fastify.hasContentTypeParser('application/json')) {
-    fastify.removeContentTypeParser('application/json');
-  }
-  fastify.addContentTypeParser(
-    'application/json',
-    { parseAs: 'buffer' },
-    (req: any, body: Buffer, done: (err: Error | null, result?: unknown) => void) => {
-      if (req.url === STRIPE_WEBHOOK_PATH || req.url?.startsWith(`${STRIPE_WEBHOOK_PATH}?`)) {
-        req.rawBody = body;
-      }
-      try {
-        done(null, body.length > 0 ? JSON.parse(body.toString('utf8')) : {});
-      } catch (err) {
-        done(err as Error, undefined);
-      }
-    },
-  );
+  // Stripe webhook raw body is provided by Nest's rawBody:true option above
+  // (available on req.rawBody in the webhook controller). Registering a custom
+  // application/json parser here would collide with the one Nest registers
+  // during init (FST_ERR_CTP_ALREADY_PRESENT), so no custom parser is used.
 
   // Multipart uploads (voice notes, avatars). attachFieldsToBody keeps files
   // buffered on req.body so Nest controllers can read them via req.body.<field>.
