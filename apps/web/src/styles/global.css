@@ -566,7 +566,119 @@ html.light .voice-call-btn:hover {
 .chat-auth-required { display:grid; place-items:center; height:100%; color:#938d88; }
 @media (min-width:900px) { .real-chat-shell { max-width:56rem; margin:0 auto; border-inline:1px solid rgba(255,255,255,.05); } }
 
-/* ── Media request confirmation card ── */
+/* ── Canvas loading placeholder for in-progress media generation ── */
+.media-canvas-placeholder {
+  position: relative;
+  width: 100%;
+  max-width: 18rem;
+  aspect-ratio: 4 / 5;
+  border-radius: 1rem .3rem 1rem 1rem;
+  overflow: hidden;
+  background: #1b1a1d;
+  animation: fade-in .24s ease-out;
+}
+.media-canvas-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 25%, rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0.06) 50%, rgba(255, 255, 255, 0.04) 55%, transparent 75%);
+  background-size: 200% 100%;
+  animation: canvas-shimmer 2s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes canvas-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.media-canvas-placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.03) 2px,
+    rgba(255, 255, 255, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 2;
+  animation: canvas-flicker 3s ease-in-out infinite;
+}
+@keyframes canvas-flicker {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+.media-canvas-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
+  z-index: 3;
+  padding: 1rem;
+}
+.media-canvas-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.3);
+  animation: canvas-icon-pulse 1.8s ease-in-out infinite;
+}
+@keyframes canvas-icon-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.05); opacity: 0.7; }
+}
+.media-canvas-label {
+  font-size: .82rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  line-height: 1.4;
+  animation: canvas-text-fade 2s ease-in-out infinite;
+}
+.media-canvas-label strong {
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 600;
+}
+@keyframes canvas-text-fade {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.8; }
+}
+
+/* Light mode canvas placeholder */
+html.light .media-canvas-placeholder {
+  background: #e8e8f0;
+}
+html.light .media-canvas-shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(0, 0, 0, 0.03) 45%, rgba(0, 0, 0, 0.05) 50%, rgba(0, 0, 0, 0.03) 55%, transparent 75%);
+  background-size: 200% 100%;
+}
+html.light .media-canvas-placeholder::after {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+}
+html.light .media-canvas-icon {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.3);
+}
+html.light .media-canvas-label {
+  color: rgba(0, 0, 0, 0.4);
+}
+html.light .media-canvas-label strong {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* ── Media request card (legacy — kept for backward compatibility) ── */
 .media-request-card {
   padding: .85rem 1rem;
   border-radius: 1rem .3rem 1rem 1rem;
@@ -597,9 +709,6 @@ html.light .voice-call-btn:hover {
 }
 .media-request-insufficient {
   color: #fbbf24;
-}
-.media-request-insufficient::before {
-  content: '⚠️ ';
 }
 .media-request-actions {
   display: flex;

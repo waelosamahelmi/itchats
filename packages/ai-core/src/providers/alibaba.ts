@@ -676,6 +676,14 @@ export async function alibabaImageToImage(request: ImageToImageRequest): Promise
       }
     }
   }
+  // Phase 3: Fallback to pure TTI when all ITI models are blocked (e.g. content filter)
+  try {
+    const ttiResult = await alibabaTextToImageWithFallback({ prompt: request.prompt, size: '1024*1024' });
+    return { url: ttiResult.url, model: `tti-fallback:${ttiResult.usedModel}` };
+  } catch (ttiErr: any) {
+    tried.push(`tti-fallback: ${ttiErr.message.slice(0, 80)}`);
+  }
+
   throw new Error(`All ITI models exhausted. Tried: ${tried.join(' | ')}`);
 }
 

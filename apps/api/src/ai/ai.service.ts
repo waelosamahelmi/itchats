@@ -228,11 +228,6 @@ export class AiService {
         maxTokens: 200,
       })) {
         fullResponse += chunk;
-        try {
-          yield { type: 'chunk', content: chunk };
-        } catch {
-          // Client disconnected mid-stream — continue accumulating for background save
-        }
       }
     } catch (err: any) {
       // Provider error — only fail if we have NO response at all
@@ -252,17 +247,20 @@ export class AiService {
       // Parse structured output if available
       const { structured, rawText } = parseStructuredChatOutput(fullResponse);
 
-      // Extract the speech content for DB storage
+      // Extract ALL speech parts' content, joining multi-part responses
       let cleanContent = rawText;
       if (structured) {
-        // Use the first speech part as the primary content
-        const speechPart = structured.parts.find(p => p.type === 'speech');
-        if (speechPart?.content) {
-          cleanContent = speechPart.content;
-        } else {
-          // Fallback to raw text without media markers
-          cleanContent = rawText;
+        const speechParts = structured.parts.filter(p => p.type === 'speech');
+        if (speechParts.length > 0) {
+          cleanContent = speechParts.map(p => p.content).filter(Boolean).join('\n');
         }
+      }
+
+      // Yield cleaned content (no raw JSON) to client
+      try {
+        yield { type: 'chunk', content: cleanContent || fullResponse };
+      } catch {
+        // Client disconnected — continue
       }
 
       const [aiMsg] = await db.insert(messages).values({
@@ -871,7 +869,7 @@ export class AiService {
   private async fetchReferenceImage(url: string) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Invalid character reference image');
-    const response = await fetch(parsed, { signal: AbortSignal.timeout(15_000) });
+    const response = await fetch(parsed, { signal: AbortSignal.timeout(60_000) });
     if (!response.ok) throw new Error('Character reference image could not be loaded');
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.startsWith('image/')) throw new Error('Character reference is not an image');

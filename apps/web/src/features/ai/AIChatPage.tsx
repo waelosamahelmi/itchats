@@ -525,29 +525,13 @@ export default function AIChatPage() {
             }]);
           }
           if (payload.type === 'media_request') {
-            // Check if user has auto-approve enabled for this character
+            // Auto-approve all media requests immediately — no approval dialog
             const autoApproveKey = `media_auto_approve_${characterId}`;
-            const autoApprove = localStorage.getItem(autoApproveKey) === 'true';
-            if (autoApprove) {
-              // Auto-approve: call the approve endpoint immediately using the conversationId from the event
-              const reqId = payload.requestId as string;
-              const cid = (payload.conversationId as string) || conversationIdRef.current;
-              if (cid) {
-                approveMediaRequest(reqId, true, cid).catch(() => {});
-              }
-            } else {
-              // Show confirmation card in chat
-              setMessages((current) => [...current, {
-                id: crypto.randomUUID(), sender: 'character', kind: 'media_request',
-                text: payload.mediaType === 'selfie'
-                  ? `📸 ${name} wants to send you a selfie`
-                  : `📸 ${name} wants to send an image: "${payload.mediaPrompt ?? ''}"`,
-                createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
-                mediaRequestId: payload.requestId as string,
-                estimatedCredits: payload.estimatedCredits as number,
-                mediaPrompt: payload.mediaPrompt as string,
-                mediaRequestType: payload.mediaType as 'selfie' | 'image',
-              }]);
+            localStorage.setItem(autoApproveKey, 'true');
+            const reqId = payload.requestId as string;
+            const cid = (payload.conversationId as string) || conversationIdRef.current;
+            if (cid) {
+              approveMediaRequest(reqId, true, cid).catch(() => {});
             }
           }
           if (payload.type === 'video') {
@@ -642,67 +626,21 @@ export default function AIChatPage() {
           setCreditBalance((b) => Math.max(0, b - result.creditsUsed));
         }
       } else if (result.status === 'queued' && result.jobId) {
-        // Async path: poll for job completion
-        const placeholderId = crypto.randomUUID();
-        const mediaLabel = result.mediaType === 'selfie' ? 'a selfie' : result.mediaType === 'image' ? 'an image' : 'a video';
+        // Async path: store job for background recovery, poll for completion
+        const mediaType = result.mediaType || 'image';
         const mediaPrompt = result.mediaPrompt || '';
+        storeMediaJob(result.jobId, { characterName: name, mediaType, mediaPrompt });
+
+        const placeholderId = crypto.randomUUID();
+        const mediaLabel = mediaType === 'selfie' ? 'a selfie' : mediaType === 'image' ? 'an image' : 'a video';
         setMessages((current) => [...current, {
           id: placeholderId, sender: 'character', kind: 'media_generating',
           text: `${name} wants to send you ${mediaLabel}${mediaPrompt ? `: "${mediaPrompt}"` : ''}`,
           createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
         }]);
 
-        // Start polling in background
-        const maxPolls = 60;
-        let resolved = false;
-        for (let i = 0; i < maxPolls && !resolved; i++) {
-          await new Promise((r) => setTimeout(r, 2000));
-          try {
-            const statusRes = await fetch(`${API}/ai/chat/media/status/${result.jobId}`, {
-              headers: headers(),
-            });
-            if (!statusRes.ok) continue;
-            const job = await statusRes.json();
-
-            if (job.status === 'succeeded' && job.url) {
-              resolved = true;
-              setMessages((current) => [
-                ...current.filter((m) => m.id !== placeholderId),
-                {
-                  id: crypto.randomUUID(), sender: 'character', kind: 'image',
-                  text: result.mediaType === 'selfie' ? `${name} sent a selfie` : `${name} sent an image`,
-                  mediaUrl: job.url, createdAt: new Date().toISOString(),
-                  delivery: 'delivered', reactions: [],
-                },
-              ]);
-              if (job.creditsUsed) {
-                setCreditBalance((b) => Math.max(0, b - job.creditsUsed));
-              }
-            } else if (job.status === 'failed') {
-              resolved = true;
-              setMessages((current) => [
-                ...current.filter((m) => m.id !== placeholderId),
-                {
-                  id: crypto.randomUUID(), sender: 'character', kind: 'system',
-                  text: `⚠️ ${name} couldn't send that ${result.mediaType === 'selfie' ? 'selfie' : 'image'}${job.error ? `: ${job.error}` : ''}`,
-                  createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
-                },
-              ]);
-            }
-          } catch {
-            // Network error, continue polling
-          }
-        }
-        if (!resolved) {
-          setMessages((current) => [
-            ...current.filter((m) => m.id !== placeholderId),
-            {
-              id: crypto.randomUUID(), sender: 'character', kind: 'system',
-              text: `⏰ ${name} is still working on that. It may appear shortly.`,
-              createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
-            },
-          ]);
-        }
+        // Start polling in background (non-blocking, survives navigation via localStorage)
+        pollMediaGeneration(result.jobId, placeholderId, mediaType, mediaPrompt, name);
       } else if (result.status === 'failed') {
         setError(result.message || 'Media generation failed. Please try again.');
       }
@@ -712,16 +650,161 @@ export default function AIChatPage() {
     }
   }
 
+  // ── Media job storage (survives navigation for background recovery) ──
+  const STORAGE_KEY = `media_jobs_${characterId}`;
+
+  function storeMediaJob(jobId: string, info: { characterName: string; mediaType: string; mediaPrompt: string }) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      stored.push({ jobId, ...info, startedAt: Date.now() });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+    } catch { /* quota exceeded or corrupt — ignore */ }
+  }
+
+  function removeMediaJob(jobId: string) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      const filtered = stored.filter((j: any) => j.jobId !== jobId);
+      if (filtered.length === 0) localStorage.removeItem(STORAGE_KEY);
+      else localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    } catch { /* ignore */ }
+  }
+
+  /** Reusable polling loop for a media generation job. Stores result in messages state on completion. */
+  async function pollMediaGeneration(
+    jobId: string,
+    placeholderId: string,
+    mediaType: string,
+    mediaPrompt: string,
+    charName: string,
+  ) {
+    const maxPolls = 60;
+    let resolved = false;
+    for (let i = 0; i < maxPolls && !resolved; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const statusRes = await fetch(`${API}/ai/chat/media/status/${jobId}`, {
+          headers: headers(),
+        });
+        if (!statusRes.ok) continue;
+        const job = await statusRes.json();
+
+        if (job.status === 'succeeded' && job.url) {
+          resolved = true;
+          removeMediaJob(jobId);
+          setMessages((current) => [
+            ...current.filter((m) => m.id !== placeholderId),
+            {
+              id: crypto.randomUUID(), sender: 'character', kind: 'image',
+              text: mediaType === 'selfie' ? `${charName} sent a selfie` : `${charName} sent an image`,
+              mediaUrl: job.url, createdAt: new Date().toISOString(),
+              delivery: 'delivered', reactions: [],
+            },
+          ]);
+          if (job.creditsUsed) {
+            setCreditBalance((b) => Math.max(0, b - job.creditsUsed));
+          }
+        } else if (job.status === 'failed') {
+          resolved = true;
+          removeMediaJob(jobId);
+          setMessages((current) => [
+            ...current.filter((m) => m.id !== placeholderId),
+            {
+              id: crypto.randomUUID(), sender: 'character', kind: 'system',
+              text: `⚠️ ${charName} couldn't send that ${mediaType === 'selfie' ? 'selfie' : 'image'}${job.error ? `: ${job.error}` : ''}`,
+              createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+            },
+          ]);
+        }
+      } catch {
+        // Network error, continue polling
+      }
+    }
+    if (!resolved) {
+      removeMediaJob(jobId);
+      setMessages((current) => [
+        ...current.filter((m) => m.id !== placeholderId),
+        {
+          id: crypto.randomUUID(), sender: 'character', kind: 'system',
+          text: `⏰ ${charName} is still working on that. It may appear shortly.`,
+          createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+        },
+      ]);
+    }
+  }
+
+  // Background recovery: resume polling for jobs that were in-flight when the user
+  // navigated away or closed the app.
+  useEffect(() => {
+    if (loading || !characterId) return;
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const jobs = JSON.parse(stored) as Array<{ jobId: string; characterName: string; mediaType: string; mediaPrompt: string; startedAt: number }>;
+      if (jobs.length === 0) return;
+      // Clear storage immediately to avoid duplicate polling, then handle each job
+      localStorage.removeItem(STORAGE_KEY);
+      for (const job of jobs) {
+        // Abandon jobs older than 10 minutes (they've timed out on the server)
+        if (Date.now() - job.startedAt > 600000) continue;
+        void (async () => {
+          try {
+            const statusRes = await fetch(`${API}/ai/chat/media/status/${job.jobId}`, {
+              headers: headers(),
+            });
+            if (!statusRes.ok) {
+              // Re-store so we retry next time
+              storeMediaJob(job.jobId, { characterName: job.characterName, mediaType: job.mediaType, mediaPrompt: job.mediaPrompt });
+              return;
+            }
+            const status = await statusRes.json();
+            if (status.status === 'succeeded' && status.url) {
+              // Image completed while away — may already be in history, add if not
+              setMessages((current) => {
+                const alreadyExists = current.some((m) => m.mediaUrl === status.url);
+                if (alreadyExists) return current;
+                return [...current, {
+                  id: crypto.randomUUID(), sender: 'character', kind: 'image',
+                  text: job.mediaType === 'selfie' ? `${job.characterName} sent a selfie` : `${job.characterName} sent an image`,
+                  mediaUrl: status.url, createdAt: new Date().toISOString(),
+                  delivery: 'delivered', reactions: [],
+                }];
+              });
+              if (status.creditsUsed) {
+                setCreditBalance((b) => Math.max(0, b - status.creditsUsed));
+              }
+            } else if (status.status === 'failed') {
+              // Job failed — nothing to show, just clean up
+            } else {
+              // Still processing — create placeholder and resume polling
+              const placeholderId = crypto.randomUUID();
+              setMessages((current) => [...current, {
+                id: placeholderId, sender: 'character', kind: 'media_generating',
+                text: `${job.characterName} is sending you ${job.mediaType === 'selfie' ? 'a selfie' : 'an image'}${job.mediaPrompt ? `: "${job.mediaPrompt}"` : ''}`,
+                createdAt: new Date().toISOString(), delivery: 'delivered', reactions: [],
+              }]);
+              // Re-store job so polling completion can clean it up
+              storeMediaJob(job.jobId, { characterName: job.characterName, mediaType: job.mediaType, mediaPrompt: job.mediaPrompt });
+              pollMediaGeneration(job.jobId, placeholderId, job.mediaType, job.mediaPrompt, job.characterName);
+            }
+          } catch {
+            // Network unreachable — re-store for next time
+            storeMediaJob(job.jobId, { characterName: job.characterName, mediaType: job.mediaType, mediaPrompt: job.mediaPrompt });
+          }
+        })();
+      }
+    } catch { localStorage.removeItem(STORAGE_KEY); }
+  }, [loading, characterId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Media request approve/deny handlers (used for auto-approve flow only) ──
   function handleApproveMedia(msg: ChatMessage) {
     if (!msg.mediaRequestId) return;
-    // Remove the media request card from messages
     setMessages((current) => current.filter((m) => m.id !== msg.id));
     approveMediaRequest(msg.mediaRequestId, true);
   }
 
   function handleDenyMedia(msg: ChatMessage) {
     if (!msg.mediaRequestId) return;
-    // Remove the media request card from messages
     setMessages((current) => current.filter((m) => m.id !== msg.id));
     approveMediaRequest(msg.mediaRequestId, false);
   }
@@ -1000,8 +1083,6 @@ export default function AIChatPage() {
             onPlay={playVoice}
             onPlaybackEnd={handlePlaybackEnd}
             playing={playingId === message.id}
-            onApproveMedia={handleApproveMedia}
-            onDenyMedia={handleDenyMedia}
             onRetry={handleRetry}
             characterName={name}
             characterId={characterId || undefined}
