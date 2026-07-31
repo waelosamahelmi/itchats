@@ -155,7 +155,7 @@ export class StorySchedulerService {
           mediaType,
           generated: 'true' as any,
           publishedAt: new Date(),
-          expiresAt: new Date(Date.now() + 24 * 3600000),
+          expiresAt: new Date(Date.now() + 72 * 3600000),
         } as any).returning();
 
         await this.billingService.debitWallet(char.ownerUserId, storyCost, 'auto-story', 'story', story!.id);

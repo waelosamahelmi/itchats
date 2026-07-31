@@ -18,6 +18,7 @@ import {
 } from './chatModel';
 import { detectTextLanguage, getCharacterCooldown, setCharacterCooldown, clearCharacterCooldown } from '@/lib/translate';
 import { t } from '@/lib/i18n';
+import { RelationshipRing, type RelationshipInfo } from './RelationshipRing';
 
 const API = '/v1';
 
@@ -79,7 +80,7 @@ export default function AIChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [mode, setMode] = useState<ConversationMode>('chat');
-  const [relationship, setRelationship] = useState<{ level: number; label: string } | null>(null);
+  const [relationship, setRelationship] = useState<RelationshipInfo | null>(null);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,10 +89,12 @@ export default function AIChatPage() {
   const [playingId, setPlayingId] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef<number>(0);
+  /** Pending voice-note blobs kept for retry after a failed upload. */
+  const voiceBlobsRef = useRef<Map<string, { blob: Blob; durationMs: number }>>(new Map());
 
   const [recording, setRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -257,7 +260,15 @@ export default function AIChatPage() {
     );
 
     // Re-send the message content
-    if (msg.kind === 'text' && msg.text) {
+    if (msg.kind === 'voice_note' || msg.kind === 'audio') {
+      const pending = voiceBlobsRef.current.get(msg.id);
+      if (pending) {
+        void sendVoiceNote(pending.blob, msg.id, pending.durationMs);
+      } else {
+        // Blob is gone (e.g. page refreshed) — nothing to re-upload
+        setMessages((current) => current.map((m) => (m.id === msg.id ? { ...m, delivery: 'failed' as const } : m)));
+      }
+    } else if (msg.kind === 'text' && msg.text) {
       void sendWithContent(msg.text, msg.id, detectedLang);
     }
   }, [detectedLang]);
@@ -301,8 +312,9 @@ export default function AIChatPage() {
 
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        const durationMs = recordingStartRef.current > 0 ? Date.now() - recordingStartRef.current : 0;
         const blob = new Blob(chunksRef.current, { type: mimeType });
-        if (blob.size > 0) sendVoiceNote(blob);
+        if (blob.size > 0) void sendVoiceNote(blob, undefined, durationMs);
       };
 
       recorder.onerror = () => {
@@ -311,6 +323,7 @@ export default function AIChatPage() {
       };
 
       recorder.start(100); // collect data every 100ms
+      recordingStartRef.current = Date.now();
       setRecording(true);
       setRecordingDuration(0);
       recordingTimerRef.current = setInterval(() => {
@@ -343,80 +356,70 @@ export default function AIChatPage() {
     }
   }
 
-  async function sendVoiceNote(audioBlob: Blob) {
+  async function sendVoiceNote(audioBlob: Blob, existingOptimisticId?: string, durationMsArg?: number) {
     if (!auth.token || !audioBlob || audioBlob.size === 0) return;
-    const optimisticId = crypto.randomUUID();
-    const blobUrl = URL.createObjectURL(audioBlob);
+    const optimisticId = existingOptimisticId ?? crypto.randomUUID();
+    const durationMs = durationMsArg ?? voiceBlobsRef.current.get(optimisticId)?.durationMs ?? 0;
+    voiceBlobsRef.current.set(optimisticId, { blob: audioBlob, durationMs });
 
-    setMessages((current) => [...current, {
-      id: optimisticId, sender: 'user', kind: 'voice_note',
-      text: 'Voice note', mediaUrl: blobUrl,
-      createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
-    }]);
+    if (!existingOptimisticId) {
+      const blobUrl = URL.createObjectURL(audioBlob);
+      setMessages((current) => [...current, {
+        id: optimisticId, sender: 'user', kind: 'voice_note',
+        text: 'Voice note', mediaUrl: blobUrl, durationMs,
+        createdAt: new Date().toISOString(), delivery: 'sending', reactions: [],
+      }]);
+    }
 
     try {
-      // 1. Get upload URL
-      const uploadRes = await fetch(`${API}/media/voice-note-upload-url`, {
-        method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileSize: audioBlob.size }),
-      });
-      if (!uploadRes.ok) throw new Error('Failed to prepare voice upload.');
-      const { uploadUrl, mediaAssetId } = await uploadRes.json();
+      // Single multipart upload: stores the file, transcribes it, and persists
+      // the voice_note message row server-side before we trigger the AI reply.
+      const form = new FormData();
+      form.append('audio', audioBlob, `voice-note-${Date.now()}.webm`);
+      if (characterId) form.append('characterId', characterId);
+      if (conversationIdRef.current) form.append('conversationId', conversationIdRef.current);
+      if (durationMs > 0) form.append('durationMs', String(Math.round(durationMs)));
 
-      // 2. Upload audio blob
-      const uploadBlob = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': audioBlob.type },
-        body: audioBlob,
+      const response = await fetch(`${API}/media/voice-notes`, {
+        method: 'POST',
+        headers: headers(), // no Content-Type — the browser sets the multipart boundary
+        body: form,
       });
-      if (!uploadBlob.ok && uploadBlob.status !== 200) {
-        // If S3 upload fails in dev mode, use data URL directly
-        throw new Error('Voice upload failed.');
+      if (!response.ok) throw new Error('Voice note could not be uploaded.');
+      const result = await response.json() as {
+        mediaAssetId: string; playbackUrl: string; durationMs: number;
+        transcription: string | null; messageId: string | null; conversationId: string | null;
+      };
+      if (!result.playbackUrl) throw new Error('Voice note upload returned no playback URL.');
+
+      if (result.conversationId && !conversationIdRef.current) {
+        conversationIdRef.current = result.conversationId;
+        setConversationId(result.conversationId);
       }
 
-      // 3. Confirm upload
-      await fetch(`${API}/media/confirm-upload`, {
-        method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaAssetId }),
-      }).catch(() => {});
+      const transcription = result.transcription?.trim() || '';
 
-      // 4. Transcribe via ASR
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = (reader.result as string).split(',')[1];
-          if (result) resolve(result);
-          else reject(new Error('Empty audio data'));
+      // Swap the blob: URL for the durable server URL
+      setMessages((current) => current.map((message) => {
+        if (message.id !== optimisticId) return message;
+        if (message.mediaUrl?.startsWith('blob:')) URL.revokeObjectURL(message.mediaUrl);
+        return {
+          ...message,
+          id: result.messageId ?? message.id,
+          text: transcription || 'Voice note',
+          mediaUrl: result.playbackUrl,
+          durationMs: result.durationMs || message.durationMs,
+          delivery: 'delivered' as const,
+          ...(result.messageId ? { sourceMessageId: result.messageId } : {}),
         };
-        reader.onerror = () => reject(new Error('Failed to read audio'));
-      });
-      reader.readAsDataURL(audioBlob);
-      const audioBase64 = await base64Promise;
+      }));
+      setPlayingId((current) => (current === optimisticId && result.messageId ? result.messageId : current));
+      voiceBlobsRef.current.delete(optimisticId);
 
-      const asrRes = await fetch(`${API}/ai/asr`, {
-        method: 'POST',
-        headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64 }),
-      });
-
-      let transcription = '';
-      if (asrRes.ok) {
-        const asrData = await asrRes.json();
-        transcription = asrData.text || '';
-      }
-
-      // 5. Update message with transcription and server URL
-      setMessages((current) => current.map((message) =>
-        message.id === optimisticId
-          ? { ...message, text: transcription || 'Voice note', delivery: 'delivered' as const }
-          : message,
-      ));
-
-      // 6. If transcribed, trigger AI response
+      // Trigger the AI reply with the transcription. The voice message row is
+      // already persisted server-side, so skip re-persisting the user message.
       if (transcription && characterId) {
-        await sendWithContent(transcription, optimisticId, detectTextLanguage(transcription));
+        await sendWithContent(transcription, result.messageId ?? optimisticId, detectTextLanguage(transcription), { skipUserPersist: true });
       }
     } catch (err: any) {
       setMessages((current) => current.map((message) =>
@@ -448,7 +451,7 @@ export default function AIChatPage() {
     await sendWithContent(content, undefined, lang);
   }
 
-  async function sendWithContent(content: string, existingOptimisticId?: string, language?: string) {
+  async function sendWithContent(content: string, existingOptimisticId?: string, language?: string, opts?: { skipUserPersist?: boolean }) {
     if (!auth.token || busy) return;
     const optimisticId = existingOptimisticId ?? crypto.randomUUID();
     const lang = language || detectTextLanguage(content);
@@ -468,7 +471,7 @@ export default function AIChatPage() {
       const response = await fetch(`${API}/ai/chat/stream`, {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ characterId, conversationId, message: content, detectedLanguage: lang }),
+        body: JSON.stringify({ characterId, conversationId: conversationIdRef.current ?? conversationId, message: content, detectedLanguage: lang, ...(opts?.skipUserPersist ? { skipUserPersist: true } : {}) }),
       });
       if (!response.ok || !response.body) throw new Error('Message could not be sent.');
       // Transition to 'sent' once API accepts the message
@@ -598,18 +601,17 @@ export default function AIChatPage() {
     }
   }
 
+  /**
+   * One-audio-at-a-time coordinator: each voice bubble owns its own <audio>
+   * element and only plays while its id matches `playingId`.
+   */
   function playVoice(message: ChatMessage) {
     if (!message.mediaUrl) return;
-    if (!audioRef.current) audioRef.current = new Audio();
-    if (playingId === message.id) {
-      audioRef.current.pause();
-      setPlayingId(undefined);
-      return;
-    }
-    audioRef.current.src = message.mediaUrl;
-    void audioRef.current.play();
-    setPlayingId(message.id);
-    audioRef.current.onended = () => setPlayingId(undefined);
+    setPlayingId((current) => (current === message.id ? undefined : message.id));
+  }
+
+  function handlePlaybackEnd(message: ChatMessage) {
+    setPlayingId((current) => (current === message.id ? undefined : current));
   }
 
   async function approveMediaRequest(requestId: string, approved: boolean, overrideConversationId?: string) {
@@ -873,15 +875,8 @@ export default function AIChatPage() {
         <button type="button" className="chat-header-button" aria-label="Go back" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
         </button>
+        <RelationshipRing relationship={relationship} avatarUrl={avatarUrl} name={name} />
         <Link to={`/ai/profile/${characterId}`} className="chat-identity">
-          <img
-            src={avatarUrl}
-            alt={`${name} profile`}
-            className="w-[2.65rem] h-[2.65rem] rounded-xl object-cover bg-surface-elevated shrink-0"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = fallbackAvatar(name);
-            }}
-          />
           <span>
             <strong>{name}</strong>
             <small><i aria-hidden="true" /> {relationship?.label || t('char.gettingToKnow')}</small>
@@ -999,6 +994,7 @@ export default function AIChatPage() {
             message={message}
             onReact={react}
             onPlay={playVoice}
+            onPlaybackEnd={handlePlaybackEnd}
             playing={playingId === message.id}
             onApproveMedia={handleApproveMedia}
             onDenyMedia={handleDenyMedia}

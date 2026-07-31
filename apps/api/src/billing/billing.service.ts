@@ -375,8 +375,12 @@ export class BillingService {
         });
       }
     } catch (err: any) {
-      // If the idempotency insert fails due to a race, that's OK — Stripe will retry
-      this.logger.warn(`Webhook idempotency check failed (may be race): ${err.message}`);
+      // If the idempotency insert fails due to a race, that's OK — Stripe will retry.
+      // Log a structured warning so guard failures are never silently swallowed.
+      this.logger.warn(
+        `Stripe webhook idempotency guard failed: event=${event.id} type=${event.type} ` +
+        `payloadHash=${payloadHash.slice(0, 12)} error=${err.message}`,
+      );
     }
 
     // ── Process the event ──
@@ -446,6 +450,32 @@ export class BillingService {
                 currentPeriodEnd: new Date(Date.now() + 30 * 86400000),
                 updatedAt: new Date(),
               } as any).where(eq(userSubscriptions.id, sub.id));
+            }
+          }
+          break;
+        }
+
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object as Stripe.Invoice;
+          if (invoice.subscription) {
+            const [sub] = await db.select().from(userSubscriptions)
+              .where(eq(userSubscriptions.providerSubscriptionId, invoice.subscription as string))
+              .limit(1);
+
+            if (sub) {
+              await db.update(userSubscriptions).set({
+                status: 'past_due',
+                updatedAt: new Date(),
+              } as any).where(eq(userSubscriptions.id, sub.id));
+
+              this.logger.warn(
+                `Stripe payment failed: subscription=${invoice.subscription} user=${sub.userId} ` +
+                `invoice=${invoice.id} attempt=${invoice.attempt_count ?? 'n/a'} — marked past_due`,
+              );
+            } else {
+              this.logger.warn(
+                `Stripe payment failed for unknown subscription ${invoice.subscription} (invoice ${invoice.id})`,
+              );
             }
           }
           break;

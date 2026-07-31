@@ -7,20 +7,46 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
--- Enums
-CREATE TYPE user_status AS ENUM ('pending','active','suspended','deleted');
-CREATE TYPE character_visibility AS ENUM ('private','public','unlisted');
-CREATE TYPE character_status AS ENUM ('draft','generating_identity','ready','published','suspended','disabled','deleted');
-CREATE TYPE identity_origin AS ENUM ('text_generated','private_text_generated','private_uploaded_reference','private_image_to_image','public_regenerated_from_private_metadata');
-CREATE TYPE conversation_type AS ENUM ('human_human','human_character','group');
-CREATE TYPE message_sender_type AS ENUM ('user','character','system');
-CREATE TYPE message_type AS ENUM ('text','image','video','audio','voice_note','system');
-CREATE TYPE generation_type AS ENUM ('llm_chat','character_autofill','character_reference','text_to_image','image_to_image','text_to_video','image_to_video','reference_to_video','tts','asr','embedding','moderation','memory_extract','story_plan');
-CREATE TYPE generation_status AS ENUM ('queued','processing','succeeded','failed','cancelled');
-CREATE TYPE media_visibility AS ENUM ('private','public');
-CREATE TYPE story_status AS ENUM ('draft','scheduled','generating','published','expired','failed','removed');
-CREATE TYPE moderation_status AS ENUM ('pending','approved','flagged','rejected');
-CREATE TYPE subscription_status AS ENUM ('trialing','active','past_due','paused','cancelled','expired');
+-- Enums (idempotent: the live DB may already have these via drizzle-kit push)
+DO $$ BEGIN
+  CREATE TYPE user_status AS ENUM ('pending','active','suspended','deleted');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE character_visibility AS ENUM ('private','public','unlisted');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE character_status AS ENUM ('draft','generating_identity','ready','published','suspended','disabled','deleted');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE identity_origin AS ENUM ('text_generated','private_text_generated','private_uploaded_reference','private_image_to_image','public_regenerated_from_private_metadata');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE conversation_type AS ENUM ('human_human','human_character','group');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE message_sender_type AS ENUM ('user','character','system');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE message_type AS ENUM ('text','image','video','audio','voice_note','system');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE generation_type AS ENUM ('llm_chat','character_autofill','character_reference','text_to_image','image_to_image','text_to_video','image_to_video','reference_to_video','tts','asr','embedding','moderation','memory_extract','story_plan');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE generation_status AS ENUM ('queued','processing','succeeded','failed','cancelled');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE media_visibility AS ENUM ('private','public');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE story_status AS ENUM ('draft','scheduled','generating','published','expired','failed','removed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE moderation_status AS ENUM ('pending','approved','flagged','rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE subscription_status AS ENUM ('trialing','active','past_due','paused','cancelled','expired');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Core tables
 CREATE TABLE IF NOT EXISTS users (

@@ -17,37 +17,64 @@ export default function PullToRefresh({
   children,
   disabled = false,
   className = '',
+  scrollRef,
 }: {
   onRefresh: () => Promise<void>;
   children: ReactNode;
   disabled?: boolean;
   className?: string;
+  /** Ref to the actual scrollable element (when it is a child of this wrapper). Pull only triggers when it is scrolled to the top. */
+  scrollRef?: { current: HTMLElement | null };
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const startYRef = useRef(0);
+  const startXRef = useRef(0);
   const pullingRef = useRef(false);
+  const axisRef = useRef<'x' | 'y' | null>(null);
   const threshold = 64; // px to trigger refresh
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (disabled || refreshing) return;
     const el = containerRef.current;
-    if (!el || !e.touches[0] || el.scrollTop > 0) return;
+    const scrollEl = scrollRef?.current ?? el;
+    if (!el || !scrollEl || !e.touches[0] || scrollEl.scrollTop > 0) return;
     startYRef.current = e.touches[0].clientY;
+    startXRef.current = e.touches[0].clientX;
+    axisRef.current = null;
     pullingRef.current = true;
-  }, [disabled, refreshing]);
+  }, [disabled, refreshing, scrollRef]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!pullingRef.current || disabled || refreshing) return;
     const touch = e.touches[0];
     if (!touch) return;
     const dy = touch.clientY - startYRef.current;
+    const dx = touch.clientX - startXRef.current;
+    // Lock the gesture axis on first meaningful movement so horizontal
+    // gestures (e.g. swipe-to-delete rows) never trigger a pull.
+    if (!axisRef.current) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axisRef.current = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
+    }
+    if (axisRef.current === 'x') {
+      pullingRef.current = false;
+      setPullDistance(0);
+      return;
+    }
+    // If the inner container started scrolling, abandon the pull
+    const scrollEl = scrollRef?.current ?? containerRef.current;
+    if (scrollEl && scrollEl.scrollTop > 0) {
+      pullingRef.current = false;
+      setPullDistance(0);
+      return;
+    }
     if (dy > 0) {
       // Dampen the pull distance (1/3 ratio)
       setPullDistance(Math.min(dy * 0.35, threshold + 20));
     }
-  }, [disabled, refreshing]);
+  }, [disabled, refreshing, scrollRef]);
 
   const handleTouchEnd = useCallback(async () => {
     if (!pullingRef.current) return;

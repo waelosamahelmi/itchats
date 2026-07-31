@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR, buildSelfiePrompt } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
-import { messages, messageReactions, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters, characterVersions } from '@itchats/database/schema';
+import { messages, messageReactions, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters, characterVersions, conversationParticipants } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ContextBuilderService } from './context-builder.service';
@@ -9,6 +9,7 @@ import { MemoryService } from './memory.service';
 import { RelationshipEngineService } from '../relationship-engine/relationship-engine.service';
 import { DailyLifeService } from '../daily-life/daily-life.service';
 import { IdentityConsistencyService } from '../identity-consistency/identity-consistency.service';
+import { NotificationsService, NOTIFICATION_TYPES } from '../notifications/notifications.service';
 import { getCreditCost } from '@itchats/ai-core/costing';
 import { z } from 'zod';
 
@@ -101,7 +102,49 @@ export class AiService {
     @Inject(RelationshipEngineService) private readonly relationshipEngine: RelationshipEngineService,
     @Inject(DailyLifeService) private readonly dailyLife: DailyLifeService,
     @Inject(IdentityConsistencyService) private readonly identityConsistency: IdentityConsistencyService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
+
+  /**
+   * Create an `incoming_message` notification for a character message,
+   * unless the conversation is muted for this user.
+   * Preference toggles (msgNotifs) are enforced by NotificationsService.create.
+   */
+  private async notifyIncomingMessage(
+    userId: string,
+    characterId: string,
+    conversationId: string,
+    preview: string,
+  ) {
+    const db = getDb();
+
+    // Skip when the conversation is muted for this user
+    const [participant] = await db
+      .select({ mutedUntil: conversationParticipants.mutedUntil })
+      .from(conversationParticipants)
+      .where(and(
+        eq(conversationParticipants.conversationId, conversationId),
+        eq(conversationParticipants.userId, userId),
+      ))
+      .limit(1);
+    if (participant?.mutedUntil && new Date(participant.mutedUntil) > new Date()) return;
+
+    const [char] = await db.select({ name: characters.name })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+
+    await this.notifications.create({
+      userId,
+      type: NOTIFICATION_TYPES.INCOMING_MESSAGE,
+      actorCharacterId: characterId,
+      entityType: 'conversation',
+      entityId: conversationId,
+      title: `New message from ${char?.name ?? 'a character'}`,
+      body: preview.slice(0, 200),
+      data: { conversationId, characterId },
+    });
+  }
 
   async *streamChat(
     userId: string,
@@ -110,6 +153,7 @@ export class AiService {
     conversationId?: string,
     imageBase64?: string,
     detectedLanguage?: string,
+    skipUserPersist?: boolean,
   ) {
     const db = getDb();
     const clientKey = randomUUID();
@@ -134,10 +178,14 @@ export class AiService {
     }
     const convId: string = cid!;  // Guaranteed by creation logic above
 
-    await db.insert(messages).values({
-      conversationId: convId, senderType: 'user', senderUserId: userId,
-      type: 'text', content: message, clientIdempotencyKey: clientKey,
-    } as any).onConflictDoNothing();
+    // Skip persistence when the user message row already exists (e.g. a voice
+    // note persisted by POST /v1/media/voice-notes before triggering the reply).
+    if (!skipUserPersist) {
+      await db.insert(messages).values({
+        conversationId: convId, senderType: 'user', senderUserId: userId,
+        type: 'text', content: message, clientIdempotencyKey: clientKey,
+      } as any).onConflictDoNothing();
+    }
 
     let systemPrompt = 'You are a helpful AI assistant on ItChats. Keep responses friendly and concise.';
     if (characterId) {
@@ -249,6 +297,8 @@ export class AiService {
       aiMsgSaved = true;
 
       if (characterId) {
+        // Notify the user about the character's message (mute + prefs respected)
+        this.notifyIncomingMessage(userId, characterId, convId, cleanContent || fullResponse).catch(() => {});
         // Use the new Relationship Engine for multidimensional scoring
         this.relationshipEngine.scoreAndUpdate(characterId, userId, message, fullResponse).catch(() => {});
         // Still update the simple relationship as fallback
@@ -475,6 +525,11 @@ export class AiService {
       content: messages.content,
       type: messages.type,
       createdAt: messages.createdAt,
+      mediaAssetId: messages.mediaAssetId,
+      mediaUrl: messages.mediaUrl,
+      transcription: messages.transcription,
+      durationMs: messages.durationMs,
+      metadata: messages.metadata,
     }).from(messages)
       .where(eq(messages.conversationId, conv.id))
       .orderBy(sql`${messages.createdAt} ASC`)
@@ -1062,6 +1117,9 @@ Return ONLY a JSON array: [{"type":"speech","content":"your message here"}]. Kee
         lastMessageAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(conversations.id, conversationId));
+
+      // Notify the user about the proactive follow-up (mute + prefs respected)
+      this.notifyIncomingMessage(userId, characterId, conversationId, followUpText.trim()).catch(() => {});
 
       return { sent: true, message: followUpText.trim() };
     } catch (err: any) {

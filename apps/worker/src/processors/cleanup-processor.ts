@@ -14,11 +14,12 @@ export async function cleanupProcessor(job: Job<CleanupJob>) {
 
   switch (task) {
     case 'expired_stories': {
+      // Expire based solely on the expires_at column (stories live 72h by default)
       const result = await db.update(stories)
-        .set({ status: 'expired', updatedAt: new Date() } as any)
+        .set({ status: 'expired' } as any)
         .where(and(
           eq(stories.status, 'published'),
-          lt(stories.publishedAt, new Date(Date.now() - 24 * 3600_000)),
+          lt(stories.expiresAt, new Date()),
         ));
       return { cleaned: 'stories', marked: result.rowCount ?? 0 };
     }

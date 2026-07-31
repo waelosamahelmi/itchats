@@ -219,15 +219,26 @@ Return ONLY JSON (no markdown):
       await db.insert(notifications).values({
         userId,
         type: 'comment_reply',
+        actorCharacterId: characterId,
+        entityType: 'post',
+        entityId: postId,
         title: `${character.name} replied to your comment`,
         body: replyContent.trim().slice(0, 200),
-        data: {
+        dataJson: {
           postId,
           commentId: reply!.id,
+          parentCommentId: commentId,
           characterId,
           type: 'comment_reply',
         },
-      });
+        data: {
+          postId,
+          commentId: reply!.id,
+          parentCommentId: commentId,
+          characterId,
+          type: 'comment_reply',
+        },
+      } as any);
     } catch {
       // Non-critical
     }

@@ -1,10 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, ChevronRight, Sparkles, Trash2, AlertCircle, X, MoreHorizontal, Bell, BellOff } from 'lucide-react';
-import type { RootState } from '@/app/store';
+import { MessageCircle, ChevronRight, Trash2, AlertCircle, BellOff } from 'lucide-react';
+import type { RootState, ConversationListItem } from '@/app/store';
 import { fetchConvs, deleteConv, useAppDispatch } from '@/app/store';
 import { timeAgo } from '@/lib/timeAgo';
+import ChatRowMenu from './ChatRowMenu';
+import PullToRefresh from '@/components/PullToRefresh';
+import NotificationBell from '@/components/NotificationBell';
+import { SkeletonAvatar, SkeletonLine } from '@/components/Skeleton';
 
 /** Touch-swipe delete handler state */
 interface SwipeState {
@@ -19,14 +23,19 @@ export default function ChatsPage() {
   const { convs, error: chatError } = useSelector((s: RootState) => s.chat);
   const { user } = useSelector((s: RootState) => s.auth);
   const [swipe, setSwipe] = useState<SwipeState>({ swipingId: null, offset: 0, confirmedId: null });
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const [mutedConvs, setMutedConvs] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('mutedConversations') || '[]')); } catch { return new Set(); }
-  });
+  const [loading, setLoading] = useState(true);
   const startXRef = useRef(0);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { if (user) dispatch(fetchConvs()); }, [user, dispatch]);
+  useEffect(() => {
+    if (!user) { setLoading(false); return; }
+    dispatch(fetchConvs()).finally(() => setLoading(false));
+  }, [user, dispatch]);
+
+  const handleRefresh = async () => {
+    try { await dispatch(fetchConvs()).unwrap(); } catch { /* error surfaced via chatError */ }
+  };
 
   const handleDelete = async (cid: string) => {
     try {
@@ -65,24 +74,6 @@ export default function ChatsPage() {
     setSwipe(s => ({ ...s, confirmedId: cid }));
   };
 
-  const toggleMute = (cid: string) => {
-    setMutedConvs(prev => {
-      const next = new Set(prev);
-      if (next.has(cid)) next.delete(cid);
-      else next.add(cid);
-      localStorage.setItem('mutedConversations', JSON.stringify([...next]));
-      return next;
-    });
-    setMenuOpenId(null);
-  };
-
-  const handleMenuDelete = (cid: string) => {
-    setMenuOpenId(null);
-    confirmDelete(cid);
-    // Auto-trigger delete after brief delay
-    setTimeout(() => handleDelete(cid), 100);
-  };
-
   if (!user) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-5 p-6">
@@ -106,25 +97,47 @@ export default function ChatsPage() {
             <h1 className="text-2xl font-bold text-text-primary tracking-tight">Messages</h1>
             <p className="text-text-muted text-xs mt-0.5">Your conversations</p>
           </div>
-          <button className="glass rounded-full p-2.5 text-text-secondary hover:text-brand-primary transition-colors">
-            <Sparkles size={18} />
-          </button>
+          <NotificationBell />
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto px-5">
+      <PullToRefresh onRefresh={handleRefresh} scrollRef={scrollRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5">
         {chatError && (
           <div className="mb-3 glass rounded-xl px-4 py-3 text-sm text-danger text-center flex items-center justify-center gap-2">
             <AlertCircle size={14} /> {chatError}
           </div>
         )}
-        {convs.length === 0 ? (
+        {loading && convs.length === 0 ? (
+          // Initial-load skeleton rows
+          <div>
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 py-3.5 px-1 border-b border-border-subtle">
+                <SkeletonAvatar size={44} />
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <SkeletonLine width="40%" height={14} />
+                    <SkeletonLine width={36} height={10} />
+                  </div>
+                  <SkeletonLine width="70%" height={12} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : convs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <MessageCircle size={36} className="text-text-muted opacity-40" />
             <p className="text-text-muted text-sm">No conversations yet</p>
             <p className="text-text-muted text-xs">Start chatting with an AI character</p>
           </div>
         ) : (
-          convs.map((c: any, i: number) => {
+          convs.map((c: ConversationListItem, i: number) => {
+            const name = c.character?.name || c.characterName || c.title || 'Conversation';
+            const avatarUrl = c.character?.avatarUrl || null;
+            const isMuted = !!c.mutedUntil && new Date(c.mutedUntil).getTime() > Date.now();
+            const previewTime = c.lastMessage?.createdAt || c.lastMessageAt;
+            const preview = c.lastMessage
+              ? `${c.lastMessage.senderType === 'user' ? 'You: ' : ''}${c.lastMessage.content}`
+              : 'No messages yet';
             const isOpen = swipe.swipingId === c.id
               ? swipe.offset
               : swipe.offset === -100 && swipe.swipingId === null
@@ -184,48 +197,40 @@ export default function ChatsPage() {
                     className="flex w-full items-center gap-4 py-3.5 border-b border-border-subtle hover:bg-white/[0.02] px-1 rounded-xl transition-colors text-left animate-slide-up"
                     style={{ animationDelay: `${i * 40}ms` }}
                   >
-                    <div className="w-11 h-11 rounded-full bg-brand-glow flex items-center justify-center shrink-0">
-                      <span className="text-brand-secondary font-semibold text-sm">{c.characterName?.[0] || c.title?.[0] || 'C'}</span>
-                    </div>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={name}
+                        className="w-11 h-11 rounded-full object-cover shrink-0 bg-brand-glow"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-11 h-11 rounded-full bg-brand-glow flex items-center justify-center shrink-0">
+                        <span className="text-brand-secondary font-semibold text-sm">{name[0] || 'C'}</span>
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium text-text-primary truncate">{c.characterName || c.title || 'Conversation'}</p>
-                        <span className="text-[10px] text-text-muted shrink-0">{c.lastMessageAt ? timeAgo(c.lastMessageAt) : 'New'}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-sm font-medium text-text-primary truncate">{name}</p>
+                          {isMuted && <BellOff size={12} className="text-text-muted shrink-0" aria-label="Muted" />}
+                        </div>
+                        <span className="text-[10px] text-text-muted shrink-0">{previewTime ? timeAgo(previewTime) : 'New'}</span>
                       </div>
-                      <p className="text-xs text-text-muted truncate mt-0.5">{c.characterName ? `Chat with ${c.characterName}` : 'Conversation'}</p>
+                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <p className={`text-xs truncate ${c.unreadCount > 0 ? 'text-text-secondary font-medium' : 'text-text-muted'}`}>{preview}</p>
+                        {c.unreadCount > 0 && (
+                          <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-primary text-white text-[10px] font-semibold flex items-center justify-center">
+                            {c.unreadCount > 99 ? '99+' : c.unreadCount}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <ChevronRight size={14} className="text-text-muted shrink-0" />
                   </button>
-                  {/* Three-dots menu */}
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => setMenuOpenId(menuOpenId === c.id ? null : c.id)}
-                      className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
-                      aria-label="Conversation options"
-                    >
-                      <MoreHorizontal size={16} className="text-text-muted" />
-                    </button>
-                    {menuOpenId === c.id && (
-                      <>
-                        <div className="fixed inset-0 z-30" onClick={() => setMenuOpenId(null)} />
-                        <div className="absolute right-0 top-8 z-40 glass rounded-xl p-1.5 min-w-[180px] shadow-xl border border-border-subtle">
-                          <button
-                            onClick={() => toggleMute(c.id)}
-                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-primary hover:bg-white/5 rounded-lg transition-colors"
-                          >
-                            {mutedConvs.has(c.id) ? <Bell size={14} /> : <BellOff size={14} />}
-                            {mutedConvs.has(c.id) ? 'Unmute notifications' : 'Mute notifications'}
-                          </button>
-                          <button
-                            onClick={() => handleMenuDelete(c.id)}
-                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-red-400 hover:bg-white/5 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={14} />
-                            Delete conversation
-                          </button>
-                        </div>
-                      </>
-                    )}
+                  {/* Three-dots menu (portal-rendered) */}
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
+                    <ChatRowMenu conversation={c} onDelete={() => handleDelete(c.id)} />
                   </div>
                 </div>
               </div>
@@ -233,6 +238,7 @@ export default function ChatsPage() {
           })
         )}
       </div>
+      </PullToRefresh>
     </div>
   );
 }

@@ -34,7 +34,7 @@ export default function MentionText({ text, className = '' }: { text: string; cl
     getMentionCharCache().then(setCache);
   }, []);
 
-  const parts = text.split(/(@[\w]+|#[\w]+)/g);
+  const parts = text.split(/(@[\p{L}\p{N}_]+|#[\p{L}\p{N}_]+)/gu);
 
   return (
     <span className={className}>
@@ -44,7 +44,7 @@ export default function MentionText({ text, className = '' }: { text: string; cl
           return (
             <button
               key={i}
-              onClick={(e) => { e.stopPropagation(); nav(`/hashtag/${tag}`); }}
+              onClick={(e) => { e.stopPropagation(); nav(`/hashtag/${encodeURIComponent(tag)}`); }}
               className="text-brand-primary hover:underline cursor-pointer"
             >
               {part}

@@ -22,11 +22,16 @@ export interface Post {
   comments: Comment[]; commentCount: number; shares: number;
   shareCount?: number; viewCount?: number;
   authorCharacterId?: string; authorUserId?: string;
+  linkPreview?: {
+    url: string; canonicalUrl?: string; title?: string; description?: string;
+    imageUrl?: string; siteName?: string; faviconUrl?: string;
+  } | null;
 }
 export interface Comment {
   id: string; authorName: string; authorAvatar: string; authorIsAI: boolean;
   content: string; createdAt: string; likes: number; liked: boolean; replies: Comment[];
   authorCharacterId?: string; authorUserId?: string;
+  parentCommentId?: string | null;
 }
 export interface UserProfile {
   id: string; username: string; avatarUrl: string;
@@ -135,6 +140,14 @@ const chars = createSlice({
   extraReducers: (b) => {
     b.addCase(fetchMine.fulfilled, (s, a) => { s.mine = a.payload; s.myCharacters = a.payload; });
     b.addCase(fetchDiscover.fulfilled, (s, a) => { s.discover = a.payload; s.discoverCharacters = a.payload; });
+    // Optimistic follow: flip on pending, reconcile on fulfilled, rollback on rejected
+    b.addCase(followChar.pending, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.meta.arg);
+      if (char && !char.isFollowing) {
+        char.isFollowing = true;
+        char.followersCount = (Number(char.followersCount) || 0) + 1;
+      }
+    });
     b.addCase(followChar.fulfilled, (s, a) => {
       const char = s.discoverCharacters.find(c => c.id === a.payload.id);
       if (char) {
@@ -142,11 +155,32 @@ const chars = createSlice({
         char.followersCount = Number.isFinite(Number(a.payload.followerCount)) ? a.payload.followerCount : 0;
       }
     });
+    b.addCase(followChar.rejected, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.meta.arg);
+      if (char && char.isFollowing) {
+        char.isFollowing = false;
+        char.followersCount = Math.max(0, (Number(char.followersCount) || 0) - 1);
+      }
+    });
+    b.addCase(unfollowChar.pending, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.meta.arg);
+      if (char && char.isFollowing) {
+        char.isFollowing = false;
+        char.followersCount = Math.max(0, (Number(char.followersCount) || 0) - 1);
+      }
+    });
     b.addCase(unfollowChar.fulfilled, (s, a) => {
       const char = s.discoverCharacters.find(c => c.id === a.payload.id);
       if (char) {
         char.isFollowing = false;
         char.followersCount = Number.isFinite(Number(a.payload.followerCount)) ? a.payload.followerCount : 0;
+      }
+    });
+    b.addCase(unfollowChar.rejected, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.meta.arg);
+      if (char && !char.isFollowing) {
+        char.isFollowing = true;
+        char.followersCount = (Number(char.followersCount) || 0) + 1;
       }
     });
     b.addCase(fetchSuggestedCharacters.fulfilled, (s, a) => { s.suggestedCharacters = a.payload; });
@@ -367,12 +401,38 @@ const stories = createSlice({
 });
 
 // ── Chat ──
-export const fetchConvs = createAsyncThunk('chat/convs', async () => (await apiFetch('/conversations')) as any[]);
+export interface ConversationListItem {
+  conversationId: string;
+  id: string; // legacy alias of conversationId
+  type: string;
+  mode: string;
+  characterId: string | null;
+  title: string | null;
+  lastMessageAt: string | null;
+  characterName: string | null;
+  character: { id: string; name: string | null; avatarUrl: string | null } | null;
+  lastMessage: { id: string; content: string; senderType: string; createdAt: string } | null;
+  unreadCount: number;
+  mutedUntil: string | null;
+  updatedAt: string;
+}
+export const fetchConvs = createAsyncThunk('chat/convs', async () => (await apiFetch('/conversations')) as ConversationListItem[]);
+export const updateConvSettings = createAsyncThunk(
+  'chat/updateConvSettings',
+  async ({ conversationId, mutedUntil }: { conversationId: string; mutedUntil: string | null }) => {
+    await apiFetch(`/conversations/${conversationId}/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mutedUntil }),
+    });
+    return { conversationId, mutedUntil };
+  },
+);
 export const fetchMsgs = createAsyncThunk('chat/msgs', async (cid: string) => (await apiFetch(`/conversations/${cid}/messages`)) as Msg[]);
 export const deleteConv = createAsyncThunk('chat/deleteConv', async (cid: string) => { await apiFetch(`/conversations/${cid}`, { method: 'DELETE' }); return cid; });
 export const deleteMsg = createAsyncThunk('chat/deleteMsg', async ({ convId, msgId }: { convId: string; msgId: string }) => { await apiFetch(`/conversations/${convId}/messages/${msgId}`, { method: 'DELETE' }); return msgId; });
 const chat = createSlice({
-  name: 'chat', initialState: { convs: [] as any[], msgs: [] as Msg[], active: null as string | null, error: null as string | null },
+  name: 'chat', initialState: { convs: [] as ConversationListItem[], msgs: [] as Msg[], active: null as string | null, error: null as string | null },
   reducers: { setActive(s, a) { s.active = a.payload; }, clearError(s) { s.error = null; } },
   extraReducers: (b) => {
     b.addCase(fetchConvs.fulfilled, (s, a) => { s.convs = a.payload; s.error = null; });
@@ -380,6 +440,10 @@ const chat = createSlice({
     b.addCase(fetchMsgs.fulfilled, (s, a) => { s.msgs = a.payload; });
     b.addCase(deleteConv.fulfilled, (s, a) => { s.convs = s.convs.filter(c => c.id !== a.payload); s.msgs = []; s.error = null; });
     b.addCase(deleteConv.rejected, (s, a) => { s.error = a.error.message || 'Failed to delete conversation'; });
+    b.addCase(updateConvSettings.fulfilled, (s, a) => {
+      const conv = s.convs.find(c => c.conversationId === a.payload.conversationId || c.id === a.payload.conversationId);
+      if (conv) conv.mutedUntil = a.payload.mutedUntil;
+    });
     b.addCase(deleteMsg.fulfilled, (s, a) => { s.msgs = s.msgs.filter(m => m.id !== a.payload); });
     b.addCase(deleteMsg.rejected, (s, a) => { s.error = a.error.message || 'Failed to delete message'; });
   },

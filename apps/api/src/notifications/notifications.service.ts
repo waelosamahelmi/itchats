@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { notifications, pushSubscriptions } from '@itchats/database/schema';
+import { notifications, pushSubscriptions, userSettings } from '@itchats/database/schema';
 import { and, desc, eq, isNull, count, sql, inArray } from 'drizzle-orm';
 
 // Notification type constants
@@ -32,14 +32,58 @@ export interface CreateNotificationInput {
   data?: Record<string, any>;
 }
 
+/**
+ * Maps user_settings notification-preference toggle keys to the notification
+ * types they control. Types not listed here (mention, billing, moderation, …)
+ * are always delivered.
+ */
+export const NOTIFICATION_PREF_GATES: Record<string, string[]> = {
+  reactNotifs: [NOTIFICATION_TYPES.POST_REACTION, NOTIFICATION_TYPES.COMMENT_REACTION],
+  msgNotifs: [NOTIFICATION_TYPES.INCOMING_MESSAGE],
+  storyNotifs: [NOTIFICATION_TYPES.STORY_INTERACTION],
+  charPostNotifs: ['character_post'],
+};
+
 @Injectable()
 export class NotificationsService {
   /**
+   * Check the user's saved notification preferences (user_settings key
+   * `notification_preferences`) and return false when the user has explicitly
+   * disabled the toggle governing this notification type.
+   * Users without saved preferences receive everything (no row = no opt-out).
+   */
+  async isTypeEnabled(userId: string, type: string): Promise<boolean> {
+    const gateEntry = Object.entries(NOTIFICATION_PREF_GATES)
+      .find(([, types]) => types.includes(type));
+    if (!gateEntry) return true; // Not preference-gated (mentions, security, etc.)
+
+    try {
+      const db = getDb();
+      const [row] = await db.select({ value: userSettings.value })
+        .from(userSettings)
+        .where(and(eq(userSettings.userId, userId), eq(userSettings.key, 'notification_preferences')))
+        .limit(1);
+      if (!row?.value) return true;
+      const prefs = JSON.parse(row.value) as Record<string, boolean>;
+      const toggle = prefs[gateEntry[0]];
+      return toggle !== false;
+    } catch {
+      return true; // Fail open — never lose notifications due to a prefs error
+    }
+  }
+
+  /**
    * Create a notification in the database.
+   * Respects the user's notification-preference toggles for gated types.
    * Use the worker notification queue for async creation in high-throughput paths.
    */
   async create(input: CreateNotificationInput) {
     const db = getDb();
+
+    if (!(await this.isTypeEnabled(input.userId, input.type))) {
+      return null;
+    }
+
     const [n] = await db.insert(notifications).values({
       userId: input.userId,
       type: input.type,

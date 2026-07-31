@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, UseGuards, Inject, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards, Inject, Query, BadRequestException } from '@nestjs/common';
 import { BillingService } from './billing.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { UsageService } from '../usage/usage.service';
@@ -76,8 +76,15 @@ export class BillingController {
   }
 
   @Post('webhook')
-  async webhook(@Body() body: any, @Req() req: any) {
-    return this.billingService.handleStripeWebhook(body, req.headers?.['stripe-signature']);
+  async webhook(@Req() req: any) {
+    // Stripe signature verification needs the RAW body bytes. The JSON content
+    // type parser registered in main.ts stores them on the Fastify request as
+    // `rawBody` for this route only.
+    const rawBody: Buffer | undefined = req.rawBody ?? req.raw?.rawBody;
+    if (!rawBody) {
+      throw new BadRequestException('Raw request body unavailable for webhook signature verification');
+    }
+    return this.billingService.handleStripeWebhook(rawBody, req.headers?.['stripe-signature']);
   }
 
   @Get('usage-stats')

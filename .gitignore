@@ -67,3 +67,4 @@ yarn-error.log*
 # face filter assets (large binary files)
 public/filters/jeelizFaceFilter/
 .env
+.turbo/

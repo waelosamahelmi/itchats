@@ -6,6 +6,7 @@ import AnimatedLogo from '@/components/AnimatedLogo';
 
 // ── Lazy-loaded pages ──
 const FeedPage = lazy(() => import('@/features/feed/FeedPage'));
+const HashtagPage = lazy(() => import('@/features/feed/HashtagPage'));
 const ChatsPage = lazy(() => import('@/features/chats/ChatsPage'));
 const ChatDetailPage = lazy(() => import('@/features/chats/ChatPage'));
 const AIChatPage = lazy(() => import('@/features/ai/AIChatPage'));
@@ -55,6 +56,7 @@ export function Router() {
             {/* Main feed — default landing */}
             <Route index element={<FeedPage />} />
             <Route path="/" element={<FeedPage />} />
+            <Route path="/hashtag/:name" element={<HashtagPage />} />
 
             {/* Chats */}
             <Route path="/chats" element={<ChatsPage />} />

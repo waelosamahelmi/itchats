@@ -32,7 +32,7 @@ export class AiController {
   @Header('Cache-Control', 'no-cache')
   @Header('X-Accel-Buffering', 'no')
   async streamChat(
-    @Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string; detectedLanguage?: string },
+    @Body() body: { characterId?: string; message: string; conversationId?: string; imageBase64?: string; detectedLanguage?: string; skipUserPersist?: boolean },
     @Req() req: any,
   ) {
     const userId = req.user.userId;
@@ -43,7 +43,7 @@ export class AiController {
 
     (async () => {
       try {
-        for await (const chunk of this.aiService.streamChat(userId, characterId, body.message, conversationId, body.imageBase64, body.detectedLanguage)) {
+        for await (const chunk of this.aiService.streamChat(userId, characterId, body.message, conversationId, body.imageBase64, body.detectedLanguage, body.skipUserPersist === true)) {
           readable.push(`data: ${JSON.stringify(chunk)}\n\n`);
         }
       } catch (err: any) {

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getDb } from '@itchats/database';
-import { stories, storyViews, contentLikes, characterFollows, users, characters } from '@itchats/database/schema';
+import { stories, storyViews, contentLikes, characterFollows, users, characters, mediaAssets } from '@itchats/database/schema';
 import { eq, and, desc, count, inArray, isNull, or, sql, asc } from 'drizzle-orm';
 
 @Injectable()
@@ -136,17 +136,32 @@ export class StoriesService {
       .limit(20);
   }
 
-  async createStory(userId: string, data: { storyType: string; caption?: string; mediaUrl?: string }) {
+  async createStory(userId: string, data: { storyType: string; caption?: string; mediaUrl?: string; mediaAssetId?: string }) {
     const db = getDb();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.STORY_TTL_MS);
+
+    // Resolve media URL from a media asset ID if the client sent one
+    let mediaUrl = data.mediaUrl;
+    if (!mediaUrl && data.mediaAssetId) {
+      const [asset] = await db.select({ url: mediaAssets.url })
+        .from(mediaAssets)
+        .where(eq(mediaAssets.id, data.mediaAssetId))
+        .limit(1);
+      if (asset?.url) mediaUrl = asset.url;
+    }
+
+    // Derive mediaType server-side so the column is always populated
+    const mediaType = (mediaUrl || data.mediaAssetId) ? 'image' : 'text';
+
     const [story] = await db.insert(stories).values({
       authorUserId: userId,
       creatorId: userId,
       status: 'published',
-      storyType: data.storyType,
+      storyType: data.storyType || mediaType,
       caption: data.caption,
-      mediaUrl: data.mediaUrl,
+      mediaUrl,
+      mediaType,
       publishedAt: now,
       expiresAt,
     } as any).returning();

@@ -165,6 +165,28 @@ export class PostsService {
     }
   }
 
+  /**
+   * Fold flat lp* columns (from the postLinkPreviews join) into a nested
+   * `linkPreview` object (or null) and strip the flat fields from the row.
+   */
+  private extractLinkPreview(p: any) {
+    const { lpUrl, lpCanonicalUrl, lpTitle, lpDescription, lpImageUrl, lpSiteName, lpFaviconUrl, ...rest } = p;
+    return {
+      ...rest,
+      linkPreview: lpUrl
+        ? {
+            url: lpUrl,
+            canonicalUrl: lpCanonicalUrl ?? undefined,
+            title: lpTitle ?? undefined,
+            description: lpDescription ?? undefined,
+            imageUrl: lpImageUrl ?? undefined,
+            siteName: lpSiteName ?? undefined,
+            faviconUrl: lpFaviconUrl ?? undefined,
+          }
+        : null,
+    };
+  }
+
   async getFeed(userId: string, page = 1, limit = 20) {
     const db = getDb();
 
@@ -224,10 +246,18 @@ export class PostsService {
         authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
         authorAvatar: characters.avatarUrl,
         authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+        lpUrl: postLinkPreviews.url,
+        lpCanonicalUrl: postLinkPreviews.canonicalUrl,
+        lpTitle: postLinkPreviews.title,
+        lpDescription: postLinkPreviews.description,
+        lpImageUrl: postLinkPreviews.imageUrl,
+        lpSiteName: postLinkPreviews.siteName,
+        lpFaviconUrl: postLinkPreviews.faviconUrl,
       })
       .from(posts)
       .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
       .leftJoin(users, eq(posts.authorUserId, users.id))
+      .leftJoin(postLinkPreviews, eq(posts.id, postLinkPreviews.postId))
       .where(
         and(
           or(...conditions),
@@ -255,7 +285,7 @@ export class PostsService {
       }
 
       return feed.map((p) => ({
-        ...p,
+        ...this.extractLinkPreview(p),
         likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
         commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
         shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
@@ -265,7 +295,7 @@ export class PostsService {
     }
 
     return feed.map((p) => ({
-      ...p,
+      ...this.extractLinkPreview(p),
       likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
       commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
       shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
@@ -300,10 +330,18 @@ export class PostsService {
         authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
         authorAvatar: characters.avatarUrl,
         authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+        lpUrl: postLinkPreviews.url,
+        lpCanonicalUrl: postLinkPreviews.canonicalUrl,
+        lpTitle: postLinkPreviews.title,
+        lpDescription: postLinkPreviews.description,
+        lpImageUrl: postLinkPreviews.imageUrl,
+        lpSiteName: postLinkPreviews.siteName,
+        lpFaviconUrl: postLinkPreviews.faviconUrl,
       })
       .from(posts)
       .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
       .leftJoin(users, eq(posts.authorUserId, users.id))
+      .leftJoin(postLinkPreviews, eq(posts.id, postLinkPreviews.postId))
       .where(
         and(
           eq(posts.authorUserId, targetUserId),
@@ -316,7 +354,7 @@ export class PostsService {
       .offset((page - 1) * limit);
 
     return results.map((p) => ({
-      ...p,
+      ...this.extractLinkPreview(p),
       likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
       commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
       shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
@@ -351,10 +389,18 @@ export class PostsService {
         authorName: sql<string>`COALESCE(${characters.name}, ${users.username}, 'Unknown')`,
         authorAvatar: characters.avatarUrl,
         authorIsAI: sql<boolean>`CASE WHEN ${posts.authorCharacterId} IS NOT NULL THEN true ELSE false END`,
+        lpUrl: postLinkPreviews.url,
+        lpCanonicalUrl: postLinkPreviews.canonicalUrl,
+        lpTitle: postLinkPreviews.title,
+        lpDescription: postLinkPreviews.description,
+        lpImageUrl: postLinkPreviews.imageUrl,
+        lpSiteName: postLinkPreviews.siteName,
+        lpFaviconUrl: postLinkPreviews.faviconUrl,
       })
       .from(posts)
       .leftJoin(characters, eq(posts.authorCharacterId, characters.id))
       .leftJoin(users, eq(posts.authorUserId, users.id))
+      .leftJoin(postLinkPreviews, eq(posts.id, postLinkPreviews.postId))
       .where(
         and(
           eq(posts.authorCharacterId, characterId),
@@ -367,7 +413,7 @@ export class PostsService {
       .offset((page - 1) * limit);
 
     return results.map((p) => ({
-      ...p,
+      ...this.extractLinkPreview(p),
       likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
       commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
       shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,

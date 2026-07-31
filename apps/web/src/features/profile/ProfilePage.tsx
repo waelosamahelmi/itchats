@@ -2,28 +2,22 @@ import { useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  User, Settings, Star, MapPin, Globe, Calendar, Camera, Sparkles,
-  Users2, Image, Heart, MessageCircle, Share2, MoreHorizontal,
-  Plus, Pencil, Lock, ChevronRight, Shield, BadgeCheck, Check,
-  X, Send, Upload, Loader2, Smile, AtSign,
+  User, Settings, Star, MapPin, Globe, Camera,
+  Users2, Image, Pencil, ChevronRight,
+  X, Send, Loader2,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
-import type { Post, UserProfile, Character } from '@/app/store';
+import type { Post, UserProfile } from '@/app/store';
 import {
-  logout, useAppDispatch,
+  useAppDispatch,
   fetchProfile, fetchFriendsThunk,
   setUserPosts,
-  setTranslatedPost,
-  setTranslating,
-  clearTranslation,
   createNewPost,
 } from '@/app/store';
 import { apiFetch } from '@/lib/api';
-import { translateText, getLanguageDisplayName, detectTextLanguage } from '@/lib/translate';
-import { timeAgo } from '@/lib/timeAgo';
 import { t } from '@/lib/i18n';
-import { Badge, Tabs } from '@itchats/ui';
-import LinkPreviewCard, { LinkPreviewSkeleton, LinkPreviewData } from '@/components/LinkPreviewCard';
+import { Tabs } from '@itchats/ui';
+import PostCard from '@/components/PostCard';
 
 // ── Edit Profile Modal ──
 function EditProfileModal({ profile, onClose, onSaved }: { profile: UserProfile; onClose: () => void; onSaved: (data: any) => void }) {
@@ -168,100 +162,84 @@ function ProfileComposer({ onPost, userAvatar, username }: { onPost: (text: stri
   );
 }
 
-// ── Shared Post Card ──
-function ProfilePost({ post }: { post: Post }) {
-  const dispatch = useAppDispatch();
+// ── Following (followed characters) bottom-sheet / modal ──
+interface FollowedCharacter {
+  id: string;
+  name: string;
+  handle?: string | null;
+  avatarUrl?: string | null;
+  description?: string | null;
+  followersCount?: number;
+}
+
+function FollowingListSheet({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
-  const [liked, setLiked] = useState(post.liked);
-  const [likeCount, setLikeCount] = useState(post.likes);
-  const [showCopiedToast, setShowCopiedToast] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [following, setFollowing] = useState<FollowedCharacter[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const isLongContent = post.content.length > 200;
-  const displayContent = expanded ? post.content : post.content.slice(0, 200);
-
-  const { language: userLang, translatedPosts, translating: transMap } = useSelector((s: RootState) => s.translation);
-  const isTranslating = transMap[post.id] ?? false;
-  const translatedData = translatedPosts[post.id];
-  const [showTranslation, setShowTranslation] = useState(false);
-
-  const handleTranslate = async () => {
-    if (isTranslating) return;
-    if (translatedData) { setShowTranslation(!showTranslation); return; }
-    dispatch(setTranslating(post.id));
-    try {
-      const result = await translateText(post.content, userLang);
-      dispatch(setTranslatedPost({ postId: post.id, translatedText: result.translatedText, detectedLanguage: result.detectedSourceLanguage || detectTextLanguage(post.content) }));
-      setShowTranslation(true);
-    } catch { dispatch(clearTranslation(post.id)); }
-  };
-
-  const handleShare = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
-      setShowCopiedToast(true);
-      setTimeout(() => setShowCopiedToast(false), 2000);
-    } catch { /* fallback */ }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch<{ following: FollowedCharacter[]; count: number }>('/users/me/following');
+        if (!cancelled) setFollowing(Array.isArray(data?.following) ? data.following : []);
+      } catch {
+        if (!cancelled) setFollowing([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
-    <div className="glass rounded-2xl overflow-hidden">
-      <div className="flex items-center gap-3 p-4">
-        <img
-          src={post.authorAvatar || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(post.authorName)}`}
-          alt=""
-          className="w-10 h-10 rounded-full object-cover"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-text-primary truncate">{post.authorName}</span>
-            {post.authorIsAI && <Badge variant="ai" className="text-[9px] px-1.5">AI</Badge>}
+    <div className="fixed inset-0 z-[var(--z-modal,1200)] bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={onClose}>
+      <div className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up max-h-[75vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-text-primary">{t('profile.friends')}</h2>
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/5"><X size={20} className="text-text-secondary" /></button>
+        </div>
+
+        {loading ? (
+          <div className="space-y-2 py-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 p-2 animate-pulse">
+                <div className="w-11 h-11 rounded-full bg-bg-elevated" />
+                <div className="space-y-1.5 flex-1">
+                  <div className="h-3 w-28 bg-bg-elevated rounded-full" />
+                  <div className="h-2 w-16 bg-bg-elevated rounded-full" />
+                </div>
+              </div>
+            ))}
           </div>
-          <span className="text-[11px] text-text-muted">{timeAgo(post.createdAt)}</span>
-        </div>
+        ) : following.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 gap-3">
+            <Users2 size={30} className="text-text-muted opacity-40" />
+            <p className="text-text-muted text-sm">{t('profile.noFriends')}</p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {following.map(c => (
+              <button
+                key={c.id}
+                onClick={() => { onClose(); nav(`/ai/profile/${c.id}`); }}
+                className="flex w-full items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors text-left"
+              >
+                <img
+                  src={c.avatarUrl || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(c.name)}`}
+                  alt={c.name}
+                  className="w-11 h-11 rounded-full object-cover shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-text-primary truncate">{c.name}</p>
+                  {c.handle && <p className="text-xs text-text-muted truncate">@{c.handle}</p>}
+                </div>
+                <ChevronRight size={16} className="text-text-muted shrink-0" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {post.content && (
-        <div className="px-4 pb-3">
-          <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
-            {showTranslation && translatedData ? translatedData.translatedText : displayContent}
-            {isLongContent && !expanded && !showTranslation && '...'}
-          </p>
-          {isLongContent && !showTranslation && (
-            <button onClick={() => setExpanded(!expanded)} className="text-xs text-brand-primary mt-1 hover:underline">
-              {expanded ? 'Show less' : 'See more'}
-            </button>
-          )}
-        </div>
-      )}
-      {post.mediaUrl && (
-        <div className="mx-4 mb-3 rounded-xl overflow-hidden">
-          <img src={post.mediaUrl} alt="" className="w-full object-cover max-h-[400px] rounded-xl" />
-        </div>
-      )}
-      <div className="flex items-center border-t border-border-subtle mx-4 py-1">
-        <button
-          onClick={() => { setLiked(!liked); setLikeCount(c => c + (liked ? -1 : 1)); }}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium ${liked ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5'}`}
-        >
-          <Heart size={16} className={liked ? 'fill-current text-brand-primary' : ''} /> Like
-        </button>
-        <button className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
-          <MessageCircle size={16} /> Comment
-        </button>
-        <button onClick={handleShare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium text-text-muted hover:bg-white/5">
-          <Share2 size={16} /> Share
-        </button>
-        <button onClick={handleTranslate} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-medium ${translatedData ? 'text-brand-primary' : 'text-text-muted hover:bg-white/5'}`}>
-          <Globe size={16} className={isTranslating ? 'animate-spin' : ''} />
-          {isTranslating ? '...' : translatedData && showTranslation ? 'Original' : 'Translate'}
-        </button>
-      </div>
-      {showCopiedToast && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 glass rounded-full px-4 py-2 text-xs font-medium text-text-primary shadow-lg animate-fade-in">
-          <Check size={12} className="text-success inline mr-1" /> Link copied!
-        </div>
-      )}
     </div>
   );
 }
@@ -297,6 +275,7 @@ export default function ProfilePage() {
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showFollowingList, setShowFollowingList] = useState(false);
 
   // Avatar / cover upload states
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -538,15 +517,19 @@ export default function ProfilePage() {
           {/* Stats */}
           <div className="flex gap-6 mt-4 pb-4 border-b border-border-subtle">
             {[
-              { label: t('profile.posts'), value: posts.length },
-              { label: t('profile.friends'), value: friends.length },
-              { label: t('profile.characters'), value: charCount },
-              { label: t('profile.followers'), value: followerCnt },
+              { label: t('profile.posts'), value: posts.length, onClick: () => setTab('posts') },
+              { label: t('profile.friends'), value: friends.length, onClick: () => setShowFollowingList(true) },
+              { label: t('profile.characters'), value: charCount, onClick: () => nav('/characters') },
+              { label: t('profile.followers'), value: followerCnt, onClick: () => setShowFollowingList(true) },
             ].map(s => (
-              <div key={s.label} className="text-center">
+              <button
+                key={s.label}
+                onClick={s.onClick}
+                className="text-center rounded-xl px-1 py-0.5 hover:bg-white/5 transition-colors"
+              >
                 <p className="text-lg font-bold text-text-primary">{s.value.toLocaleString()}</p>
                 <p className="text-[10px] text-text-muted uppercase tracking-wider">{s.label}</p>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -606,7 +589,7 @@ export default function ProfilePage() {
                       <p className="text-text-muted text-xs text-center">{t('profile.shareFirst')}</p>
                     </div>
                   ) : (
-                    posts.map(p => <ProfilePost key={p.id} post={p} />)
+                    posts.map(p => <PostCard key={p.id} post={p} />)
                   )}
                 </div>
               )}
@@ -685,6 +668,9 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+
+      {/* Following (followed characters) list */}
+      {showFollowingList && <FollowingListSheet onClose={() => setShowFollowingList(false)} />}
 
       {/* Edit Profile Modal */}
       {showEditProfile && (

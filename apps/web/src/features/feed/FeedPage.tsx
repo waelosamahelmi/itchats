@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Home, Plus, Smile, Camera, X, AtSign, Bell,
+  Home, Plus, Smile, Camera, X,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
@@ -19,7 +19,11 @@ import PostCard from '@/components/PostCard';
 import MentionAutocomplete from '@/components/MentionAutocomplete';
 import FeelingPicker from '@/components/FeelingPicker';
 import LinkPreviewCard, { LinkPreviewSkeleton, LinkPreviewData } from '@/components/LinkPreviewCard';
+import StoryViewer from '@/components/StoryViewer';
 import { SkeletonLine } from '@/components/Skeleton';
+import PullToRefresh from '@/components/PullToRefresh';
+import NotificationBell from '@/components/NotificationBell';
+import { useScrollRestoration } from '@/hooks/useScrollRestoration';
 
 /** Trigger haptic feedback if available (Section 22) */
 function haptic(ms: number = 10) {
@@ -27,7 +31,7 @@ function haptic(ms: number = 10) {
 }
 
 // ── Story Circle ──
-function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: Story; isYours?: boolean; userAvatar?: string; onYourStoryClick?: () => void }) {
+function StoryCircle({ story, isYours, userAvatar, onYourStoryClick, onClick }: { story: Story; isYours?: boolean; userAvatar?: string; onYourStoryClick?: () => void; onClick?: () => void }) {
   if (isYours) {
     return (
       <button onClick={onYourStoryClick} className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
@@ -49,7 +53,7 @@ function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: 
   }
 
   return (
-    <button className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
+    <button onClick={onClick} className="flex flex-col items-center gap-1 shrink-0 w-[72px] group">
       <div className={`relative p-[2px] rounded-full ${story.viewed ? '' : 'bg-gradient-to-br from-brand-primary via-social-warm to-brand-secondary'} ${story.isLive ? 'ring-2 ring-danger ring-offset-2 ring-offset-bg-canvas' : ''}`}>
         <div className="w-[60px] h-[60px] rounded-full overflow-hidden border-[3px] border-bg-canvas">
           <img src={story.authorAvatar} alt={story.authorName} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
@@ -64,7 +68,7 @@ function StoryCircle({ story, isYours, userAvatar, onYourStoryClick }: { story: 
 }
 
 // ── Stories Bar ──
-function StoriesBar({ stories, userAvatar, onYourStoryClick }: { stories: Story[]; userAvatar?: string; onYourStoryClick?: () => void }) {
+function StoriesBar({ stories, userAvatar, onYourStoryClick, onStoryClick }: { stories: Story[]; userAvatar?: string; onYourStoryClick?: () => void; onStoryClick?: (story: Story) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Filter: only show characters that have at least one active story
@@ -93,7 +97,7 @@ function StoriesBar({ stories, userAvatar, onYourStoryClick }: { stories: Story[
           onYourStoryClick={onYourStoryClick}
         />
         {filteredStories.map(s => (
-          <StoryCircle key={s.id} story={s} />
+          <StoryCircle key={s.id} story={s} onClick={() => onStoryClick?.(s)} />
         ))}
       </div>
       <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-bg-canvas to-transparent" />
@@ -115,14 +119,21 @@ function extractFirstUrl(text: string): string | null {
 }
 
 // ── Composer ──
-function Composer({ onPost, userAvatar, username, onStoryCreate }: {
+function Composer({ onPost, userAvatar, username, onStoryCreate, openSignal }: {
   onPost: (text: string, mediaUrl?: string, feeling?: string, mediaType?: string, linkPreview?: LinkPreviewData) => void;
   userAvatar?: string;
   username?: string;
   onStoryCreate?: () => void;
+  /** Increment to programmatically expand/focus the composer (Create sheet → "New Post") */
+  openSignal?: number;
 }) {
   const [text, setText] = useState('');
   const [expanded, setExpanded] = useState(false);
+
+  // External open request (e.g. bottom-nav Create sheet)
+  useEffect(() => {
+    if (openSignal && openSignal > 0) setExpanded(true);
+  }, [openSignal]);
   const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [selectedFeeling, setSelectedFeeling] = useState<string | null>(null);
@@ -321,11 +332,11 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
   return (
     <div className={`glass rounded-2xl p-4 mb-4 transition-all duration-300 ${expanded ? 'shadow-lg shadow-brand-glow/10' : ''}`}>
       <div className="flex items-center gap-3">
-        {userAvatar ? (
-          <img src={userAvatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-bg-elevated shrink-0" />
-        )}
+        <img
+          src={userAvatar || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(username || 'user')}`}
+          alt=""
+          className="w-10 h-10 rounded-full object-cover shrink-0"
+        />
         <button
           onClick={() => setExpanded(true)}
           className={`flex-1 text-left glass rounded-full px-4 py-2.5 text-sm text-text-muted hover:bg-white/8 transition-colors ${expanded ? 'hidden' : ''}`}
@@ -437,13 +448,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               title={t('feed.addPhoto')}
             >
               <Camera size={18} />
-            </button>
-            <button
-              onClick={() => { setShowFeelingPicker(false); }}
-              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
-              title={t('feed.mentionCharacter')}
-            >
-              <AtSign size={18} />
             </button>
             <button
               onClick={() => setShowFeelingPicker(true)}
@@ -612,28 +616,21 @@ export default function FeedPage() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [showStoryCreator, setShowStoryCreator] = useState(false);
+  const [viewerStory, setViewerStory] = useState<Story | null>(null);
   const [showWizard, setShowWizard] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [composerSignal, setComposerSignal] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scrollRef = useScrollRestoration('feed', !loading);
 
-  // Fetch unread notifications count for the bell badge
+  // Create-sheet signaling: /?compose=1 opens the post composer, /?story=1 the story creator
   useEffect(() => {
-    let mounted = true;
-    const fetchCount = async () => {
-      try {
-        const token = localStorage.getItem('accessToken');
-        if (!token) return;
-        const res = await fetch('/v1/notifications/unread-count', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (mounted) setUnreadCount(data?.count ?? 0);
-      } catch { /* silent */ }
-    };
-    fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => { mounted = false; clearInterval(interval); };
-  }, []);
+    const compose = searchParams.get('compose');
+    const story = searchParams.get('story');
+    if (!compose && !story) return;
+    if (compose) setComposerSignal(s => s + 1);
+    if (story) setShowStoryCreator(true);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (user) {
@@ -720,25 +717,13 @@ export default function FeedPage() {
       <header className="safe-top px-5 pt-5 pb-2 shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">{t('feed.title')}</h1>
-          <button
-            onClick={() => nav('/notifications')}
-            className="relative w-9 h-9 rounded-full bg-bg-glass-strong backdrop-blur-xl border border-border-subtle flex items-center justify-center hover:bg-white/10 transition-colors"
-            aria-label="Notifications"
-          >
-            <Bell size={16} className="text-text-secondary" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-danger flex items-center justify-center px-1">
-                <span className="text-[10px] font-bold text-white leading-none">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              </span>
-            )}
-          </button>
+          <NotificationBell />
         </div>
       </header>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Scrollable Content (pull down at top to refresh) */}
+      <PullToRefresh onRefresh={handleRefresh} scrollRef={scrollRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {refreshing && (
           <div className="flex justify-center py-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
@@ -746,11 +731,16 @@ export default function FeedPage() {
         )}
 
         {/* Stories Bar */}
-        <StoriesBar stories={stories} userAvatar={profile?.avatarUrl} onYourStoryClick={() => setShowStoryCreator(true)} />
+        <StoriesBar
+          stories={stories}
+          userAvatar={profile?.avatarUrl}
+          onYourStoryClick={() => setShowStoryCreator(true)}
+          onStoryClick={s => setViewerStory(s)}
+        />
 
         {/* Composer */}
         <div className="px-4">
-          <Composer onPost={handleCreatePost} userAvatar={profile?.avatarUrl} username={profile?.username ?? user?.username} onStoryCreate={() => setShowStoryCreator(true)} />
+          <Composer onPost={handleCreatePost} userAvatar={profile?.avatarUrl} username={profile?.username ?? user?.username} onStoryCreate={() => setShowStoryCreator(true)} openSignal={composerSignal} />
         </div>
 
         {/* Posts Feed */}
@@ -798,6 +788,24 @@ export default function FeedPage() {
           )}
         </div>
       </div>
+      </PullToRefresh>
+
+      {/* Story Creator */}
+      {showStoryCreator && (
+        <StoryCreatorModal onClose={() => setShowStoryCreator(false)} onPublish={handleCreateStory} />
+      )}
+
+      {/* Full-screen Story Viewer */}
+      {viewerStory && (
+        <StoryViewer
+          story={viewerStory}
+          onClose={() => {
+            setViewerStory(null);
+            // Refresh so viewed rings update
+            dispatch(fetchStoriesThunk());
+          }}
+        />
+      )}
     </div>
   );
 }

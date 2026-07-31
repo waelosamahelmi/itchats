@@ -38,6 +38,13 @@ export class UsersController {
     return this.usersService.getMyFriends(req.user.userId);
   }
 
+  // ── Following (characters the current user follows) ──
+  @Get('me/following')
+  @UseGuards(JwtAuthGuard)
+  async getMyFollowing(@Req() req: any) {
+    return this.usersService.getFollowing(req.user.userId);
+  }
+
   // ── New endpoints ──
 
   @Get('score')
@@ -91,40 +98,59 @@ export class UsersController {
     return this.usersService.updateProfile(req.user.userId, body);
   }
 
+  /**
+   * Read an uploaded image from a multipart request parsed by @fastify/multipart
+   * with `attachFieldsToBody: true` (parts live directly on req.body), store it
+   * under its media-asset ID (the convention GET /v1/media/:id serves), and
+   * return the resulting public URL + asset ID.
+   */
+  private async storeMultipartImage(
+    req: any,
+    fieldNames: string[],
+    label: string,
+  ): Promise<{ url: string; mediaAssetId: string }> {
+    // @fastify/multipart with attachFieldsToBody: parsed parts live on req.body
+    const data = (req as any).body ?? {};
+    const file = fieldNames.map((name) => data?.[name]).find((part: any) => part && typeof part.toBuffer === 'function');
+    if (!file) {
+      throw new BadRequestException(`No ${label} file provided. Use field name "${fieldNames[0]}" or "image".`);
+    }
+
+    const buffer: Buffer = await file.toBuffer();
+    const mimeType: string = (file.mimetype || 'image/jpeg').split(';')[0]!.trim();
+    const fileName = file.filename || `${label}-${Date.now()}.jpg`;
+    const fileSize = buffer.length;
+
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedImageTypes.includes(mimeType)) {
+      throw new BadRequestException(`Unsupported image type: ${mimeType}. Allowed: ${allowedImageTypes.join(', ')}`);
+    }
+    if (fileSize === 0) throw new BadRequestException(`${label} image is empty.`);
+    if (fileSize > 10 * 1024 * 1024) {
+      throw new BadRequestException(`${label} image too large. Maximum 10MB.`);
+    }
+
+    // Create the asset row, then persist the bytes under the asset ID —
+    // storeLocalFile writes to <uploadsDir>/<assetId> and records metadata.localPath,
+    // which is exactly what GET /v1/media/:id (serveLocal) resolves.
+    const result = await this.mediaService.createUploadUrl(req.user.userId, mimeType, fileName, fileSize, 'public');
+    await this.mediaService.storeLocalFile(result.mediaAssetId, buffer.toString('base64'));
+
+    // Public URL served by GET /v1/media/:id (avoid getDownloadUrl's base64 data-URL fallback).
+    const config = (await import('@itchats/config')).getConfig();
+    const apiBase = config.API_BASE_URL || `http://localhost:${config.PORT}`;
+    return { url: `${apiBase}/v1/media/${result.mediaAssetId}`, mediaAssetId: result.mediaAssetId };
+  }
+
   @Post('avatar')
   @UseGuards(JwtAuthGuard)
   async uploadAvatar(@Req() req: any) {
     // Support both JSON body and multipart upload
     const contentType = req.headers['content-type'] || '';
     if (contentType.includes('multipart/form-data')) {
-      // Handle multipart upload
       try {
-        const data = await (req as any).body();
-        const file = data?.avatar || data?.file || data?.image;
-        if (!file) throw new BadRequestException('No avatar file provided. Use field name "avatar" or "image".');
-
-        const buffer = await file.toBuffer();
-        const mimeType = file.mimetype || 'image/jpeg';
-        const fileName = file.filename || `avatar-${Date.now()}.jpg`;
-        const fileSize = buffer.length;
-
-        // Validate image type
-        const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-        if (!allowedImageTypes.includes(mimeType)) {
-          throw new BadRequestException(`Unsupported image type: ${mimeType}. Allowed: ${allowedImageTypes.join(', ')}`);
-        }
-        if (fileSize > 10 * 1024 * 1024) {
-          throw new BadRequestException('Avatar image too large. Maximum 10MB.');
-        }
-
-        // Upload via media service
-        const result = await this.mediaService.createUploadUrl(req.user.userId, mimeType, fileName, fileSize, 'public');
-        // Store the local file
-        await this.mediaService.storeLocalFile(result.mediaAssetId, buffer.toString('base64'));
-        // Get download URL
-        const { url: avatarUrl } = await this.mediaService.getDownloadUrl(result.mediaAssetId);
-
-        return this.usersService.updateAvatar(req.user.userId, avatarUrl, result.mediaAssetId);
+        const { url, mediaAssetId } = await this.storeMultipartImage(req, ['avatar', 'file', 'image'], 'avatar');
+        return this.usersService.updateAvatar(req.user.userId, url, mediaAssetId);
       } catch (err: any) {
         if (err.status) throw err;
         throw new BadRequestException(err.message || 'Avatar upload failed');
@@ -144,28 +170,8 @@ export class UsersController {
     const contentType = req.headers['content-type'] || '';
     if (contentType.includes('multipart/form-data')) {
       try {
-        const data = await (req as any).body();
-        const file = data?.cover || data?.file || data?.image;
-        if (!file) throw new BadRequestException('No cover image file provided. Use field name "cover" or "image".');
-
-        const buffer = await file.toBuffer();
-        const mimeType = file.mimetype || 'image/jpeg';
-        const fileName = file.filename || `cover-${Date.now()}.jpg`;
-        const fileSize = buffer.length;
-
-        const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-        if (!allowedImageTypes.includes(mimeType)) {
-          throw new BadRequestException(`Unsupported image type: ${mimeType}. Allowed: ${allowedImageTypes.join(', ')}`);
-        }
-        if (fileSize > 10 * 1024 * 1024) {
-          throw new BadRequestException('Cover image too large. Maximum 10MB.');
-        }
-
-        const result = await this.mediaService.createUploadUrl(req.user.userId, mimeType, fileName, fileSize, 'public');
-        await this.mediaService.storeLocalFile(result.mediaAssetId, buffer.toString('base64'));
-        const { url: coverPhotoUrl } = await this.mediaService.getDownloadUrl(result.mediaAssetId);
-
-        return this.usersService.updateCoverPhoto(req.user.userId, coverPhotoUrl);
+        const { url } = await this.storeMultipartImage(req, ['cover', 'file', 'image'], 'cover');
+        return this.usersService.updateCoverPhoto(req.user.userId, url);
       } catch (err: any) {
         if (err.status) throw err;
         throw new BadRequestException(err.message || 'Cover upload failed');
@@ -230,6 +236,8 @@ export class UsersController {
       charVisibility?: string;
       nsfwFilter?: boolean;
       contentLanguage?: string;
+      theme?: string;
+      language?: string;
       notificationPreferences?: Record<string, boolean>;
     },
     @Req() req: any,

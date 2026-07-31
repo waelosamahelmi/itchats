@@ -9,6 +9,7 @@ import {
 } from '@itchats/database/schema';
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
+import { characterReengagementQueue, notificationQueue } from '../queues';
 import type { CharacterReengagementJob } from '../queues';
 
 /**
@@ -312,6 +313,23 @@ Return ONLY JSON:
       .set({ lastMessageAt: new Date(), updatedAt: new Date() })
       .where(eq(conversations.id, conversationId));
 
+    // Notify the user about the incoming character message (processor respects mute + prefs)
+    try {
+      await notificationQueue.add('incoming-message', {
+        userId,
+        type: 'incoming_message',
+        title: `New message from ${character.name}`,
+        body: content,
+        data: {
+          conversationId,
+          characterId,
+          entityType: 'conversation',
+          entityId: conversationId,
+          url: `/chat/${characterId}`,
+        },
+      });
+    } catch { /* non-critical */ }
+
     console.log(`[reengagement] ${character.name} sent follow-up to user ${userId}: "${content}"`);
     return { sent: true, characterName: character.name, message: content };
   } catch (err: any) {
@@ -391,7 +409,18 @@ async function handleSweepAll(db: ReturnType<typeof getDb>) {
 
     if (participant?.mutedUntil && new Date(participant.mutedUntil) > new Date()) continue;
 
-    // Enqueue individual re-engagement job
+    // Enqueue individual re-engagement job with random jitter (0-15 min)
+    // so follow-ups don't all fire at the same instant
+    const jitterMs = Math.floor(Math.random() * 15 * 60 * 1000);
+    await characterReengagementQueue.add(
+      'reengage-conversation',
+      {
+        characterId: conv.characterId,
+        userId: conv.createdByUserId,
+        conversationId: conv.id,
+      } satisfies CharacterReengagementJob,
+      { delay: jitterMs },
+    );
     enqueued.push(`${conv.characterId}:${conv.createdByUserId}`);
   }
 

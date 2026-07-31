@@ -55,6 +55,8 @@ Implement in this order:
 
 # 3. Feed Layout and Horizontal Overflow
 
+> **Status (updated 2026-07-31): ✅ Done.** Global `overflow-x:hidden` guard, `max-width:100%` on media, no `w-screen` usage, and the `.overflow-guard` wrap class is now applied to post and comment text so long unbroken strings wrap.
+
 ## Problem
 
 The feed can scroll horizontally. The application should only scroll vertically.
@@ -121,6 +123,8 @@ on mobile breakpoints.
 ---
 
 # 4. Stories System
+
+> **Status (updated 2026-07-31): ⚠️ Mostly done — video stories remain.** Expiration is now truly 72h (cleanup cron expires solely on `expiresAt`; AI stories also get 72h), `mediaType` is always set server-side, and story circles now open a full-screen StoryViewer (per-story progress bars, tap navigation, captions, auto-advance) that persists viewed state via `POST /stories/:id/view` and refreshes the viewed rings. The story creator modal is now reachable. Remaining: no video story option.
 
 ## Problems
 
@@ -212,6 +216,8 @@ In the feed:
 
 ## 5.1 Missing user avatar
 
+> **Status (updated): ✅ Done.** Real authenticated avatar with a generated Dicebear fallback when `avatarUrl` is empty; re-syncs after profile updates.
+
 ### Problem
 
 The composer shows a gray circle instead of the logged-in user’s profile image.
@@ -232,6 +238,8 @@ Likely files:
 ---
 
 ## 5.2 Intelligent mention autocomplete
+
+> **Status (updated): ✅ Done.** Backend mention-search matches spec; `MentionAutocomplete` has portal/debounce/keyboard nav; and `MentionText`'s rendering regex is now Unicode-aware (`[\p{L}\p{N}_]` with `u` flag), so Unicode mentions render as links.
 
 ### Desired behavior
 
@@ -316,6 +324,8 @@ Remove the separate mention button if manual `@` typing fully replaces it.
 
 ## 5.3 Hashtags
 
+> **Status (updated): ✅ Done.** Tables, Unicode parsing/upsert, backend endpoints, and now a `/hashtag/:name` frontend page rendering posts via the shared PostCard — hashtag links navigate there.
+
 ### Required behavior
 
 - Typing `#topic` creates a hashtag token.
@@ -369,6 +379,8 @@ GET /v1/hashtags/trending
 
 ## 5.4 Feeling picker redesign
 
+> **Status: ✅ Done.** All 12 categories implemented as a portal-based bottom sheet (mobile) / popover (desktop) with a remove option, matching the spec.
+
 ### Problem
 
 The current feeling UI looks unpolished and AI-generated.
@@ -404,6 +416,8 @@ Do not use a cramped floating grid.
 ---
 
 ## 5.5 Link embeds in posts
+
+> **Status (updated): ✅ Done.** `POST /v1/link-preview` with full SSRF protections; previews persist to `post_link_previews`; feed/profile queries now join the table and PostCard renders `LinkPreviewCard` after refresh.
 
 ### Desired behavior
 
@@ -475,6 +489,8 @@ Frontend:
 
 ## 5.6 Image upload validation
 
+> **Status: ⚠️ Partial.** Picker, upload, preview, and persistence work with visible progress, and unsupported types are rejected. Missing: client-side compression/resizing, EXIF orientation correction, and a retry action (a failed upload can only be dismissed).
+
 Verify:
 
 - image picker opens,
@@ -490,6 +506,8 @@ Verify:
 ---
 
 # 6. Post Reactions and Persistence
+
+> **Status: ⚠️ Partial.** Unique DB constraints, idempotent PUT/DELETE reaction endpoints with authoritative `viewerReaction`/counts, and NaN-safe rendering on both API and Redux are all done. AI reactions run as durable BullMQ jobs (`setTimeout` only as an explicit fallback when Redis is unavailable). Gap: reaction/count updates aren't wrapped in a `db.transaction()` anywhere, despite the spec requiring it.
 
 ## Problems
 
@@ -591,6 +609,8 @@ AI characters should:
 
 # 7. Comments and Replies
 
+> **Status (updated): ⚠️ Mostly done.** Reply button now fully works — "Replying to <name>" chip, focus, `parentCommentId` sent, nested render, persists after refresh. The character-reply engine runs as a durable worker job. Remaining: AI reply structured-output validation still uses raw `JSON.parse` without a schema validator/repair retry.
+
 ## Problems
 
 - Character does not reply to the user.
@@ -683,6 +703,8 @@ Use a structured output validator with retries.
 
 # 8. Post Menus and Share UI
 
+> **Status: ✅ Done.** Menus and the share sheet render via `createPortal(document.body)`, the z-index scale matches this spec exactly, and the share UI is a true bottom sheet on mobile.
+
 ## Problems
 
 - Three-dot menus are too transparent.
@@ -728,6 +750,8 @@ Recommended layers:
 ---
 
 # 9. Social Sharing and SEO
+
+> **Status: ⚠️ Partial.** The `/p/:postId` route is real server-rendered HTML (not client-only Vite) with full OG/Twitter meta tags, served by the API and proxied by nginx separately from the SPA — confirmed by the latest commit. Gap: there's no durable, branded social-card image generator for text-only posts; they fall back to an external Dicebear placeholder rather than a stored, on-brand image.
 
 ## Desired behavior
 
@@ -787,6 +811,8 @@ Do not rely on browser screenshots at share time.
 
 # 10. Feed Ranking
 
+> **Status: ✅ Done.** The feed query is scoped to the user's own posts, followed characters, and friends — no "all public characters" fallback.
+
 ## Desired behavior
 
 The feed should show posts from followed characters only, including private characters owned by the user and public followed characters.
@@ -833,6 +859,8 @@ Start with correctness before algorithmic ranking.
 ---
 
 # 11. Discover Page
+
+> **Status (updated): ✅ Done.** The live `/discover` page now has a "My Characters" private section above the public grid, search hits the backend `GET /v1/characters/search` (debounced), follow state is server-authoritative with optimistic update + rollback, field mismatches fixed, star badge defined/hidden appropriately.
 
 ## Desired layout
 
@@ -941,6 +969,8 @@ Then render separate sections.
 
 # 12. Character Profile Posts
 
+> **Status (updated): ⚠️ Mostly done.** One shared `PostCard` is now used by feed, character profiles, the user's own profile, and the hashtag page. Remaining: the finer decomposition (`PostContent`/`PostActions`/`CommentThread`/`ReactionPicker` as separate files) wasn't done — they live inline in PostCard.tsx; `MentionText`, `PostMenu`, `LinkPreviewCard`, `ShareBottomSheet` exist separately.
+
 ## Requirement
 
 Posts on a character profile must use the same post card component and the same behavior as feed posts.
@@ -964,6 +994,8 @@ Character profile and feed must share them.
 ---
 
 # 13. Chat List
+
+> **Status (updated): ⚠️ Mostly done.** The list endpoint now returns a complete single-query projection (character {id,name,avatarUrl}, lastMessage {content/senderType/createdAt, media placeholders}, unreadCount, mutedUntil, updatedAt) and rows render real avatars, last-message previews, timestamps, unread badges, mute indicator, and a portaled three-dot menu with backend-persisted mute. Remaining: outgoing delivery/read glyphs on rows — `delivered_at`/`read_at` columns now exist but the server never writes those transitions.
 
 ## Required chat-row design
 
@@ -1020,6 +1052,8 @@ Do not assemble critical row metadata from temporary Redux character lists.
 
 # 14. Chat Menus and Header Persistence
 
+> **Status: ✅ Done.** `AIChatPage` now falls back to a direct `GET /v1/characters/:characterId` fetch when the Redux `mine`/`discover` lists are empty (e.g. on direct refresh), and the header menu uses a portal.
+
 ## Problems
 
 - Conversation menus are clipped.
@@ -1064,6 +1098,8 @@ Menus must use portals.
 ---
 
 # 15. Relationship System
+
+> **Status (updated): ⚠️ Mostly done.** All dimensions + bounded deltas/clamps/cooldowns/diminishing returns/stage-skip guard implemented and live. The header now has a gradient circular progress ring around the avatar with a tap popover (stage, level N/10, progress bar, dimension mini-bars). Remaining: a second simpler relationship-update path (`context-builder.service.ts`) still runs concurrently with the engine, and the engine's delta/cooldown logic still has no dedicated tests.
 
 ## Desired behavior
 
@@ -1159,6 +1195,8 @@ Add unit tests for relationship presets and deltas.
 
 # 16. AI Conversation Quality
 
+> **Status: ⚠️ Partial.** The prompt is genuinely layered (safety, identity, state, relationship, memory, mode, message), and extensive prompt engineering reduces generic/repetitive language. Gaps: "recent messages" is collapsed into an ~80-character-per-turn summary rather than real multi-turn history; the model is never actually instructed to emit the `{parts, emotion, relationshipSignals}` structured schema defined in code (it emits a simpler array instead), so the schema validator is effectively dead code; and the "one repair retry" is only local re-parsing — no second LLM call ever happens despite a code comment claiming there is one.
+
 ## Required prompt stack
 
 Build prompts in layers:
@@ -1206,6 +1244,8 @@ Retry invalid structured output once with a repair prompt.
 ---
 
 # 17. Intelligent Image and Video Generation
+
+> **Status: ⚠️ Partial.** Selfie-avoidance is explicit and effective in the prompt (non-face requests correctly map to `[IMAGE:]`), and video generation is real (Alibaba wan2.6) with an honest, non-fake fallback message on failure. Gaps: there's no discrete classifier — intent is inferred entirely from prompt-instructed text markers parsed by regex, with no "group scene" or "refusal" category; and the reference-pack/`IdentityConsistencyService` infrastructure for identity-consistent generation exists but is never actually called from the live image-generation path (selfies are generated from a text prompt only).
 
 ## Current problem
 
@@ -1266,6 +1306,8 @@ If no video provider is configured:
 ---
 
 # 18. Voice Messages
+
+> **Status (updated): ✅ Done.** `@fastify/multipart` is now registered (it never was — the endpoint was dead); `POST /v1/media/voice-notes` stores the file under the asset ID (matching the serve path), transcribes inline, persists the `voice_note` message row (mediaAssetId/mediaUrl/transcription/durationMs) BEFORE the AI reply, and returns messageId. Frontend uses one multipart POST, swaps the blob URL for the durable playbackUrl, retries on failure, and history rehydrates voice bubbles. New shared player: play/pause, elapsed/total, seekable progress, buffering, error+retry, one-at-a-time.
 
 ## Current problems
 
@@ -1370,6 +1412,8 @@ Convert unsupported input formats server-side if necessary.
 
 # 19. User Profile
 
+> **Status (updated): ✅ Done.** Avatar/cover uploads actually work now (they were silently broken — multipart never registered, handlers called a nonexistent API; both fixed with correct storage-path convention). Profile posts use the shared PostCard (local ProfilePost deleted). Stats row is clickable — Friends/Followers open a following-list bottom sheet backed by new `GET /v1/users/me/following`.
+
 ## Required features
 
 1. Upload/change profile image.
@@ -1400,6 +1444,8 @@ If user-to-user following is later supported, keep it separate from character fr
 
 # 20. Settings
 
+> **Status (updated): ✅ Done.** Notification-type toggles are now enforced in notification creation and push delivery (no more fake-functional settings); theme + language persist server-side via `PATCH /users/me/settings` and sync on boot (localStorage kept as instant-apply cache); email notifications remain hidden.
+
 ## Requirement
 
 Do not show non-functional settings as if they work.
@@ -1427,6 +1473,8 @@ Settings needing real persistence:
 ---
 
 # 21. Sessions and Cookies
+
+> **Status: ⚠️ Partial.** Short-lived JWT access tokens, rotating refresh tokens in an HttpOnly cookie with SameSite/secure flags, token-reuse detection (revokes all sessions on reuse), a `user_sessions` table, and a shared-promise `apiFetch` refresh-once-and-retry (no parallel refresh storms, no logout on a single transient failure) are all implemented correctly. Gap: the frontend also stores the raw refresh token in `localStorage` and sends it in the request body, which undermines the intended HttpOnly/XSS protection this section asks for.
 
 ## Problems
 
@@ -1480,6 +1528,8 @@ Persist only non-sensitive profile cache locally.
 
 # 22. Mobile-First UX
 
+> **Status (updated): ⚠️ Mostly done.** PullToRefresh is now wired on Feed/Discover/Notifications/Chats (with gesture axis-lock protecting swipe-to-delete); scroll restoration on Feed/Discover via sessionStorage hook; bottom nav is Home/Discover/Create/Chats/Profile with a center Create action button opening a bottom sheet (New Post/Story/Character + Go Live); notifications bell with unread badge in the top bar; skeletons on all 5 key screens; touched controls ≥44px. Remaining: app-wide touch-target audit and full glassmorphism elimination.
+
 ## Required improvements
 
 - Pull-to-refresh on feed, discover, notifications, and chats.
@@ -1513,6 +1563,8 @@ The current navigation should be redesigned to feel deliberate, not generated.
 ---
 
 # 23. Notifications
+
+> **Status (updated): ⚠️ Mostly done.** 7 of 9 event types now created (added relationship_milestone + incoming_message with mute checks); preference toggles enforced centrally; every creation site stores entityType/entityId + data_json. Remaining: story-interaction/billing/moderation events aren't created anywhere, NotificationsPage still deep-links several types to a no-op, and the frontend doesn't paginate.
 
 ## Required notification events
 
@@ -1565,6 +1617,8 @@ Support:
 
 # 24. PWA Push Notifications
 
+> **Status: ✅ Done.** Web Push subscription flow, VAPID keys, a real service-worker push handler with click deep-linking, the `push_subscriptions` table, permission requested only from a Settings toggle (not on load), and per-conversation mute suppression are all implemented correctly.
+
 ## Required behavior
 
 Push notifications should work while the installed PWA is closed.
@@ -1602,6 +1656,8 @@ Ask after a meaningful user action.
 
 # 25. Character Re-engagement Messages
 
+> **Status (updated): ✅ Done.** The sweep now actually enqueues `reengage-conversation` jobs (with 0–15 min jitter) for eligible candidates; all rate-limit rules preserved; sent follow-ups also raise a mute-checked incoming_message notification.
+
 ## Desired behavior
 
 If the user leaves a conversation, the character may later send a message such as “Where did you go?” but not annoyingly.
@@ -1631,6 +1687,8 @@ Use durable scheduled jobs.
 
 # 26. Conversation Mute
 
+> **Status (updated): ⚠️ Mostly done.** Mute works end-to-end (both the in-chat menu and the chat-list row menu now call the backend; localStorage hack removed). Remaining: `proactive_messages_enabled` is now a real column, but the settings endpoint still uses the far-future-`mutedUntil` proxy instead of writing it.
+
 Add:
 
 ```http
@@ -1659,6 +1717,8 @@ Muting must suppress push and proactive notifications, not normal message histor
 ---
 
 # 27. Subscription and Pricing
+
+> **Status (updated): ⚠️ Mostly done.** Stripe webhook signature verification is fixed — a raw-body content-type parser captures the Buffer for `/v1/billing/webhook` and `constructEvent` receives it; explicit `invoice.payment_failed` handling added; idempotency-guard failures now log structured warnings. Remaining: no customer-portal endpoint, and storage/bandwidth/Stripe fees are still unmodeled in the cost model.
 
 ## Current observation
 
@@ -1710,6 +1770,8 @@ Do not trust checkout redirect alone. Stripe webhooks are the source of truth.
 
 # 28. UI Quality Standard
 
+> **Status: ⚠️ Partial.** A real design-token system (spacing, typography, radius, elevation, semantic colors, z-index, motion durations, focus rings) is defined in `global.css`, and glassmorphism/duplication are much reduced. Gap: the `.storybook` config at the repo root points at a legacy, unrelated `src/` app using CRA-era addons — there's no working component gallery for the current `apps/web`/`packages/ui` stack, and `packages/ui` itself only has a handful of primitives (no menus/sheets/dialogs/post-cards/chat-rows/bubbles/reaction-pickers/progress-rings as shared components).
+
 The application should not look “vibe coded.”
 
 ## Remove or reduce
@@ -1756,6 +1818,8 @@ Create Storybook or a development component gallery for:
 
 # 29. Database Migration Checklist
 
+> **Status (updated): ✅ Done (with one caveat).** `_journal.json` rebuilt (8 entries, validated); all migration SQL made idempotent against the live push-created DB; new `0005_missing_tables.sql` creates the ~45 previously push-only tables, 7 enums, indexes, post-reaction unique constraints, and the messages/conversation_participants columns (metadata, media fields, delivered_at/read_at, proactive_messages_enabled); `migrate.ts` path bug fixed; journal ordering makes fresh-DB bootstrap work. Caveat: 0000-era tables that later grew columns via `drizzle-kit push` (e.g. `characters` identity columns) aren't covered — run a `drizzle-kit generate` diff before standing up a brand-new environment.
+
 Potential new/changed structures:
 
 - hashtags
@@ -1783,6 +1847,8 @@ All migrations must:
 ---
 
 # 30. Testing Requirements
+
+> **Status: ❌ Not done.** Only relationship-preset bounds and chat-message reaction toggling have any unit test coverage; mention/Unicode parsing, hashtag parsing, feed filtering, proactive-message limits, link-preview security, and media-intent classification have none. The one integration-style test file only smoke-tests endpoint health, not the persistence scenarios required below. The `cypress/` E2E specs test a leftover Snapchat-clone UI unrelated to itChats — there is no itChats-specific E2E coverage at all.
 
 ## Unit tests
 
@@ -1860,6 +1926,8 @@ A phase is not complete until:
 
 # 32. Immediate First Sprint
 
+> **Status (updated 2026-07-31): Sprints 1A–1D complete** except: structured prompt validation (1D) remains disconnected from the model's actual output format. Everything else — persistence, overlays, stories/feed, AI interaction — is implemented; see [ITCHATS_TASK_LIST.md](ITCHATS_TASK_LIST.md).
+
 Implement these first because they produce the largest visible quality improvement:
 
 ## Sprint 1A — Persistence
@@ -1898,6 +1966,8 @@ Implement these first because they produce the largest visible quality improveme
 ---
 
 # 33. Known Current Code Issues Already Identified
+
+> **Status of each issue below (updated 2026-07-31):** Discover `useState(false)` — ✅ fixed. Redux reaction reducer — ✅ fixed. Chat header lookup — ✅ fixed. Voice-note browser object URL — ✅ fixed (durable playback URL persisted; blob revoked). Delayed AI `setTimeout` — ⚠️ mostly fixed (BullMQ primary; `setTimeout` only as Redis-down fallback; mention-replies still inline).
 
 ## Discover
 

@@ -11,7 +11,7 @@ import {
 import type { RootState } from '@/app/store';
 import { logout, useAppDispatch, setLanguage, setAutoTranslate, initLanguageSettings } from '@/app/store';
 import { apiFetch } from '@/lib/api';
-import { getStoredTheme, toggleAndNotify, type Theme } from '@/app/theme';
+import { getStoredTheme, toggleAndNotify, applyTheme, type Theme } from '@/app/theme';
 import { LANGUAGES, applyLanguage } from '@/lib/i18n';
 
 // ── Types ──
@@ -21,6 +21,8 @@ interface UserSettings {
   charVisibility: string;
   nsfwFilter: boolean;
   contentLanguage: string;
+  theme?: string | null;
+  language?: string | null;
   notificationPreferences: {
     pushNotifs: boolean;
     emailNotifs: boolean;
@@ -188,6 +190,18 @@ export default function SettingsPage() {
       setNsfwFilter(data.nsfwFilter);
       setContentLanguage(data.contentLanguage);
       setNotifPrefs(data.notificationPreferences);
+      // Server-side theme/language win over the localStorage cache when they differ
+      if (data.theme === 'light' || data.theme === 'dark') {
+        if (data.theme !== getStoredTheme()) {
+          applyTheme(data.theme);
+          window.dispatchEvent(new CustomEvent('themechange', { detail: data.theme }));
+        }
+        setTheme(data.theme);
+      }
+      if (data.language && data.language !== localStorage.getItem('itchats-language')) {
+        dispatch(setLanguage(data.language));
+        applyLanguage(data.language);
+      }
     } catch {
       // Fall back to localStorage defaults
       try {
@@ -442,7 +456,11 @@ export default function SettingsPage() {
             value={theme === 'dark' ? 'Dark mode' : 'Light mode'}
             toggle
             toggled={theme === 'dark'}
-            onToggle={() => setTheme(toggleAndNotify())}
+            onToggle={() => {
+              const next = toggleAndNotify();
+              setTheme(next);
+              saveSettingsBatch({ theme: next });
+            }}
           />
           <SettingsRow
             icon={Languages}
@@ -710,6 +728,7 @@ export default function SettingsPage() {
                   applyLanguage(lang.code);
                   setShowLangPicker(false);
                   try { localStorage.setItem('itchats-language', lang.code); } catch {}
+                  saveSettingsBatch({ language: lang.code });
                 }}
                 className={`flex w-full items-center gap-4 px-4 py-3 rounded-xl transition-colors text-left ${currentLang === lang.code ? 'bg-brand-primary/10 text-brand-primary font-semibold' : 'glass hover:bg-white/5 text-text-primary'}`}
                 style={{ minHeight: 48 }}

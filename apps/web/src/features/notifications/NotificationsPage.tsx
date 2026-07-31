@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import PullToRefresh from '@/components/PullToRefresh';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell, Heart, MessageCircle, UserPlus, AtSign, Star,
@@ -210,7 +211,7 @@ export default function NotificationsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [markingIds, setMarkingIds] = useState<Set<string>>(new Set());
-  const touchStartRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const fetchNotifications = useCallback(async (silent = false) => {
     try {
@@ -254,23 +255,6 @@ export default function NotificationsPage() {
       });
     }
   }, [markingIds]);
-
-  // Pull-to-refresh via touch
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.currentTarget === e.target || (e.target as HTMLElement).closest('.scroll-container')) {
-      touchStartRef.current = e.touches.item(0)?.clientY ?? 0;
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartRef.current != null) {
-      const diff = (e.changedTouches.item(0)?.clientY ?? 0) - touchStartRef.current;
-      if (diff > 80 && window.scrollY < 10) {
-        handleRefresh();
-      }
-      touchStartRef.current = null;
-    }
-  };
 
   // ── Loading State ──
   if (loading) {
@@ -341,11 +325,7 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div
-      className="h-full flex flex-col bg-bg-canvas"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="h-full flex flex-col bg-bg-canvas">
       {/* Header */}
       <header className="shrink-0 px-4 pt-4 pb-3 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-text-primary">Notifications</h1>
@@ -354,7 +334,7 @@ export default function NotificationsPage() {
         ) : (
           <button
             onClick={handleRefresh}
-            className="p-2 rounded-full hover:bg-bg-elevated transition-colors"
+            className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-bg-elevated transition-colors"
             aria-label="Refresh notifications"
           >
             <RefreshCw size={16} className="text-text-muted" />
@@ -362,8 +342,9 @@ export default function NotificationsPage() {
         )}
       </header>
 
-      {/* Notification list */}
-      <div className="flex-1 overflow-y-auto scroll-container">
+      {/* Notification list (pull down at top to refresh) */}
+      <PullToRefresh onRefresh={handleRefresh} scrollRef={scrollRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-container">
         <AnimatePresence mode="wait">
           {groups.map((group, gi) => (
             <motion.div
@@ -399,6 +380,7 @@ export default function NotificationsPage() {
         {/* Bottom spacer */}
         <div className="h-6" />
       </div>
+      </PullToRefresh>
     </div>
   );
 }

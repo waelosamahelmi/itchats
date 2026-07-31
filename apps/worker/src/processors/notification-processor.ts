@@ -1,9 +1,41 @@
 import { Job } from 'bullmq';
 import { getDb } from '@itchats/database';
-import { notifications, pushSubscriptions, conversationParticipants, conversations, messages } from '@itchats/database/schema';
+import { notifications, pushSubscriptions, conversationParticipants, conversations, messages, userSettings } from '@itchats/database/schema';
 import { eq, and } from 'drizzle-orm';
 import { getConfig } from '@itchats/config';
 import type { NotificationJob } from '../queues';
+
+/**
+ * Maps user_settings notification-preference toggle keys to the notification
+ * types they control. Types not listed (mention, billing, moderation, …) are
+ * always delivered.
+ */
+const NOTIFICATION_PREF_GATES: Record<string, string[]> = {
+  reactNotifs: ['post_reaction', 'comment_reaction'],
+  msgNotifs: ['incoming_message'],
+  storyNotifs: ['story_interaction'],
+  charPostNotifs: ['character_post'],
+};
+
+async function loadNotificationPrefs(db: ReturnType<typeof getDb>, userId: string): Promise<Record<string, boolean> | null> {
+  try {
+    const [row] = await db.select({ value: userSettings.value })
+      .from(userSettings)
+      .where(and(eq(userSettings.userId, userId), eq(userSettings.key, 'notification_preferences')))
+      .limit(1);
+    if (!row?.value) return null;
+    return JSON.parse(row.value) as Record<string, boolean>;
+  } catch {
+    return null;
+  }
+}
+
+function isTypeEnabled(prefs: Record<string, boolean> | null, type: string): boolean {
+  if (!prefs) return true; // No saved prefs — deliver everything
+  const gateEntry = Object.entries(NOTIFICATION_PREF_GATES).find(([, types]) => types.includes(type));
+  if (!gateEntry) return true; // Not preference-gated
+  return prefs[gateEntry[0]] !== false;
+}
 
 /**
  * Notification processor.
@@ -16,6 +48,13 @@ export async function notificationProcessor(job: Job<NotificationJob>) {
   const db = getDb();
   const config = getConfig();
   const { userId, type, title, body, data } = job.data;
+
+  // Respect the user's notification preference toggles for gated types
+  const prefs = await loadNotificationPrefs(db, userId);
+  if (!isTypeEnabled(prefs, type)) {
+    return { success: true, skipped: true, reason: `user disabled ${type} notifications` };
+  }
+  const pushEnabled = !prefs || prefs.pushNotifs !== false;
 
   // For incoming_message or character_reply notifications, check mute
   if ((type === 'incoming_message' || type === 'character_reply') && data?.conversationId) {
@@ -57,7 +96,7 @@ export async function notificationProcessor(job: Job<NotificationJob>) {
   } as any).returning();
 
   // Send push notifications to subscribed devices
-  if (config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY) {
+  if (pushEnabled && config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY) {
     try {
       const subs = await db.select().from(pushSubscriptions)
         .where(and(

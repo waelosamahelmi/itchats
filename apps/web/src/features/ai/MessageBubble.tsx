@@ -1,15 +1,163 @@
-import { useRef, useState } from 'react';
-import { Check, CheckCheck, Pause, Play, AlertCircle, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Check, CheckCheck, Pause, Play, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ChatMessage } from './chatModel';
 import { ReactionBar } from './ReactionBar';
 
 const HOLD_MS = 420;
 
+function formatAudioTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Shared voice-note player: play/pause, elapsed/total time, seekable progress
+ * bar, buffering spinner, and an error state with retry. Playback is
+ * coordinated by the parent via the `playing` prop (one audio at a time).
+ */
+function VoiceNotePlayer({
+  url,
+  playing,
+  durationMs,
+  onToggle,
+  onEnded,
+}: {
+  url: string;
+  playing: boolean;
+  durationMs?: number;
+  onToggle: () => void;
+  onEnded: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [metaDuration, setMetaDuration] = useState(0);
+  const [buffering, setBuffering] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  // Prefer real audio metadata; MediaRecorder webm often reports Infinity, so
+  // fall back to the recorded durationMs from the message row.
+  const duration = metaDuration > 0 && Number.isFinite(metaDuration)
+    ? metaDuration
+    : durationMs && durationMs > 0 ? durationMs / 1000 : 0;
+  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      setFailed(false);
+      const attempt = audio.play();
+      if (attempt) {
+        attempt.catch(() => {
+          setBuffering(false);
+          setFailed(true);
+          onEnded();
+        });
+      }
+    } else {
+      audio.pause();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, url]);
+
+  const handleSeek = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || duration <= 0 || failed) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    try {
+      audio.currentTime = ratio * duration;
+      setCurrentTime(ratio * duration);
+    } catch { /* stream not seekable yet */ }
+  };
+
+  const handleRetryAudio = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setFailed(false);
+    setBuffering(true);
+    audio.load();
+    if (!playing) onToggle();
+    else audio.play().catch(() => { setBuffering(false); setFailed(true); });
+  };
+
+  return (
+    <div className="voice-note flex items-center gap-2 min-w-[180px]" onPointerDown={(e) => e.stopPropagation()}>
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="metadata"
+        onLoadedMetadata={(e) => {
+          const d = (e.target as HTMLAudioElement).duration;
+          if (Number.isFinite(d) && d > 0) setMetaDuration(d);
+        }}
+        onDurationChange={(e) => {
+          const d = (e.target as HTMLAudioElement).duration;
+          if (Number.isFinite(d) && d > 0) setMetaDuration(d);
+        }}
+        onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+        onWaiting={() => setBuffering(true)}
+        onCanPlay={() => setBuffering(false)}
+        onPlaying={() => setBuffering(false)}
+        onError={() => { setBuffering(false); setFailed(true); if (playing) onEnded(); }}
+        onEnded={() => { setCurrentTime(0); onEnded(); }}
+      />
+      {failed ? (
+        <button
+          type="button"
+          onClick={handleRetryAudio}
+          className="flex items-center gap-1.5 text-danger"
+          aria-label="Voice note failed to load. Retry"
+        >
+          <AlertCircle size={16} />
+          <RefreshCw size={14} />
+          <span className="text-xs">Retry</span>
+        </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onToggle}
+            className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-white/10"
+            aria-label={playing ? 'Pause voice note' : 'Play voice note'}
+          >
+            {buffering && playing
+              ? <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+              : playing ? <Pause size={16} /> : <Play size={16} />}
+          </button>
+          <div className="flex flex-col gap-1 flex-1 min-w-0">
+            <div
+              className="relative h-1.5 rounded-full bg-white/20 cursor-pointer"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress * 100)}
+              aria-label="Voice note progress"
+              onClick={handleSeek}
+            >
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-current opacity-90"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+            <span className="text-[11px] opacity-80 tabular-nums leading-none">
+              {formatAudioTime(playing || currentTime > 0 ? currentTime : duration)}
+              {duration > 0 ? ` / ${formatAudioTime(duration)}` : ''}
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   onReact,
   onPlay,
+  onPlaybackEnd,
   playing = false,
   onApproveMedia,
   onDenyMedia,
@@ -23,6 +171,7 @@ export function MessageBubble({
   message: ChatMessage;
   onReact: (messageId: string, emoji: string) => void;
   onPlay?: (message: ChatMessage) => void;
+  onPlaybackEnd?: (message: ChatMessage) => void;
   playing?: boolean;
   onApproveMedia?: (message: ChatMessage) => void;
   onDenyMedia?: (message: ChatMessage) => void;
@@ -202,11 +351,13 @@ export function MessageBubble({
           ) : message.kind === 'video' && message.mediaUrl ? (
             <video src={message.mediaUrl} controls playsInline aria-label={message.text || 'Video sent in conversation'} />
           ) : (message.kind === 'voice_note' || message.kind === 'audio') && message.mediaUrl ? (
-            <button type="button" className="voice-note" onClick={() => onPlay?.(message)}>
-              {playing ? <Pause size={17} /> : <Play size={17} />}
-              <span className="voice-wave" aria-hidden="true">▂▅▃▇▅▂▆▃▅</span>
-              <span className="sr-only">{playing ? 'Pause voice note' : 'Play voice note'}</span>
-            </button>
+            <VoiceNotePlayer
+              url={message.mediaUrl}
+              playing={playing}
+              durationMs={message.durationMs}
+              onToggle={() => onPlay?.(message)}
+              onEnded={() => onPlaybackEnd?.(message)}
+            />
           ) : (
             <p>{cleanText}</p>
           )}

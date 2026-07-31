@@ -65,6 +65,34 @@ async function bootstrap() {
   // Manual CORS — handles all requests including SSE raw writes
   const fastify = app.getHttpAdapter().getInstance();
 
+  // Stripe webhook signature verification requires the RAW request body.
+  // Replace the default JSON parser with one that keeps the raw buffer for the
+  // webhook route (only there, to avoid double memory for every request) and
+  // still hands parsed JSON to the rest of the app.
+  const STRIPE_WEBHOOK_PATH = '/v1/billing/webhook';
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req: any, body: Buffer, done: (err: Error | null, result?: unknown) => void) => {
+      if (req.url === STRIPE_WEBHOOK_PATH || req.url?.startsWith(`${STRIPE_WEBHOOK_PATH}?`)) {
+        req.rawBody = body;
+      }
+      try {
+        done(null, body.length > 0 ? JSON.parse(body.toString('utf8')) : {});
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
+  // Multipart uploads (voice notes, avatars). attachFieldsToBody keeps files
+  // buffered on req.body so Nest controllers can read them via req.body.<field>.
+  const { default: fastifyMultipart } = await import('@fastify/multipart');
+  await fastify.register(fastifyMultipart, {
+    attachFieldsToBody: true,
+    limits: { fileSize: 30 * 1024 * 1024, files: 3 },
+  });
+
   // Cookie support for refresh token HttpOnly cookies
   const { default: fastifyCookie } = await import('@fastify/cookie');
   await fastify.register(fastifyCookie, {

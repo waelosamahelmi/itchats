@@ -386,6 +386,31 @@ export class UsersService {
     return this.getUserFriends(userId);
   }
 
+  /** Characters the user follows */
+  async getFollowing(userId: string) {
+    const db = getDb();
+    const following = await db
+      .select({
+        id: characters.id,
+        name: characters.name,
+        handle: characters.handle,
+        avatarUrl: characters.avatarUrl,
+        description: characters.description,
+        followersCount: characters.followerCount,
+        followedAt: characterFollows.createdAt,
+      })
+      .from(characterFollows)
+      .innerJoin(characters, eq(characterFollows.characterId, characters.id))
+      .where(
+        and(
+          eq(characterFollows.userId, userId),
+          sql`${characters.deletedAt} IS NULL`,
+        ),
+      )
+      .orderBy(sql`${characterFollows.createdAt} DESC`);
+    return { following, count: following.length };
+  }
+
   async getScore(userId: string) {
     const db = getDb();
     const [score] = await db
@@ -506,6 +531,18 @@ export class UsersService {
     const nsfwFilter = nsfwResult.rows[0]?.value ?? 'true';
     const contentLanguage = contentLangResult.rows[0]?.value ?? 'en';
 
+    // UI preferences (theme + app language)
+    const themeResult = await pool.query(
+      `SELECT value FROM user_settings WHERE user_id = $1 AND key = 'theme' LIMIT 1`,
+      [userId],
+    );
+    const languageResult = await pool.query(
+      `SELECT value FROM user_settings WHERE user_id = $1 AND key = 'language' LIMIT 1`,
+      [userId],
+    );
+    const theme = themeResult.rows[0]?.value ?? null;
+    const language = languageResult.rows[0]?.value ?? null;
+
     // Notification preferences
     const notifResult = await pool.query(
       `SELECT value FROM user_settings WHERE user_id = $1 AND key = 'notification_preferences' LIMIT 1`,
@@ -531,6 +568,8 @@ export class UsersService {
       charVisibility,
       nsfwFilter: nsfwFilter === 'true',
       contentLanguage,
+      theme,
+      language,
       notificationPreferences,
     };
   }
@@ -544,6 +583,8 @@ export class UsersService {
       charVisibility?: string;
       nsfwFilter?: boolean;
       contentLanguage?: string;
+      theme?: string;
+      language?: string;
       notificationPreferences?: Record<string, boolean>;
     },
   ) {
@@ -576,6 +617,8 @@ export class UsersService {
     if (data.charVisibility !== undefined) await upsertSetting('char_visibility', data.charVisibility);
     if (data.nsfwFilter !== undefined) await upsertSetting('nsfw_filter', String(data.nsfwFilter));
     if (data.contentLanguage !== undefined) await upsertSetting('content_language', data.contentLanguage);
+    if (data.theme !== undefined) await upsertSetting('theme', data.theme);
+    if (data.language !== undefined) await upsertSetting('language', data.language);
     if (data.notificationPreferences !== undefined) {
       await upsertSetting('notification_preferences', JSON.stringify(data.notificationPreferences));
     }

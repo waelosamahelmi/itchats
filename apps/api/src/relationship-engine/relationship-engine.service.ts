@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { characterRelationships, characters } from '@itchats/database/schema';
 import { eq, and, sql } from 'drizzle-orm';
+import { NotificationsService, NOTIFICATION_TYPES } from '../notifications/notifications.service';
 
 /**
  * Message quality dimensions scored by the relationship engine.
@@ -57,6 +58,8 @@ export interface RelationshipState {
 @Injectable()
 export class RelationshipEngineService {
   private readonly logger = new Logger(RelationshipEngineService.name);
+
+  constructor(@Optional() private readonly notifications?: NotificationsService) {}
 
   /** Decay rate: how much attachment/affection fades per day of no contact */
   private readonly DECAY_RATE = 0.003;
@@ -300,6 +303,13 @@ export class RelationshipEngineService {
       updatedAt: now,
     } as any).where(eq(characterRelationships.id, existing.id));
 
+    // ── Relationship milestone notification on stage transition ──
+    if (newVisibleLevel > currentStage) {
+      this.notifyMilestone(userId, characterId, newVisibleLevel).catch((err) => {
+        this.logger.debug(`Milestone notification failed: ${err?.message}`);
+      });
+    }
+
     return {
       visibleLevel: newVisibleLevel,
       familiarity: newState.familiarity ?? 0,
@@ -319,6 +329,31 @@ export class RelationshipEngineService {
       conversationCount: isNewConversation ? existing.conversationCount + 1 : existing.conversationCount,
       daysKnown: daysSinceCreation,
     };
+  }
+
+  /**
+   * Notify the user that their relationship with a character reached a new stage.
+   */
+  private async notifyMilestone(userId: string, characterId: string, newLevel: number) {
+    if (!this.notifications) return;
+    const db = getDb();
+    const [char] = await db.select({ name: characters.name })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+    if (!char) return;
+
+    const label = this.getRelationshipLabel({ visibleLevel: newLevel } as RelationshipState);
+    await this.notifications.create({
+      userId,
+      type: NOTIFICATION_TYPES.RELATIONSHIP_MILESTONE,
+      actorCharacterId: characterId,
+      entityType: 'character',
+      entityId: characterId,
+      title: 'Relationship milestone!',
+      body: `You and ${char.name} are now ${label}${label === 'Soulmate' || label === 'Best Friend' ? 's' : ''} (level ${newLevel})`,
+      data: { characterId, level: newLevel, label },
+    });
   }
 
   /**

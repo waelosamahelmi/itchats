@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Heart, MessageCircle, Share2, Send,
-  Globe, Lock, Sparkles,
+  Globe, Lock, Sparkles, X,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
@@ -28,6 +28,7 @@ import { Badge } from '@itchats/ui';
 import PostMenu from './PostMenu';
 import ShareBottomSheet from './ShareBottomSheet';
 import MentionText from './MentionText';
+import LinkPreviewCard from './LinkPreviewCard';
 
 /** Trigger haptic feedback if available */
 function haptic(ms: number = 10) {
@@ -75,6 +76,7 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
   const [editContent, setEditContent] = useState(post.content);
   const [savingEdit, setSavingEdit] = useState(false);
   const nav = useNavigate();
@@ -131,14 +133,26 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
 
   const handleAddComment = () => {
     if (!commentText.trim()) return;
-    dispatch(addCommentThunk({ postId: post.id, content: commentText.trim() }));
+    const parentCommentId = replyTo?.id;
+    dispatch(addCommentThunk({ postId: post.id, content: commentText.trim(), parentCommentId }));
     // Optimistic
     const newComment: Comment = {
       id: genId(), authorName: 'You', authorAvatar: '',
       authorIsAI: false, content: commentText.trim(), createdAt: new Date().toISOString(), likes: 0, liked: false, replies: [],
+      parentCommentId: parentCommentId ?? null,
     };
-    setComments(c => [...c, newComment]);
+    if (parentCommentId) {
+      setComments(cs => cs.map(c => c.id === parentCommentId ? { ...c, replies: [...(c.replies || []), newComment] } : c));
+    } else {
+      setComments(c => [...c, newComment]);
+    }
     setCommentText('');
+    setReplyTo(null);
+  };
+
+  const handleStartReply = (commentId: string, name: string) => {
+    setReplyTo({ id: commentId, name });
+    document.getElementById(`comment-input-pc-${post.id}`)?.focus();
   };
 
   const handleShare = (e: React.MouseEvent) => {
@@ -289,7 +303,7 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
           </div>
         ) : (
           <>
-            <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line">
+            <p className="text-sm text-text-primary leading-relaxed whitespace-pre-line overflow-guard">
               <MentionText text={showTranslation && translatedData ? translatedData.translatedText : displayContent} />
               {isLongContent && !expandedContent && !showTranslation && '...'}
             </p>
@@ -319,6 +333,13 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
       {post.mediaUrl && (
         <div className="mx-4 mb-3 rounded-xl overflow-hidden">
           <img src={post.mediaUrl} alt="Post media" className="w-full object-cover max-h-[400px] rounded-xl hover:scale-[1.02] transition-transform duration-500" />
+        </div>
+      )}
+
+      {/* Link Preview (only when no media) */}
+      {!post.mediaUrl && post.linkPreview?.url && (
+        <div className="mx-4 mb-3">
+          <LinkPreviewCard preview={post.linkPreview} />
         </div>
       )}
 
@@ -390,14 +411,19 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
                         <span className="text-xs font-semibold text-text-primary">{c.authorName}</span>
                         {c.authorIsAI && <Badge variant="ai" className="text-[9px] px-1">AI</Badge>}
                       </div>
-                      <p className="text-xs text-text-secondary"><MentionText text={c.content} /></p>
+                      <p className="text-xs text-text-secondary overflow-guard"><MentionText text={c.content} /></p>
                     </div>
                     <div className="flex items-center gap-3 mt-1 ml-1">
                       <span className="text-[10px] text-text-muted">{timeAgo(c.createdAt)}</span>
                       <button onClick={() => handleLikeComment(c.id, !!c.liked)} className={`text-[10px] font-medium ${c.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
                         {c.likes > 0 ? `Like · ${c.likes}` : 'Like'}
                       </button>
-                      <button className="text-[10px] text-text-muted font-medium">Reply</button>
+                      <button
+                        onClick={() => handleStartReply(c.id, c.authorName)}
+                        className="text-[10px] text-text-muted font-medium hover:text-brand-primary transition-colors"
+                      >
+                        Reply
+                      </button>
                     </div>
                   </div>
                   {c.likes > 0 && (
@@ -415,10 +441,10 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
                       className="w-6 h-6 rounded-full object-cover shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className={`rounded-2xl px-3 py-1.5 inline-block ${r.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
+                      <div className={`rounded-2xl px-3 py-1.5 inline-block max-w-full ${r.authorIsAI ? 'bg-brand-glow/10' : 'bg-bg-elevated'}`}>
                         <span className="text-xs font-semibold text-text-primary">{r.authorName || 'Unknown'}</span>
                         {r.authorIsAI && <Badge variant="ai" className="text-[9px] px-1 ml-1">AI</Badge>}
-                        <p className="text-xs text-text-secondary mt-0.5"><MentionText text={r.content} /></p>
+                        <p className="text-xs text-text-secondary mt-0.5 overflow-guard"><MentionText text={r.content} /></p>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 ml-1">
                         <span className="text-[10px] text-text-muted">{timeAgo(r.createdAt)}</span>
@@ -450,15 +476,29 @@ export default function PostCard({ post, characterName, characterAvatar }: PostC
         </div>
       )}
 
+      {/* Replying-to chip */}
+      {replyTo && (
+        <div className="flex items-center gap-2 px-4 pt-2 border-t border-border-subtle">
+          <span className="text-[11px] text-text-muted">
+            Replying to <span className="text-brand-primary font-medium">{replyTo.name}</span>
+          </span>
+          <button
+            onClick={() => setReplyTo(null)}
+            className="p-0.5 rounded-full text-text-muted hover:text-text-primary transition-colors"
+            aria-label="Cancel reply"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Comment Composer */}
-      <div className="flex items-center gap-2.5 px-4 py-3 border-t border-border-subtle">
-        {userAvatar ? (
-          <img src={userAvatar} alt="You" className="w-7 h-7 rounded-full object-cover shrink-0" />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0 flex items-center justify-center">
-            <span className="text-[10px] text-text-muted">U</span>
-          </div>
-        )}
+      <div className={`flex items-center gap-2.5 px-4 py-3 ${replyTo ? '' : 'border-t border-border-subtle'}`}>
+        <img
+          src={userAvatar || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(user?.username || 'you')}`}
+          alt="You"
+          className="w-7 h-7 rounded-full object-cover shrink-0"
+        />
         <div className="flex-1 flex items-center gap-2 glass rounded-full px-3 py-2">
           <input
             id={`comment-input-pc-${post.id}`}

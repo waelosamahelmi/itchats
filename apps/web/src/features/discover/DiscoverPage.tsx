@@ -4,10 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import { Compass, Search, Star, Heart, Users, Sparkles, Plus, Loader2, Lock } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import type { Character } from '@/app/store';
-import { useAppDispatch, fetchDiscover, followChar, unfollowChar } from '@/app/store';
+import { useAppDispatch, fetchDiscover, fetchMine, followChar, unfollowChar } from '@/app/store';
+import { apiFetch } from '@/lib/api';
 import { Badge } from '@itchats/ui';
+import PullToRefresh from '@/components/PullToRefresh';
+import NotificationBell from '@/components/NotificationBell';
+import { useScrollRestoration } from '@/hooks/useScrollRestoration';
 
-function CharacterCard({ char, index }: { char: Character; index: number }) {
+function CharacterCard({ char, index, onFollowToggle }: { char: Character; index: number; onFollowToggle?: (id: string, next: boolean) => void }) {
   const dispatch = useAppDispatch();
   const nav = useNavigate();
   // Use server state — no local useState(false) that resets on refresh
@@ -15,8 +19,11 @@ function CharacterCard({ char, index }: { char: Character; index: number }) {
 
   const handleFollow = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (following) dispatch(unfollowChar(char.id));
-    else dispatch(followChar(char.id));
+    const next = !following;
+    // Optimistic local update (for search results kept outside the store)
+    onFollowToggle?.(char.id, next);
+    const thunk = next ? followChar(char.id) : unfollowChar(char.id);
+    dispatch(thunk).unwrap().catch(() => onFollowToggle?.(char.id, !next));
   };
 
   return (
@@ -91,15 +98,55 @@ export default function DiscoverPage() {
   const nav = useNavigate();
   const { user } = useSelector((s: RootState) => s.auth);
   const chars = useSelector((s: RootState) => s.characters.discoverCharacters);
+  const myCharacters = useSelector((s: RootState) => s.characters.myCharacters);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
+  // Backend search state (debounced)
+  const [searchResults, setSearchResults] = useState<Character[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchActive = search.trim().length >= 2;
+  const scrollRef = useScrollRestoration('discover', !loading);
+
   useEffect(() => {
     if (!user) { setLoading(false); return; }
     loadData();
+    dispatch(fetchMine());
   }, [user]);
+
+  // Debounced backend search — falls back to default discover list when empty
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setSearchResults(null); setSearching(false); return; }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch<{ results: any[] }>(`/characters/search?q=${encodeURIComponent(q)}`);
+        const mapped: Character[] = (res?.results || []).map((r: any) => ({
+          ...r,
+          description: r.description ?? '',
+          followersCount: r.followersCount ?? r.followerCount ?? 0,
+        }));
+        setSearchResults(mapped);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Optimistic follow state for search results (kept outside the store)
+  const patchSearchResult = (id: string, next: boolean) => {
+    setSearchResults(rs => rs
+      ? rs.map(c => c.id === id
+        ? { ...c, isFollowing: next, followersCount: Math.max(0, (Number(c.followersCount) || 0) + (next ? 1 : -1)) }
+        : c)
+      : rs);
+  };
 
   async function loadData() {
     setLoading(true);
@@ -118,23 +165,23 @@ export default function DiscoverPage() {
     setRefreshing(false);
   }
 
-  // Filter out user's own characters
+  // Grid data: backend search results when searching, otherwise the discover list
   const visibleChars = useMemo(() => {
+    if (searchActive) {
+      if (!searchResults) return [];
+      // Merge follow state from the store for characters also present in discover
+      return searchResults.map(c => {
+        const inStore = chars.find(d => d.id === c.id);
+        return inStore ? { ...c, isFollowing: inStore.isFollowing, followersCount: inStore.followersCount } : c;
+      });
+    }
     // The discover endpoint returns public characters; we additionally filter by ownerUserId
-    const filtered = chars.filter(c => {
+    return chars.filter(c => {
       // If the character has ownerUserId, don't show if it matches current user
       if ((c as any).ownerUserId && (c as any).ownerUserId === user?.id) return false;
       return true;
     });
-
-    if (!search.trim()) return filtered;
-    const q = search.toLowerCase();
-    return filtered.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      c.description.toLowerCase().includes(q) ||
-      (c.interests?.some(i => i.toLowerCase().includes(q)))
-    );
-  }, [chars, search, user?.id]);
+  }, [chars, searchActive, searchResults, user?.id]);
 
   if (!user) {
     return (
@@ -158,12 +205,15 @@ export default function DiscoverPage() {
             <h1 className="text-[26px] font-extrabold text-text-primary tracking-tight">Discover</h1>
             <p className="text-text-muted text-xs mt-0.5">Explore the AI world</p>
           </div>
-          <button
-            onClick={() => nav('/ai/create')}
-            className="flex items-center gap-1.5 rounded-full bg-brand-primary text-white px-4 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
-          >
-            <Plus size={16} /> Create Character
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => nav('/ai/create')}
+              className="flex items-center gap-1.5 rounded-full bg-brand-primary text-white px-4 py-2.5 min-h-[44px] text-sm font-medium hover:brightness-110 transition-all"
+            >
+              <Plus size={16} /> Create Character
+            </button>
+            <NotificationBell />
+          </div>
         </div>
 
         {/* Search bar */}
@@ -177,30 +227,66 @@ export default function DiscoverPage() {
             className="w-full glass rounded-full pl-10 pr-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-brand-primary/30 transition-all"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+            <button
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center text-text-muted hover:text-text-primary"
+            >
               ✕
             </button>
           )}
         </div>
       </header>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4">
+      {/* Content (pull down at top to refresh) */}
+      <PullToRefresh onRefresh={handleRefresh} scrollRef={scrollRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         {refreshing && (
           <div className="flex justify-center py-3">
             <Loader2 size={20} className="animate-spin text-brand-primary" />
           </div>
         )}
 
-        {loading ? (
+        {/* My Characters — private/owned section, only when the user owns characters */}
+        {!searchActive && myCharacters.length > 0 && (
+          <div className="mb-4">
+            <div className="flex items-center gap-1.5 mb-2 px-1">
+              <Sparkles size={14} className="text-brand-primary" />
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">My Characters</h2>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+              {myCharacters.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => nav(`/ai/profile/${c.id}`)}
+                  className="glass rounded-2xl p-3 w-[110px] shrink-0 text-center hover:bg-white/6 transition-all"
+                >
+                  <img
+                    src={c.avatarUrl || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(c.name)}`}
+                    alt={c.name}
+                    className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
+                    loading="lazy"
+                  />
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="text-[11px] font-semibold text-text-primary truncate">{c.name}</p>
+                    {c.visibility === 'private' && <Lock size={9} className="text-amber-400 shrink-0" />}
+                  </div>
+                  <p className="text-[9px] text-text-muted">{c.visibility === 'private' ? 'Private' : 'Public'}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading || (searchActive && searching && !searchResults) ? (
           <div className="grid grid-cols-2 gap-3 pb-4">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="glass rounded-2xl overflow-hidden animate-pulse">
-                <div className="w-full aspect-square bg-bg-elevated" />
+              <div key={i} className="glass rounded-2xl overflow-hidden">
+                <div className="skeleton w-full aspect-square rounded-none" />
                 <div className="p-3 space-y-2">
-                  <div className="h-3 bg-bg-elevated rounded-full w-3/4" />
-                  <div className="h-2 bg-bg-elevated rounded-full w-full" />
-                  <div className="h-2 bg-bg-elevated rounded-full w-1/2" />
+                  <div className="skeleton h-3 rounded-full w-3/4" />
+                  <div className="skeleton h-2 rounded-full w-full" />
+                  <div className="skeleton h-2 rounded-full w-1/2" />
                 </div>
               </div>
             ))}
@@ -233,13 +319,26 @@ export default function DiscoverPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 pb-24">
-            {visibleChars.map((char, i) => (
-              <CharacterCard key={char.id} char={char} index={i} />
-            ))}
-          </div>
+          <>
+            {searchActive && searching && (
+              <div className="flex justify-center py-2">
+                <Loader2 size={16} className="animate-spin text-brand-primary" />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 pb-24">
+              {visibleChars.map((char, i) => (
+                <CharacterCard
+                  key={char.id}
+                  char={char}
+                  index={i}
+                  onFollowToggle={searchActive ? patchSearchResult : undefined}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
+      </PullToRefresh>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   pgEnum,
   index,
   uniqueIndex,
+  boolean,
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { characters } from './characters';
@@ -36,6 +37,7 @@ export const conversationParticipants = pgTable('conversation_participants', {
   lastReadMessageId: uuid('last_read_message_id'),
   mutedUntil: timestamp('muted_until', { withTimezone: true }),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
+  proactiveMessagesEnabled: boolean('proactive_messages_enabled').notNull().default(true),
 }, (table) => ({
   participantUnique: uniqueIndex('conversation_participants_user_unique').on(table.conversationId, table.userId),
 }));

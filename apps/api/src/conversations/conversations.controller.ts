@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuard
 
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters, conversationParticipants } from '@itchats/database/schema';
-import { eq, and, desc, sql, isNull, gt } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { MessageReactionsService } from './message-reactions.service';
@@ -18,6 +18,20 @@ export class ConversationsController {
   async list(@Req() req: any) {
     try {
       const db = getDb();
+
+      // Latest message per conversation via a ROW_NUMBER window subquery (single query, no N+1)
+      const lastMsg = db.select({
+        conversationId: messages.conversationId,
+        msgId: messages.id,
+        msgContent: messages.content,
+        msgType: messages.type,
+        msgSenderType: messages.senderType,
+        msgCreatedAt: messages.createdAt,
+        rn: sql<number>`row_number() over (partition by ${messages.conversationId} order by ${messages.createdAt} desc)`.as('rn'),
+      }).from(messages)
+        .where(isNull(messages.deletedAt))
+        .as('last_msg');
+
       const rows = await db.select({
         id: conversations.id,
         type: conversations.type,
@@ -28,12 +42,32 @@ export class ConversationsController {
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
         characterName: characters.name,
-        lastReadMessageId: conversationParticipants.lastReadMessageId,
+        characterAvatarUrl: characters.avatarUrl,
+        mutedUntil: conversationParticipants.mutedUntil,
+        lastMsgId: lastMsg.msgId,
+        lastMsgContent: lastMsg.msgContent,
+        lastMsgType: lastMsg.msgType,
+        lastMsgSenderType: lastMsg.msgSenderType,
+        lastMsgCreatedAt: lastMsg.msgCreatedAt,
+        unreadCount: sql<number>`(
+          SELECT count(*)::int FROM messages m
+          WHERE m.conversation_id = ${conversations.id}
+            AND m.sender_type = 'character'
+            AND m.deleted_at IS NULL
+            AND (
+              ${conversationParticipants.lastReadMessageId} IS NULL
+              OR m.created_at > (SELECT created_at FROM messages WHERE id = ${conversationParticipants.lastReadMessageId})
+            )
+        )`,
       }).from(conversations)
         .leftJoin(characters, eq(conversations.characterId, characters.id))
         .leftJoin(conversationParticipants, and(
           eq(conversationParticipants.conversationId, conversations.id),
           eq(conversationParticipants.userId, req.user.userId),
+        ))
+        .leftJoin(lastMsg, and(
+          eq(lastMsg.conversationId, conversations.id),
+          eq(lastMsg.rn, 1),
         ))
         .where(and(
           eq(conversations.createdByUserId, req.user.userId),
@@ -42,35 +76,47 @@ export class ConversationsController {
         .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
         .limit(50);
 
-      // Compute unread counts for each conversation
-      const result = await Promise.all(rows.map(async (row) => {
-        let unreadCount = 0;
-        if (row.lastReadMessageId) {
-          // Count character messages after lastReadMessageId
-          const countRows = await db.select({
-            count: sql<number>`count(*)::int`,
-          }).from(messages)
-            .where(and(
-              eq(messages.conversationId, row.id),
-              eq(messages.senderType, 'character'),
-              gt(messages.createdAt, sql`(SELECT created_at FROM messages WHERE id = ${row.lastReadMessageId})`),
-            ));
-          unreadCount = Number(countRows[0]?.count) || 0;
-        } else {
-          // No last read message — count all character messages
-          const countRows = await db.select({
-            count: sql<number>`count(*)::int`,
-          }).from(messages)
-            .where(and(
-              eq(messages.conversationId, row.id),
-              eq(messages.senderType, 'character'),
-            ));
-          unreadCount = Number(countRows[0]?.count) || 0;
+      const previewFor = (type: string | null, content: string | null): string => {
+        switch (type) {
+          case 'voice_note':
+          case 'audio':
+            return '🎤 Voice message';
+          case 'image':
+            return '📷 Photo';
+          case 'video':
+            return '🎬 Video';
+          default: {
+            const text = (content || '').trim();
+            return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+          }
         }
-        return { ...row, unreadCount, lastReadMessageId: undefined };
-      }));
+      };
 
-      return result;
+      return rows.map((row) => ({
+        conversationId: row.id,
+        // Legacy aliases kept for existing clients
+        id: row.id,
+        type: row.type,
+        mode: row.mode,
+        characterId: row.characterId,
+        title: row.title,
+        lastMessageAt: row.lastMessageAt,
+        characterName: row.characterName,
+        character: row.characterId ? {
+          id: row.characterId,
+          name: row.characterName,
+          avatarUrl: row.characterAvatarUrl,
+        } : null,
+        lastMessage: row.lastMsgId ? {
+          id: row.lastMsgId,
+          content: previewFor(row.lastMsgType, row.lastMsgContent),
+          senderType: row.lastMsgSenderType,
+          createdAt: row.lastMsgCreatedAt,
+        } : null,
+        unreadCount: Number(row.unreadCount) || 0,
+        mutedUntil: row.mutedUntil,
+        updatedAt: row.updatedAt,
+      }));
     } catch (err: any) {
       this.logger.error('Failed to list conversations', err?.message || err);
       throw new InternalServerErrorException('Failed to load conversations');

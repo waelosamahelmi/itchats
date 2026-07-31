@@ -12,10 +12,12 @@ import { RelationshipModule } from '../relationship/relationship.module';
 import { RoleplayModule } from '../roleplay/roleplay.module';
 import { CharactersModule } from '../characters/characters.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     AuthModule,
+    NotificationsModule,
     RelationshipEngineModule,
     DailyLifeModule,
     IdentityConsistencyModule,

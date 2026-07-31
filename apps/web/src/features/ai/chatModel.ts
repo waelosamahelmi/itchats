@@ -25,6 +25,8 @@ export interface ChatMessage {
   kind: MessageKind;
   text: string;
   mediaUrl?: string;
+  /** Voice note duration in milliseconds (when kind === 'voice_note' | 'audio') */
+  durationMs?: number;
   createdAt: string;
   delivery: DeliveryState;
   reactions: MessageReaction[];
@@ -44,6 +46,9 @@ export interface HistoryMessage {
   type?: string;
   content?: string | null;
   createdAt?: string | Date;
+  mediaUrl?: string | null;
+  transcription?: string | null;
+  durationMs?: number | null;
   metadata?: { audioUrl?: string; mediaUrl?: string; status?: string };
   reactions?: MessageReaction[];
 }
@@ -157,8 +162,12 @@ export function normalizeHistoryMessage(message: HistoryMessage): ChatMessage {
 
   if (kind === 'image' || kind === 'video') {
     // Content is the media URL for image/video messages
-    mediaUrl = message.metadata?.mediaUrl ?? (message.content || undefined);
+    mediaUrl = message.mediaUrl ?? message.metadata?.mediaUrl ?? (message.content || undefined);
     displayText = kind === 'image' ? '📸 Image' : '🎬 Video';
+  } else if (kind === 'voice_note' || kind === 'audio') {
+    // Durable server URL persisted on the message row
+    mediaUrl = message.mediaUrl ?? message.metadata?.audioUrl ?? message.metadata?.mediaUrl ?? undefined;
+    displayText = message.transcription || message.content || 'Voice note';
   } else if (message.metadata?.audioUrl) {
     mediaUrl = message.metadata.audioUrl;
   } else if (message.metadata?.mediaUrl) {
@@ -180,6 +189,7 @@ export function normalizeHistoryMessage(message: HistoryMessage): ChatMessage {
     kind,
     text: displayText,
     ...(mediaUrl ? { mediaUrl } : {}),
+    ...(typeof message.durationMs === 'number' && message.durationMs > 0 ? { durationMs: message.durationMs } : {}),
     createdAt: message.createdAt instanceof Date
       ? message.createdAt.toISOString()
       : message.createdAt ?? new Date().toISOString(),
