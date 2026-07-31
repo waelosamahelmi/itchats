@@ -149,6 +149,9 @@ export class ContextBuilderService {
       speakingStyle: char.speakingStyle || undefined,
       humorStyle: char.humorStyle || undefined,
       emojiStyle: char.emojiStyle || undefined,
+      relationshipLabel,
+      relationshipLevel: level,
+      characterGender: char.gender || undefined,
       typingProfile: {
         averageWords: typingProfile.averageWords || 12,
         emojiFrequency: typingProfile.emojiFrequency || 1.5,

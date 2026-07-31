@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR, buildSelfiePrompt } from '@itchats/ai-core';
+import { alibabaChatStream, alibabaChat, alibabaTTS, alibabaTextToImageWithFallback, alibabaImageToImage, alibabaTextToVideo, alibabaImageToVideo, alibabaGetVideoResult, alibabaASR, buildSelfiePrompt, buildSceneSelfiePrompt, buildEnrichedImagePrompt } from '@itchats/ai-core';
 import { getDb } from '@itchats/database';
 import { messages, messageReactions, generationJobs, usageEvents, creditWallets, creditLedger, conversations, characterRelationships, characters, characterVersions, conversationParticipants } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray } from 'drizzle-orm';
@@ -342,7 +342,7 @@ export class AiService {
   }>();
 
   /**
-   * Detects [SELFIE], [IMAGE: ...] markers in the AI response and yields media_request events.
+   * Detects [SELFIE], [SCENE: ...], [IMAGE: ...] markers in the AI response and yields media_request events.
    * [VIDEO: ...] markers still auto-generate (unchanged behavior).
    */
   private async *detectMediaMarkers(
@@ -354,10 +354,23 @@ export class AiService {
     if (!characterId) return;
 
     const selfieMatch = aiResponse.match(/\[SELFIE\]/i);
+    const sceneMatch = aiResponse.match(/\[SCENE:\s*(.+?)\]/i);
     const imageMatch = aiResponse.match(/\[IMAGE:\s*(.+?)\]/i);
     const videoMatch = aiResponse.match(/\[VIDEO:\s*(.+?)\]/i);
 
-    if (selfieMatch) {
+    // [SCENE: ...] takes priority over [SELFIE] — it provides richer context
+    if (sceneMatch) {
+      const sceneDescription = sceneMatch[1]!.trim();
+      const requestId = randomUUID();
+      const estimatedCredits = getCreditCost('qwen-image-edit-plus', 'image_to_image');
+
+      this.pendingMediaRequests.set(requestId, {
+        userId, characterId, conversationId, mediaType: 'selfie',
+        mediaPrompt: sceneDescription, estimatedCredits,
+      });
+
+      yield { type: 'media_request', mediaType: 'selfie', mediaPrompt: sceneDescription, sceneContext: sceneDescription, estimatedCredits, requestId, conversationId };
+    } else if (selfieMatch) {
       const requestId = randomUUID();
       const estimatedCredits = getCreditCost('qwen-image-edit-plus', 'image_to_image');
 
@@ -440,9 +453,18 @@ export class AiService {
       try {
         let result: { url: string; model: string; creditsUsed: number } | undefined;
         if (pending.mediaType === 'selfie') {
-          result = await this.generateSelfie(userId, pending.characterId, pending.mediaPrompt);
+          // Check if the mediaPrompt is a preset name or a scene description from [SCENE: ...]
+          const isPresetContext = ['casual_front_camera', 'mirror_selfie', 'activity_snapshot', 'dressed_up',
+            'candid_low_light', 'golden_hour', 'morning_bed', 'cafe_moment'].includes(pending.mediaPrompt);
+          if (isPresetContext) {
+            result = await this.generateSelfie(userId, pending.characterId, pending.mediaPrompt);
+          } else {
+            // It's a scene description — use enriched selfie generation
+            result = await this.generateSceneSelfie(userId, pending.characterId, pending.mediaPrompt);
+          }
         } else if (pending.mediaType === 'image') {
-          result = await this.generateImage(userId, pending.mediaPrompt);
+          // Use enriched image prompt that blends AI description with character DNA
+          result = await this.generateEnrichedImage(userId, pending.characterId, pending.mediaPrompt);
         }
 
         if (result?.url) {
@@ -696,6 +718,134 @@ export class AiService {
     }).where(eq(creditWallets.userId, userId));
 
     return { url: result.url, model: result.model, creditsUsed: cost, referenceConditioned: true };
+  }
+
+  /**
+   * Generate a selfie using the scene description from a [SCENE: ...] marker.
+   * Enriches the prompt with character DNA and scene context.
+   */
+  async generateSceneSelfie(userId: string, characterId: string, sceneDescription: string) {
+    const db = getDb();
+    const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!char) throw new Error('Character not found');
+
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = getCreditCost('qwen-image-2.0-pro', 'text_to_image');
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    const [version] = await db.select().from(characterVersions)
+      .where(eq(characterVersions.characterId, characterId)).orderBy(desc(characterVersions.version)).limit(1);
+
+    const selfiePrompt = buildSceneSelfiePrompt({
+      characterName: char.name,
+      gender: char.gender || undefined,
+      ageDisplay: char.ageDisplay || undefined,
+      description: char.description,
+      canonicalPrompt: version?.canonicalPrompt,
+      photographyStyle: char.photographyStyle || undefined,
+      selfieStyle: char.selfieStyle || undefined,
+      wardrobe: char.wardrobe || undefined,
+      skinTone: char.skinTone || undefined,
+      eyeColor: char.eyeColor || undefined,
+      hair: char.hair || undefined,
+      facialFeatures: char.facialFeatures || undefined,
+    }, sceneDescription);
+
+    const result = await alibabaTextToImageWithFallback({ prompt: selfiePrompt, size: '1024*1024' });
+    if (!result?.url) throw new Error('Selfie generation failed');
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt: selfiePrompt, scene: sceneDescription },
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
+      imageCount: 1, providerCostUsd: '0.0300', creditsDebited: cost,
+      pricingSnapshot: { model: result.model || 'qwen-image-edit-plus', credits: cost, referenceConditioned: true },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
+    return { url: result.url, model: result.model, creditsUsed: cost, referenceConditioned: true };
+  }
+
+  /**
+   * Generate an image from the AI's [IMAGE: description] marker,
+   * ENRICHING the description with character DNA, relationship context,
+   * mood, and time-of-day awareness for superior visual results.
+   */
+  async generateEnrichedImage(userId: string, characterId: string, rawDescription: string) {
+    const db = getDb();
+    const [char] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!char) throw new Error('Character not found');
+
+    const wallet = await db.select().from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1);
+    const balance = wallet[0]?.balance ?? 0;
+    const cost = getCreditCost('qwen-image-2.0', 'text_to_image');
+    if (balance < cost) throw new Error(`Insufficient credits: need ${cost}, have ${balance}`);
+
+    // Get relationship context
+    const [rel] = await db.select().from(characterRelationships)
+      .where(and(
+        eq(characterRelationships.characterId, characterId),
+        eq(characterRelationships.userId, userId),
+      )).limit(1);
+    const relationshipLevel = rel ? Math.round(Number(rel.visibleLevel)) : 1;
+
+    // Get the latest character version for canonical prompt
+    const [version] = await db.select().from(characterVersions)
+      .where(eq(characterVersions.characterId, characterId)).orderBy(desc(characterVersions.version)).limit(1);
+
+    // Build enriched prompt that blends AI description with character identity
+    const enrichedPrompt = buildEnrichedImagePrompt({
+      rawDescription,
+      characterName: char.name,
+      gender: char.gender || undefined,
+      ageDisplay: char.ageDisplay || undefined,
+      description: char.description,
+      canonicalPrompt: version?.canonicalPrompt,
+      photographyStyle: char.photographyStyle || undefined,
+      selfieStyle: char.selfieStyle || undefined,
+      wardrobe: char.wardrobe || undefined,
+      skinTone: char.skinTone || undefined,
+      eyeColor: char.eyeColor || undefined,
+      hair: char.hair || undefined,
+      bodyType: char.bodyType || undefined,
+      facialFeatures: char.facialFeatures || undefined,
+      relationshipLevel,
+      currentMood: (char.emotionState as any)?.mood || undefined,
+      timeOfDay: (char.emotionState as any)?.timeOfDay || undefined,
+    });
+
+    const result = await alibabaTextToImageWithFallback({ prompt: enrichedPrompt, size: '1024*1024' });
+    if (!result?.url) throw new Error('Image generation failed — no URL returned');
+
+    const [job] = await db.insert(generationJobs).values({
+      userId, characterId, generationType: 'text_to_image', routeKey: 'image.standard',
+      idempotencyKey: randomUUID(), requestJson: { prompt: enrichedPrompt, rawDescription },
+      responseJson: { url: result.url, model: result.usedModel }, status: 'succeeded', completedAt: new Date(),
+    }).returning();
+
+    await db.insert(usageEvents).values({
+      userId, characterId, generationJobId: job!.id, providerId: 'alibaba', generationType: 'text_to_image',
+      imageCount: 1, providerCostUsd: '0.035', creditsDebited: cost,
+      pricingSnapshot: { model: result.model || 'qwen-image-2.0', credits: cost },
+    });
+
+    await db.update(creditWallets).set({
+      balance: sql`GREATEST(0, ${creditWallets.balance} - ${cost})`,
+      lifetimeDebited: sql`${creditWallets.lifetimeDebited} + ${cost}`,
+      updatedAt: new Date(),
+    }).where(eq(creditWallets.userId, userId));
+
+    return { url: result.url, model: result.model, creditsUsed: cost };
   }
 
   async generateCharacterVideo(userId: string, characterId: string, style = 'casual_front_camera') {

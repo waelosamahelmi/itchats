@@ -66,7 +66,7 @@ export { buildEgyptianArabicStylePrompt, isArabic, type EgyptianArabicParams } f
 
 // ── Legacy / image / voice ──────────────────────────────────────────
 export { buildStoryPrompt, buildStoryImagePrompt, type StoryPromptParams } from './story.prompt';
-export { buildImagePrompt, buildSelfiePrompt, buildReferenceImagePrompt, type ImagePromptParams } from './image.prompt';
+export { buildImagePrompt, buildSelfiePrompt, buildReferenceImagePrompt, buildSceneSelfiePrompt, buildEnrichedImagePrompt, type ImagePromptParams, type EnrichedImageParams } from './image.prompt';
 export { buildVoicePrompt, buildVoiceCallSystemPrompt, type VoicePromptParams } from './voice.prompt';
 
 // ── Full chat prompt assembler ──────────────────────────────────────
