@@ -59,6 +59,14 @@
   --color-accent-gradient-2: #f472b6;
   --color-accent-gradient-3: #f59e0b;
 
+  /* ── Z-Index Scale ── */
+  --z-content: 1;
+  --z-sticky: 20;
+  --z-dropdown: 1000;
+  --z-modal-backdrop: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+
   /* ── Animations ── */
   --animate-float: float 3s ease-in-out infinite;
   --animate-glow-pulse: glow-pulse 2s ease-in-out infinite;
@@ -232,6 +240,9 @@ html.light .voice-call-btn:hover {
     background: #08080f;
     height: 100dvh;
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   html.light {
@@ -244,10 +255,18 @@ html.light .voice-call-btn:hover {
     height: 100dvh;
     overflow: hidden;
     width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     background-image:
       radial-gradient(ellipse 80% 60% at 50% -20%, rgba(236, 72, 153, 0.08), transparent),
       radial-gradient(ellipse 60% 40% at 20% 80%, rgba(139, 92, 246, 0.04), transparent);
     background-attachment: fixed;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   html.light body {
@@ -258,6 +277,19 @@ html.light .voice-call-btn:hover {
 
   .safe-top { padding-top: env(safe-area-inset-top, 0px); }
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* Prevent any element from overflowing horizontally */
+  img, video, iframe, canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .overflow-guard {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════

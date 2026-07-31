@@ -1,17 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { stories, storyViews, contentLikes, characterFollows, users, characters } from '@itchats/database/schema';
-import { eq, and, desc, count, inArray, isNull, or, sql } from 'drizzle-orm';
+import { eq, and, desc, count, inArray, isNull, or, sql, asc } from 'drizzle-orm';
 
 @Injectable()
 export class StoriesService {
   private readonly logger = new Logger(StoriesService.name);
+
+  /** 72 hours in milliseconds */
+  private readonly STORY_TTL_MS = 72 * 60 * 60 * 1000;
+
   /**
    * GET /v1/stories — returns ONE story per character that has active stories.
    * Groups stories by character, returns the latest active story per character.
    * Characters without published/active stories are excluded.
+   * Ordering: unviewed first, then newest per author.
    */
-  async getAllStories() {
+  async getAllStories(userId?: string) {
     const db = getDb();
     const now = new Date();
 
@@ -42,9 +47,22 @@ export class StoriesService {
       .leftJoin(characters, eq(stories.authorCharacterId, characters.id))
       .where(and(
         eq(stories.status, 'published'),
-        or(isNull(stories.expiresAt), sql`${stories.expiresAt} > ${now}`),
+        sql`${stories.expiresAt} IS NOT NULL AND ${stories.expiresAt} > ${now}`,
       ))
       .orderBy(desc(stories.publishedAt));
+
+    // Fetch viewed state for current user if authenticated
+    let viewedStoryIds = new Set<string>();
+    if (userId && allActive.length > 0) {
+      const storyIds = allActive.map(s => s.id);
+      const views = await db.select({ storyId: storyViews.storyId })
+        .from(storyViews)
+        .where(and(
+          eq(storyViews.viewerUserId, userId),
+          inArray(storyViews.storyId, storyIds),
+        ));
+      viewedStoryIds = new Set(views.map(v => v.storyId));
+    }
 
     // Group by character - one story ring per character (their latest)
     const grouped = new Map<string, typeof allActive[0]>();
@@ -62,36 +80,58 @@ export class StoriesService {
       authorAvatar: r.authorAvatarUrl || null,
       isAI: !!r.authorCharacterId,
       isLive: false,
-      viewed: false,
+      viewed: viewedStoryIds.has(r.id),
     })).slice(0, 50);
+
+    // Sort: unviewed first, then newest first
+    result.sort((a, b) => {
+      if (a.viewed !== b.viewed) return a.viewed ? 1 : -1;
+      const aPub = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const bPub = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return bPub - aPub;
+    });
 
     return result;
   }
 
   async getFeed() {
     const db = getDb();
+    const now = new Date();
     return db.select().from(stories)
-      .where(eq(stories.status, 'published'))
+      .where(and(
+        eq(stories.status, 'published'),
+        sql`${stories.expiresAt} IS NOT NULL AND ${stories.expiresAt} > ${now}`,
+      ))
       .orderBy(desc(stories.publishedAt))
       .limit(50);
   }
 
   async getFollowing(userId: string) {
     const db = getDb();
+    const now = new Date();
     const follows = await db.select({ characterId: characterFollows.characterId })
       .from(characterFollows).where(eq(characterFollows.userId, userId));
     if (follows.length === 0) return { stories: [] };
     const characterIds = follows.map(f => f.characterId);
     const results = await db.select().from(stories)
-      .where(and(eq(stories.status, 'published'), inArray(stories.authorCharacterId!, characterIds)))
+      .where(and(
+        eq(stories.status, 'published'),
+        inArray(stories.authorCharacterId!, characterIds),
+        sql`${stories.expiresAt} IS NOT NULL AND ${stories.expiresAt} > ${now}`,
+      ))
       .orderBy(desc(stories.publishedAt)).limit(50);
     return { stories: results };
   }
 
   async getCharacterStories(characterId: string) {
     const db = getDb();
+    const now = new Date();
     return db.select().from(stories)
-      .where(and(eq(stories.authorCharacterId, characterId), eq(stories.status, 'published')))
+      .where(and(
+        eq(stories.authorCharacterId, characterId),
+        eq(stories.status, 'published'),
+        sql`${stories.expiresAt} IS NOT NULL AND ${stories.expiresAt} > ${now}`,
+      ))
       .orderBy(desc(stories.publishedAt))
       .limit(20);
   }
@@ -99,7 +139,7 @@ export class StoriesService {
   async createStory(userId: string, data: { storyType: string; caption?: string; mediaUrl?: string }) {
     const db = getDb();
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 24 * 3600000);
+    const expiresAt = new Date(now.getTime() + this.STORY_TTL_MS);
     const [story] = await db.insert(stories).values({
       authorUserId: userId,
       creatorId: userId,

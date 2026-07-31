@@ -17,3 +17,4 @@ export * from './friends';
 export * from './voices';
 export * from './autonomy';
 export * from './score';
+export * from './hashtags';

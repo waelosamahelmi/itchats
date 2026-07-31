@@ -57,18 +57,23 @@ export class CharactersService {
       .offset((page - 1) * limit);
   }
 
-  async findPublic(page = 1, limit = 20) {
+  async findPublic(page = 1, limit = 20, viewerUserId?: string) {
     const db = getDb();
-    return db.select({
+    const results = await db.select({
       id: characters.id,
       name: characters.name,
+      handle: characters.handle,
       avatarUrl: characters.avatarUrl,
       description: characters.description,
       mood: characters.mood,
-      followerCount: characters.followerCount,
-      characterScore: characters.characterScore,
+      followersCount: characters.followerCount,
+      score: characters.characterScore,
       gender: characters.gender,
       ageDisplay: characters.ageDisplay,
+      visibility: characters.visibility,
+      status: characters.status,
+      interests: characters.interests,
+      ownerUserId: characters.ownerUserId,
     }).from(characters).where(
       and(
         eq(characters.visibility, 'public'),
@@ -76,6 +81,19 @@ export class CharactersService {
         sql`${characters.deletedAt} IS NULL`,
       )
     ).limit(Math.min(limit, 50)).offset((page - 1) * limit);
+
+    // Compute isFollowing for each character if viewer is provided
+    if (viewerUserId && results.length > 0) {
+      const characterIds = results.map((c) => c.id);
+      const follows = await db
+        .select({ characterId: characterFollows.characterId })
+        .from(characterFollows)
+        .where(eq(characterFollows.userId, viewerUserId));
+      const followedSet = new Set(follows.map((f) => f.characterId));
+      return results.map((c) => ({ ...c, isFollowing: followedSet.has(c.id) }));
+    }
+
+    return results.map((c) => ({ ...c, isFollowing: false }));
   }
 
   async findSuggested(limit = 8) {
@@ -112,6 +130,22 @@ export class CharactersService {
     const [follows] = await db.select({ count: sql<number>`count(*)` })
       .from(characterFollows).where(eq(characterFollows.characterId, id));
 
+    // Check if viewer is following this character
+    let isFollowing = false;
+    if (viewerUserId) {
+      const [followRecord] = await db
+        .select({ userId: characterFollows.userId })
+        .from(characterFollows)
+        .where(
+          and(
+            eq(characterFollows.userId, viewerUserId),
+            eq(characterFollows.characterId, id),
+          ),
+        )
+        .limit(1);
+      isFollowing = !!followRecord;
+    }
+
     // Get relationship if viewer is provided
     let relationship = null;
     if (viewerUserId && viewerUserId !== character.ownerUserId) {
@@ -137,6 +171,7 @@ export class CharactersService {
       ...character,
       location: location || null,
       followersCount: follows?.count ?? 0,
+      isFollowing,
       relationship,
       autonomy: character.autonomyConfig || {},
       mood: character.mood,

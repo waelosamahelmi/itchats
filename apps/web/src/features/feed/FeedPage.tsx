@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Home, Heart, MessageCircle, Share2, Send,
-  Smile, Globe, Lock, Plus, Sparkles, Check, Camera, X, AtSign, Bell,
+  Smile, Globe, Lock, Plus, Sparkles, Check, Camera, X, AtSign, Bell, User,
 } from 'lucide-react';
 import type { RootState } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
@@ -13,11 +14,15 @@ import {
   fetchStoriesThunk,
   createNewPost,
   reactToPostThunk,
+  unreactToPostThunk,
   addCommentThunk,
+  reactToCommentThunk,
+  unreactToCommentThunk,
   setTranslatedPost,
   setTranslating,
   clearTranslation,
   editPostThunk,
+  EMOJI_TO_REACTION,
 } from '@/app/store';
 import { genId, reactionEmojis, apiFetch } from '@/lib/api';
 import { translateText, getLanguageDisplayName, detectTextLanguage, getAutoTranslateSetting } from '@/lib/translate';
@@ -27,6 +32,8 @@ import { Badge } from '@itchats/ui';
 import ProfileWizard from '@/features/auth/ProfileWizard';
 import PostMenu from '@/components/PostMenu';
 import ShareBottomSheet from '@/components/ShareBottomSheet';
+import MentionAutocomplete from '@/components/MentionAutocomplete';
+import FeelingPicker from '@/components/FeelingPicker';
 
 // ── Character cache (handle → id, name) ──
 let characterCache: Map<string, { id: string; name: string; handle: string }> | null = null;
@@ -51,7 +58,7 @@ async function getCharacterCache(): Promise<Map<string, { id: string; name: stri
   return characterCache;
 }
 
-// ── Mention Text Renderer ──
+// ── Mention and Hashtag Text Renderer ──
 function MentionText({ text, className = '' }: { text: string; className?: string }) {
   const nav = useNavigate();
   const [cache, setCache] = useState<Map<string, { id: string; name: string; handle: string }> | null>(null);
@@ -60,12 +67,24 @@ function MentionText({ text, className = '' }: { text: string; className?: strin
     getCharacterCache().then(setCache);
   }, []);
 
-  // Parse @handle patterns
-  const parts = text.split(/(@[\w]+)/g);
+  // Parse @handle and #hashtag patterns
+  const parts = text.split(/(@[\w]+|#[\w]+)/g);
 
   return (
     <span className={className}>
       {parts.map((part, i) => {
+        if (part.startsWith('#') && part.length > 1) {
+          const tag = part.slice(1);
+          return (
+            <button
+              key={i}
+              onClick={(e) => { e.stopPropagation(); nav(`/hashtag/${tag}`); }}
+              className="text-brand-primary hover:underline cursor-pointer"
+            >
+              {part}
+            </button>
+          );
+        }
         if (part.startsWith('@') && part.length > 1) {
           const handle = part.slice(1).toLowerCase();
           const char = cache?.get(handle);
@@ -186,11 +205,12 @@ function PostCard({ post }: { post: Post }) {
   const dispatch = useAppDispatch();
   const { user } = useSelector((s: RootState) => s.auth);
   const myCharacters = useSelector((s: RootState) => s.characters.myCharacters);
-  const [liked, setLiked] = useState(post.liked);
-  const [likeCount, setLikeCount] = useState(post.likes);
+  const profile = useSelector((s: RootState) => s.profile.profile);
+  const userAvatar = profile?.avatarUrl || user?.avatarUrl || '';
   const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
   const [showAllComments, setShowAllComments] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [replyTarget, setReplyTarget] = useState<{ commentId: string; authorName: string } | null>(null);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [expandedContent, setExpandedContent] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
@@ -201,6 +221,10 @@ function PostCard({ post }: { post: Post }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const nav = useNavigate();
   const myCharacterIds = myCharacters?.map((c: any) => c.id) ?? [];
+
+  // Use Redux-sourced reaction state
+  const liked = post.viewerReaction != null;
+  const likeCount = Number.isFinite(Number(post.likeCount ?? post.likes)) ? (post.likeCount ?? post.likes ?? 0) : 0;
 
   // Fetch comments with full threads from server
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -219,15 +243,21 @@ function PostCard({ post }: { post: Post }) {
   const displayContent = expandedContent ? post.content : post.content.slice(0, 200);
 
   const handleLike = () => {
-    const newLiked = !liked;
-    setLiked(newLiked);
-    setLikeCount(c => c + (newLiked ? 1 : -1));
-    dispatch(reactToPostThunk({ postId: post.id, emoji: '❤️' }));
+    if (liked) {
+      dispatch(unreactToPostThunk(post.id));
+    } else {
+      dispatch(reactToPostThunk({ postId: post.id, emoji: '❤️' }));
+    }
   };
 
   const handleReaction = (emoji: string) => {
-    if (!liked) { setLiked(true); setLikeCount(c => c + 1); }
-    dispatch(reactToPostThunk({ postId: post.id, emoji }));
+    // If already reacted with same type, remove
+    const reactionType = EMOJI_TO_REACTION[emoji] || 'like';
+    if (post.viewerReaction === reactionType) {
+      dispatch(unreactToPostThunk(post.id));
+    } else {
+      dispatch(reactToPostThunk({ postId: post.id, emoji }));
+    }
   };
 
   const handleLikeMouseDown = () => {
@@ -268,10 +298,16 @@ function PostCard({ post }: { post: Post }) {
     setSavingEdit(false);
   };
 
-  const handleLikeComment = (commentId: string) => {
+  const handleLikeComment = (commentId: string, currentReaction: boolean) => {
+    // Optimistic update
     setComments(c => c.map(cmt =>
-      cmt.id === commentId ? { ...cmt, liked: !cmt.liked, likes: cmt.likes + (cmt.liked ? -1 : 1) } : cmt
+      cmt.id === commentId ? { ...cmt, liked: !currentReaction, likes: (cmt.likes ?? 0) + (currentReaction ? -1 : 1) } : cmt
     ));
+    if (currentReaction) {
+      dispatch(unreactToCommentThunk(commentId));
+    } else {
+      dispatch(reactToCommentThunk({ commentId, reactionType: 'like' }));
+    }
   };
 
   const handleTranslate = async () => {
@@ -503,7 +539,7 @@ function PostCard({ post }: { post: Post }) {
                     </div>
                     <div className="flex items-center gap-3 mt-1 ml-1">
                       <span className="text-[10px] text-text-muted">{timeAgo(c.createdAt)}</span>
-                      <button onClick={() => handleLikeComment(c.id)} className={`text-[10px] font-medium ${c.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
+                      <button onClick={() => handleLikeComment(c.id, !!c.liked)} className={`text-[10px] font-medium ${c.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
                         {c.likes > 0 ? `Like · ${c.likes}` : 'Like'}
                       </button>
                       <button className="text-[10px] text-text-muted font-medium">Reply</button>
@@ -531,7 +567,7 @@ function PostCard({ post }: { post: Post }) {
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 ml-1">
                         <span className="text-[10px] text-text-muted">{timeAgo(r.createdAt)}</span>
-                        <button onClick={() => handleLikeComment(r.id)} className={`text-[10px] font-medium ${r.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
+                        <button onClick={() => handleLikeComment(r.id, !!r.liked)} className={`text-[10px] font-medium ${r.liked ? 'text-brand-primary' : 'text-text-muted'}`}>
                           {r.likes > 0 ? `Like · ${r.likes}` : 'Like'}
                         </button>
                       </div>
@@ -561,7 +597,13 @@ function PostCard({ post }: { post: Post }) {
 
       {/* Comment Composer */}
       <div className="flex items-center gap-2.5 px-4 py-3 border-t border-border-subtle">
-        <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0" />
+        {userAvatar ? (
+          <img src={userAvatar} alt="You" className="w-7 h-7 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-bg-elevated shrink-0 flex items-center justify-center">
+            <User size={12} className="text-text-muted" />
+          </div>
+        )}
         <div className="flex-1 flex items-center gap-2 glass rounded-full px-3 py-2">
           <input
             id={`comment-input-${post.id}`}
@@ -600,69 +642,24 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
   const [selectedFeeling, setSelectedFeeling] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showFeelingPicker, setShowFeelingPicker] = useState(false);
-  const [showMentionPicker, setShowMentionPicker] = useState(false);
-  const [mentionSearch, setMentionSearch] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
-  const mentionRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Get available characters for mentioning
-  const characters = useSelector((s: RootState) => s.characters.discoverCharacters);
-
-  const filteredMentions = mentionSearch.trim() 
-    ? characters.filter(c => c.name.toLowerCase().includes(mentionSearch.toLowerCase()) || (c.handle && c.handle.toLowerCase().includes(mentionSearch.toLowerCase()))).slice(0, 8)
-    : characters.slice(0, 8);
-
-  const insertMention = (c: typeof characters[number]) => {
-    const handle = c.handle || c.name.toLowerCase().replace(/\s+/g, '_');
-    setText(prev => {
-      // If there's a @ at cursor position, replace it; otherwise append
-      if (showMentionPicker) {
-        // Replace the @ that triggered the mention
-        const atIdx = prev.lastIndexOf('@');
-        if (atIdx !== -1 && atIdx < prev.length - mentionSearch.length - 1) {
-          return prev.substring(0, atIdx) + `@${handle} ` + prev.substring(atIdx + mentionSearch.length + 1);
-        }
-      }
-      return prev + `@${handle} `;
-    });
-    setShowMentionPicker(false);
-    setMentionSearch('');
+  const handleInsertMention = (before: string, mention: string, after: string) => {
+    setText(before + mention + after);
     textareaRef.current?.focus();
+    // Set cursor after the inserted mention
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const pos = before.length + mention.length;
+        textareaRef.current.setSelectionRange(pos, pos);
+      }
+    }, 0);
   };
 
-  // Detect @ mentions while typing
   const handleTextChange = (value: string) => {
     setText(value);
-    const cursorPos = (textareaRef.current?.selectionStart ?? value.length);
-    const textBeforeCursor = value.substring(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
-    if (atMatch) {
-      setMentionSearch(atMatch[1]!);
-      setShowMentionPicker(true);
-    } else {
-      if (showMentionPicker) setShowMentionPicker(false);
-    }
   };
-
-  const FEELINGS = [
-    { emoji: '😊', label: 'Happy' },
-    { emoji: '🎵', label: 'Listening' },
-    { emoji: '📚', label: 'Reading' },
-    { emoji: '🍽️', label: 'Eating' },
-    { emoji: '✈️', label: 'Traveling' },
-    { emoji: '💪', label: 'Working out' },
-    { emoji: '🎮', label: 'Gaming' },
-    { emoji: '😴', label: 'Tired' },
-    { emoji: '🤔', label: 'Thinking' },
-    { emoji: '☕', label: 'Coffee' },
-    { emoji: '🎬', label: 'Watching' },
-    { emoji: '💼', label: 'Working' },
-    { emoji: '🌧️', label: 'Moody' },
-    { emoji: '🔥', label: 'Hyped' },
-    { emoji: '🌿', label: 'Chill' },
-    { emoji: '🎉', label: 'Celebrating' },
-  ];
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -686,9 +683,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
           reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
           reader.readAsDataURL(selectedMedia);
         });
-        // Upload via media service
         const token = localStorage.getItem('accessToken');
-        // Create media asset first
         const uploadRes = await fetch('/v1/media/upload-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -703,7 +698,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
           const uploadData = await uploadRes.json();
           const { mediaAssetId, uploadUrl } = uploadData;
           if (uploadUrl) {
-            // Try S3/local upload
             try {
               await fetch(uploadUrl, {
                 method: 'PUT',
@@ -716,7 +710,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                 body: JSON.stringify({ mediaAssetId }),
               });
             } catch {
-              // PUT failed, try local base64 store
               await fetch('/v1/media/upload-local', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -724,7 +717,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               });
             }
           }
-          // Get download URL
           const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -736,7 +728,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
       } catch (err) {
         console.error('Upload failed:', err);
       }
-      // Fallback: use base64 data URL if upload didn't produce a URL
       if (!mediaUrl) {
         mediaUrl = mediaPreview ?? undefined;
       }
@@ -765,15 +756,22 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
           {t('feed.whatsOnYourMind', { name: username || '' })}
         </button>
         {expanded && (
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={e => handleTextChange(e.target.value)}
-            placeholder={t('feed.whatsOnYourMind', { name: username || '' })}
-            rows={3}
-            autoFocus
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none"
-          />
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={e => handleTextChange(e.target.value)}
+              placeholder={t('feed.whatsOnYourMind', { name: username || '' })}
+              rows={3}
+              autoFocus
+              className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none resize-none"
+            />
+            <MentionAutocomplete
+              textareaRef={textareaRef}
+              text={text}
+              onInsertMention={handleInsertMention}
+            />
+          </div>
         )}
       </div>
 
@@ -803,7 +801,6 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
 
       {expanded && (
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle">
-          {/* Action buttons — evenly spaced left group */}
           <div className="flex items-center gap-3">
             <input
               ref={fileRef}
@@ -819,80 +816,20 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
             >
               <Camera size={18} />
             </button>
-            <div className="relative" ref={mentionRef}>
-              <button
-                onClick={() => { setShowMentionPicker(!showMentionPicker); setShowFeelingPicker(false); }}
-                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
-                title={t('feed.mentionCharacter')}
-              >
-                <AtSign size={18} />
-              </button>
-              {showMentionPicker && filteredMentions.length > 0 && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowMentionPicker(false)} />
-                  <div className="absolute bottom-full left-0 mb-2 z-50 glass rounded-2xl shadow-xl w-[260px] max-h-[280px] overflow-y-auto animate-fade-in border border-border-subtle">
-                    <div className="sticky top-0 p-2 border-b border-border-subtle bg-bg-canvas/90 backdrop-blur">
-                      <input
-                        type="text"
-                        placeholder={t('feed.searchCharacters')}
-                        value={mentionSearch}
-                        onChange={e => setMentionSearch(e.target.value)}
-                        autoFocus
-                        className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-muted outline-none py-1 px-2"
-                      />
-                    </div>
-                    {filteredMentions.map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => insertMention(c)}
-                        className="flex w-full items-center gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <img
-                          src={c.avatarUrl || `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(c.name)}`}
-                          alt={c.name}
-                          className="w-8 h-8 rounded-full object-cover shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-text-primary truncate">{c.name}</p>
-                          <p className="text-[10px] text-text-muted truncate">@{c.handle || c.name.toLowerCase().replace(/\s+/g, '_')}</p>
-                        </div>
-                      </button>
-                    ))}
-                    {mentionSearch.trim() && filteredMentions.length === 0 && (
-                      <div className="px-3 py-4 text-center text-xs text-text-muted">
-                        {t('feed.noCharactersFound')}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="relative">
-              <button
-                onClick={() => { setShowFeelingPicker(!showFeelingPicker); setShowMentionPicker(false); }}
-                className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
-                title={t('feed.addFeeling')}
-              >
-                <Smile size={18} />
-              </button>
-              {showFeelingPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-30 p-3 glass rounded-2xl shadow-xl max-w-[300px] animate-fade-in">
-                  <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 px-1">{t('feed.howAreYouFeeling')}</p>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {FEELINGS.map(f => (
-                      <button
-                        key={f.label}
-                        onClick={() => { setSelectedFeeling(`${f.emoji} ${f.label}`); setShowFeelingPicker(false); }}
-                        className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-white/10 transition-colors"
-                      >
-                        <span className="text-xl">{f.emoji}</span>
-                        <span className="text-[9px] text-text-muted">{f.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={() => { setShowFeelingPicker(false); }}
+              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-brand-primary transition-all"
+              title={t('feed.mentionCharacter')}
+            >
+              <AtSign size={18} />
+            </button>
+            <button
+              onClick={() => setShowFeelingPicker(true)}
+              className="p-2 rounded-full glass hover:bg-white/8 text-text-muted hover:text-text-primary transition-all"
+              title={t('feed.addFeeling')}
+            >
+              <Smile size={18} />
+            </button>
           </div>
           <button
             onClick={handleSubmit}
@@ -903,6 +840,13 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
           </button>
         </div>
       )}
+
+      {/* Feeling Picker Portal */}
+      <FeelingPicker
+        show={showFeelingPicker}
+        onClose={() => setShowFeelingPicker(false)}
+        onSelect={(feeling) => setSelectedFeeling(feeling)}
+      />
     </div>
   );
 }
@@ -913,6 +857,7 @@ function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPubl
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [textOverlay, setTextOverlay] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -963,13 +908,14 @@ function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPubl
         }
       } catch { mediaUrl = mediaPreview ?? undefined; }
     }
-    onPublish(caption.trim() || 'My story 📸', mediaUrl);
+    const finalCaption = textOverlay ? `${caption.trim() || 'My story'} — ${textOverlay}` : (caption.trim() || 'My story 📸');
+    onPublish(finalCaption, mediaUrl);
     setPublishing(false);
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[var(--z-modal,1200)] bg-black/70 flex items-end sm:items-center justify-center animate-fade-in" onClick={onClose}>
       <div className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/5">
@@ -994,6 +940,13 @@ function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPubl
             >
               <X size={14} />
             </button>
+            {/* Text overlay on image */}
+            <input
+              value={textOverlay}
+              onChange={e => setTextOverlay(e.target.value)}
+              placeholder="Add text overlay..."
+              className="absolute top-1/2 left-4 right-4 -translate-y-1/2 bg-black/40 text-white text-center text-sm py-2 px-4 rounded-lg outline-none placeholder:text-white/60"
+            />
             <input
               value={caption}
               onChange={e => setCaption(e.target.value)}
@@ -1021,7 +974,8 @@ function StoryCreatorModal({ onClose, onPublish }: { onClose: () => void; onPubl
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

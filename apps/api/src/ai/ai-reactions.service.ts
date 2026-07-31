@@ -12,6 +12,17 @@ import {
 import { eq, and, sql, isNull, or, inArray } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
 import { parseMentions, findCharacterByHandle } from '../posts/posts.service';
+import { Queue } from 'bullmq';
+import { getConfig } from '@itchats/config';
+
+/**
+ * Get a BullMQ Queue instance connected to Redis.
+ * Queue names match those defined in the worker package.
+ */
+function getQueue(name: string): Queue {
+  const config = getConfig();
+  return new Queue(name, { connection: { url: config.REDIS_URL } });
+}
 
 interface ReactionDecision {
   shouldReact: boolean;
@@ -20,15 +31,29 @@ interface ReactionDecision {
   reason?: string;
 }
 
+/**
+ * Get the BullMQ queues for AI social operations.
+ */
+function getSocialQueues(): {
+  aiPostReactions: Queue;
+  characterReply: Queue;
+  aiSocialInteraction: Queue;
+} {
+  return {
+    aiPostReactions: getQueue('ai-post-reactions'),
+    characterReply: getQueue('character-reply'),
+    aiSocialInteraction: getQueue('ai-social-interaction'),
+  };
+}
+
 @Injectable()
 export class AiReactionsService {
   private readonly logger = new Logger(AiReactionsService.name);
   private readonly reactionTypes = ['like', 'love', 'haha', 'wow', 'sad', 'angry', 'care'];
 
   /**
-   * Called after a user creates a post. Schedules AI character reactions
-   * with staggered delays to simulate natural timing.
-   * Characters the user follows will react; characters with relationship >= 5 will also comment.
+   * Called after a user creates a post. Enqueues AI character reactions
+   * as durable BullMQ jobs with staggered delays.
    */
   async scheduleReactions(postId: string, userId?: string) {
     const db = getDb();
@@ -40,16 +65,12 @@ export class AiReactionsService {
       .limit(1);
     if (!post) return;
 
-    // If post has authorCharacterId, it's from a character, not a user
-    // If post is from a user (authorUserId exists), schedule friend reactions
     const authorUserId = post.authorUserId || userId;
     if (!authorUserId) return;
 
     // Get characters the user follows
     const follows = await db
-      .select({
-        characterId: characterFollows.characterId,
-      })
+      .select({ characterId: characterFollows.characterId })
       .from(characterFollows)
       .where(eq(characterFollows.userId, authorUserId));
 
@@ -70,66 +91,152 @@ export class AiReactionsService {
 
     if (followedChars.length === 0) return;
 
-    // For each character the user follows, decide reaction
-    for (const character of followedChars) {
-      // Check relationship level (friend threshold = 5)
-      const [rel] = await db
-        .select()
-        .from(characterRelationships)
-        .where(
-          and(
-            eq(characterRelationships.characterId, character.id),
-            eq(characterRelationships.userId, authorUserId),
-          ),
-        )
-        .limit(1);
+    try {
+      const { aiPostReactions: queue } = getSocialQueues();
 
-      const relationshipLevel = rel ? Number(rel.visibleLevel) || 0 : 0;
-      const isFriend = relationshipLevel >= 5;
+      // Enqueue all characters into a single AI post reaction job
+      // The worker processes the job for each character with proper rate limits
+      for (const character of followedChars) {
+        // Check relationship level
+        const [rel] = await db
+          .select()
+          .from(characterRelationships)
+          .where(
+            and(
+              eq(characterRelationships.characterId, character.id),
+              eq(characterRelationships.userId, authorUserId),
+            ),
+          )
+          .limit(1);
 
-      // Base probability based on relationship level
-      const prob = Math.min(0.85, (relationshipLevel / 10) * 0.6 + 0.15);
+        const relationshipLevel = rel ? Number(rel.visibleLevel) || 0 : 0;
+        if (relationshipLevel < 2) continue; // Skip strangers
 
-      // Mood modifier
-      const mood = character.mood || 'neutral';
-      const moodMultiplier =
-        mood === 'happy' ? 1.3 : mood === 'excited' ? 1.5 :
-        mood === 'depressed' ? 0.2 : mood === 'sad' ? 0.3 :
-        mood === 'angry' ? 0.3 : 1.0;
+        // Random delay 1-30 minutes for natural timing
+        const delayMinutes = 1 + Math.floor(Math.random() * 30);
+        const delayMs = delayMinutes * 60 * 1000;
 
-      if (Math.random() > prob * moodMultiplier) continue;
+        this.logger.log(
+          `Enqueuing reaction job from ${character.name} to post ${postId} (delay: ${delayMinutes}min)`,
+        );
 
-      // Random delay 1-30 minutes
-      const delayMinutes = 1 + Math.floor(Math.random() * 30);
-      const delayMs = delayMinutes * 60 * 1000;
-
-      this.logger.log(
-        `Scheduling ${isFriend ? 'friend' : 'follower'} reaction from ${character.name} to post ${postId} in ${delayMinutes}min`,
-      );
-
-      setTimeout(() => {
-        this.processCharacterReaction(postId, character.id).catch((err) => {
-          this.logger.error(
-            `Failed to process reaction from ${character.id}: ${err.message}`,
+        await queue.add(
+          `ai-reaction-${postId}-${character.id}`,
+          { postId, characterId: character.id },
+          { delay: delayMs, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } },
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(`BullMQ queue unavailable, falling back to inline processing: ${err.message}`);
+      // Fallback: process inline if Redis isn't available
+      for (const character of followedChars) {
+        const delayMinutes = 1 + Math.floor(Math.random() * 30);
+        const delayMs = delayMinutes * 60 * 1000;
+        setTimeout(() => {
+          this.processCharacterReaction(postId, character.id).catch((e) =>
+            this.logger.error(`Fallback reaction failed: ${e.message}`),
           );
-        });
-      }, delayMs);
+        }, delayMs);
+      }
     }
 
-    // Schedule mention replies (if post mentions any characters)
+    // Schedule AI-to-AI interactions too
+    this.scheduleAiToAiInteractions(postId, post).catch(() => {});
+    // Schedule mention replies
     this.scheduleMentionReplies(postId, post.content ?? '').catch(() => {});
   }
 
   /**
-   * When a post contains @handle mentions, the mentioned characters reply.
-   * Max 2 AI-to-AI replies per thread to prevent infinite loops.
+   * Schedule AI-to-AI interactions: characters react to each other's posts.
+   */
+  private async scheduleAiToAiInteractions(postId: string, post: any) {
+    if (!post.authorCharacterId) return; // Only for character-authored posts
+
+    const db = getDb();
+    // Get all public characters (excluding the author)
+    const allChars = await db
+      .select()
+      .from(characters)
+      .where(
+        and(
+          eq(characters.status, 'published'),
+          eq(characters.visibility, 'public'),
+          sql`${characters.deletedAt} IS NULL`,
+          sql`${characters.id} != ${post.authorCharacterId}`,
+        ),
+      )
+      .limit(20);
+
+    try {
+      const { aiSocialInteraction: queue } = getSocialQueues();
+
+      for (const character of allChars) {
+        // 15% chance to interact
+        if (Math.random() > 0.15) continue;
+
+        const delayMinutes = 5 + Math.floor(Math.random() * 45);
+        const delayMs = delayMinutes * 60 * 1000;
+
+        // 60% chance reaction, 30% comment, 10% both
+        const interactionRoll = Math.random();
+        if (interactionRoll < 0.6) {
+          await queue.add(
+            `ai-ai-reaction-${postId}-${character.id}`,
+            {
+              type: 'ai-to-ai-reaction' as const,
+              sourcePostId: postId,
+              sourceCharacterId: character.id,
+              targetCharacterId: post.authorCharacterId,
+            },
+            { delay: delayMs, removeOnComplete: { age: 3600 } },
+          );
+        } else if (interactionRoll < 0.9) {
+          await queue.add(
+            `ai-ai-comment-${postId}-${character.id}`,
+            {
+              type: 'ai-to-ai-comment' as const,
+              sourcePostId: postId,
+              sourceCharacterId: character.id,
+              targetCharacterId: post.authorCharacterId,
+            },
+            { delay: delayMs, removeOnComplete: { age: 3600 } },
+          );
+        } else {
+          await queue.add(
+            `ai-ai-reaction-${postId}-${character.id}`,
+            {
+              type: 'ai-to-ai-reaction' as const,
+              sourcePostId: postId,
+              sourceCharacterId: character.id,
+              targetCharacterId: post.authorCharacterId,
+            },
+            { delay: delayMs, removeOnComplete: { age: 3600 } },
+          );
+          await queue.add(
+            `ai-ai-comment-${postId}-${character.id}`,
+            {
+              type: 'ai-to-ai-comment' as const,
+              sourcePostId: postId,
+              sourceCharacterId: character.id,
+              targetCharacterId: post.authorCharacterId,
+            },
+            { delay: delayMs + 60000, removeOnComplete: { age: 3600 } },
+          );
+        }
+      }
+    } catch {
+      // Redis unavailable, skip AI-to-AI
+    }
+  }
+
+  /**
+   * When a post contains @handle mentions, the mentioned characters queue replies.
    */
   async scheduleMentionReplies(postId: string, content: string) {
     const db = getDb();
     const handles = parseMentions(content);
     if (handles.length === 0) return;
 
-    // Get the post to check if it's already an AI post (for depth tracking)
     const [post] = await db
       .select()
       .from(posts)
@@ -150,18 +257,15 @@ export class AiReactionsService {
       );
 
     let currentAiCount = Number(aiCommentCount[0]?.count ?? 0);
-    const maxAllowed = 2; // Max AI-to-AI per thread
+    const maxAllowed = 2;
 
     for (const handle of handles) {
       if (currentAiCount >= maxAllowed) break;
 
       const char = await findCharacterByHandle(handle);
       if (!char) continue;
-
-      // Don't let a character reply to their own post
       if (post.authorCharacterId === char.id) continue;
 
-      // Check if this character already replied
       const [existing] = await db
         .select({ id: postComments.id })
         .from(postComments)
@@ -182,10 +286,7 @@ export class AiReactionsService {
           .where(eq(characters.id, char.id))
           .limit(1);
 
-        const replyContent = await this.generateMentionReply(
-          fullChar ?? char,
-          content,
-        );
+        const replyContent = await this.generateMentionReply(fullChar ?? char, content);
 
         if (replyContent) {
           await db.insert(postComments).values({
@@ -195,7 +296,6 @@ export class AiReactionsService {
             isAiGenerated: true,
           });
 
-          // Update comment count on the post
           const [cResult] = await db
             .select({ count: sql<number>`count(*)` })
             .from(postComments)
@@ -205,103 +305,125 @@ export class AiReactionsService {
             .set({ commentCount: Number(cResult?.count ?? 0) })
             .where(eq(posts.id, postId));
 
-          // Count this reply toward AI-to-AI limit
           currentAiCount++;
-
-          this.logger.log(
-            `Character ${char.name} replied to mention in post ${postId}`,
-          );
+          this.logger.log(`Character ${char.name} replied to mention in post ${postId}`);
         }
       } catch (err: any) {
-        this.logger.error(
-          `Failed to generate mention reply from ${char.name}: ${err.message}`,
-        );
+        this.logger.error(`Failed to generate mention reply from ${char.name}: ${err.message}`);
       }
     }
   }
 
   /**
-   * When a user comments on a character's post, the character replies.
-   * Called from the posts endpoint after comment creation.
-   * One reply only per comment pair.
+   * When a user comments on a character's post (or replies to character comment),
+   * enqueue a durable BullMQ job instead of processing immediately.
    */
   async scheduleCommentReply(
     postId: string,
     commentId: string,
     userId: string,
     commentContent: string,
+    parentCommentId?: string,
   ) {
     const db = getDb();
 
-    // Get the post to check if it's from a character
     const [post] = await db
       .select()
       .from(posts)
       .where(eq(posts.id, postId))
       .limit(1);
-    if (!post || !post.authorCharacterId) return; // Only reply if post is from a character
+    if (!post) return;
 
-    const [character] = await db
-      .select()
-      .from(characters)
-      .where(eq(characters.id, post.authorCharacterId))
-      .limit(1);
-    if (!character) return;
+    // Determine which character(s) should reply
+    let targetCharacterId = post.authorCharacterId;
 
-    // Check if this character already replied to this comment
-    const [existingReply] = await db
-      .select({ id: postComments.id })
-      .from(postComments)
-      .where(
-        and(
-          eq(postComments.postId, postId),
-          eq(postComments.parentCommentId, commentId),
-          eq(postComments.characterId, character.id),
-          isNull(postComments.deletedAt),
-        ),
-      )
-      .limit(1);
-    if (existingReply) return; // One reply per comment pair
+    // If replying to a character comment, that character should reply
+    if (parentCommentId) {
+      const [parentComment] = await db
+        .select({ characterId: postComments.characterId })
+        .from(postComments)
+        .where(eq(postComments.id, parentCommentId))
+        .limit(1);
+      if (parentComment?.characterId) {
+        targetCharacterId = parentComment.characterId;
+      }
+    }
+
+    if (!targetCharacterId) return;
+
+    // Natural delay 1-15 minutes
+    const delayMinutes = 1 + Math.floor(Math.random() * 15);
+    const delayMs = delayMinutes * 60 * 1000;
 
     try {
-      const replyContent = await this.generateCommentReply(
-        character,
-        commentContent,
-      );
+      const { characterReply: queue } = getSocialQueues();
 
-      if (replyContent) {
-        await db.insert(postComments).values({
+      await queue.add(
+        `comment-reply-${commentId}-${targetCharacterId}`,
+        {
           postId,
-          characterId: character.id,
-          parentCommentId: commentId,
-          content: replyContent.slice(0, 500),
-          isAiGenerated: true,
-        });
-
-        // Update comment count on the post
-        const [cResult] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(postComments)
-          .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
-        await db
-          .update(posts)
-          .set({ commentCount: Number(cResult?.count ?? 0) })
-          .where(eq(posts.id, postId));
-
-        this.logger.log(
-          `Character ${character.name} replied to user comment on their post ${postId}`,
-        );
-      }
-    } catch (err: any) {
-      this.logger.error(
-        `Failed to generate comment reply from ${character.name}: ${err.message}`,
+          commentId,
+          userId,
+          commentContent,
+          parentCommentId,
+          characterId: targetCharacterId,
+        },
+        { delay: delayMs, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } },
       );
+
+      this.logger.log(
+        `Enqueued character reply job for comment ${commentId} (delay: ${delayMinutes}min)`,
+      );
+    } catch (err: any) {
+      this.logger.warn(`BullMQ unavailable for comment reply, processing inline: ${err.message}`);
+      // Fallback: process inline
+      setTimeout(async () => {
+        try {
+          await this.generateAndSaveCommentReply(
+            postId, commentId, targetCharacterId!, userId, commentContent, parentCommentId,
+          );
+        } catch (e: any) {
+          this.logger.error(`Inline comment reply failed: ${e.message}`);
+        }
+      }, delayMs);
+    }
+  }
+
+  /**
+   * Fallback inline processing for comment replies when Redis unavailable.
+   */
+  private async generateAndSaveCommentReply(
+    postId: string,
+    commentId: string,
+    characterId: string,
+    userId: string,
+    commentContent: string,
+    parentCommentId?: string,
+  ) {
+    const db = getDb();
+    const [character] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+    if (!character) return;
+
+    const replyContent = await this.generateCommentReply(character, commentContent);
+    if (replyContent) {
+      await db.insert(postComments).values({
+        postId,
+        characterId,
+        parentCommentId: commentId,
+        content: replyContent.slice(0, 500),
+        isAiGenerated: true,
+      });
+
+      const [cResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(postComments)
+        .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
+      await db.update(posts).set({ commentCount: Number(cResult?.count ?? 0) }).where(eq(posts.id, postId));
     }
   }
 
   /**
    * Individual character decides whether and how to react to a post.
-   * Friends (level >= 5) always leave a comment.
    */
   async processCharacterReaction(postId: string, characterId: string) {
     const db = getDb();
@@ -355,18 +477,13 @@ export class AiReactionsService {
           set: { reactionType: decision.reactionType as any },
         });
 
-      // Update like count
       const [result] = await db
         .select({ count: sql<number>`count(*)` })
         .from(postReactions)
         .where(eq(postReactions.postId, postId));
-      const likeCount = Number(result?.count ?? 0);
-      await db
-        .update(posts)
-        .set({ likeCount })
-        .where(eq(posts.id, postId));
+      const likeCount = Number.isFinite(Number(result?.count ?? 0)) ? Number(result?.count) : 0;
+      await db.update(posts).set({ likeCount }).where(eq(posts.id, postId));
 
-      // Add comment: always for friends, per LLM decision for others
       const commentText = isFriend
         ? (decision.comment || await this.generateFriendComment(char, post.content || ''))
         : decision.comment;
@@ -383,10 +500,7 @@ export class AiReactionsService {
           .select({ commentCount: sql<number>`count(*)` })
           .from(postComments)
           .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
-        await db
-          .update(posts)
-          .set({ commentCount: Number(cResult?.commentCount ?? 0) })
-          .where(eq(posts.id, postId));
+        await db.update(posts).set({ commentCount: Number.isFinite(Number(cResult?.commentCount ?? 0)) ? Number(cResult?.commentCount) : 0 }).where(eq(posts.id, postId));
       }
 
       this.logger.log(
@@ -461,9 +575,6 @@ Return ONLY JSON (no markdown, no explanation):
     return 'Stranger';
   }
 
-  /**
-   * Generate an in-character reply when the character is @mentioned.
-   */
   private async generateMentionReply(
     character: any,
     postContent: string,
@@ -502,9 +613,6 @@ Return ONLY JSON:
     }
   }
 
-  /**
-   * Generate an in-character reply when a user comments on the character's post.
-   */
   private async generateCommentReply(
     character: any,
     userComment: string,
@@ -543,9 +651,6 @@ Return ONLY JSON:
     }
   }
 
-  /**
-   * Generate a friend's comment on a user's post (always called for level >= 5).
-   */
   private async generateFriendComment(
     character: any,
     postContent: string,

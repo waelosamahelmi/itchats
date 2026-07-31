@@ -6,8 +6,9 @@ import {
   sendMessage,
   addMessage,
   clearChat,
-  updateRelationship
+  updateRelationship,
 } from './AICharactersStore';
+import { fetchCharacterById, Character } from 'features/Social/SocialStore';
 import { ChatMessage } from './types';
 import './AIChat.scss';
 
@@ -15,21 +16,63 @@ const AIChat: React.FC = () => {
   const { characterId } = useParams<{ characterId: string }>();
   const history = useHistory();
   const dispatch = useDispatch();
-  const { characters, currentChat, isTyping } = useSelector(
-    ({ aiCharacters }: RootStateOrAny) => aiCharacters
-  );
 
-  const character = characters.find((c: any) => c.id === characterId);
+  // Get character from both the legacy AI store and the social store
+  const { characters, currentChat, isTyping } = useSelector(
+    ({ aiCharacters }: RootStateOrAny) => aiCharacters,
+  );
+  const { currentCharacter } = useSelector(
+    ({ social }: RootStateOrAny) => social,
+  );
+  const userSession = useSelector(({ user }: RootStateOrAny) => user?.session);
+
+  // Try to find character from legacy store first, then social store's currentCharacter
+  const legacyChar = characters.find((c: any) => c.id === characterId);
+  const apiChar = currentCharacter?.id === characterId ? currentCharacter : null;
+
+  // Merge character data - prefer API data when available
+  const character = apiChar
+    ? {
+        id: apiChar.id,
+        name: apiChar.name,
+        avatar: apiChar.avatarUrl || null,
+        description: apiChar.description || '',
+        personality: '',
+        backstory: '',
+        age: apiChar.ageDisplay || '',
+        gender: apiChar.gender || '',
+        relationshipLevel: 1,
+        emotions: [],
+        lastMessage: '',
+        timestamp: '',
+        unread: 0,
+        createdAt: '',
+        memories: [],
+      }
+    : legacyChar;
 
   const messageContainer = useRef<HTMLElement>(null);
   const [message, setMessage] = useState('');
   const [showMenu, setShowMenu] = useState(false);
 
+  // Load character from API on mount (direct URL access)
   useEffect(() => {
-    if (!character) {
-      history.push('/ai');
+    if (characterId) {
+      dispatch(fetchCharacterById(characterId));
     }
-  }, [character, history]);
+  }, [characterId, dispatch]);
+
+  useEffect(() => {
+    if (!legacyChar && !apiChar) {
+      // Give time for the API fetch, don't redirect immediately if loading
+      const timer = setTimeout(() => {
+        if (!currentCharacter) {
+          history.push('/ai');
+        }
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [legacyChar, apiChar, currentCharacter, history]);
 
   useLayoutEffect(() => {
     if (messageContainer.current) {
@@ -46,7 +89,7 @@ const AIChat: React.FC = () => {
       sender: 'user',
       content: message,
       type: 'text',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     dispatch(addMessage(userMessage));
@@ -82,13 +125,8 @@ const AIChat: React.FC = () => {
 
   const getAvatarColor = (name: string) => {
     const colors = [
-      '#FF6B6B',
-      '#4ECDC4',
-      '#45B7D1',
-      '#96CEB4',
-      '#FFEAA7',
-      '#DDA0DD',
-      '#98D8C8'
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4',
+      '#FFEAA7', '#DDA0DD', '#98D8C8',
     ];
     const index = name.charCodeAt(0) % colors.length;
     return colors[index];
@@ -99,8 +137,13 @@ const AIChat: React.FC = () => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Get user avatar for composer
+  const userAvatarUrl = userSession?.avatar || userSession?.avatarUrl || '';
+  const userInitial = (userSession?.username || userSession?.fullName || 'Y').charAt(0).toUpperCase();
+  const userAvatarColor = getAvatarColor(userSession?.username || 'User');
+
   if (!character) {
-    return <div className="ai-chat ai-chat--loading">Loading...</div>;
+    return <div className="ai-chat ai-chat--loading">Loading character...</div>;
   }
 
   return (
@@ -113,7 +156,7 @@ const AIChat: React.FC = () => {
         <div className="ai-chat__user">
           <div className="ai-chat__avatar">
             {character.avatar ? (
-              <img src={character.avatar} alt={character.name} />
+              <img src={character.avatar} alt={character.name} style={{ maxWidth: '100%' }} />
             ) : (
               <div
                 className="ai-chat__initial"
@@ -124,8 +167,8 @@ const AIChat: React.FC = () => {
             )}
             <span className="ai-chat__status" />
           </div>
-          <div className="ai-chat__info">
-            <h2>{character.name}</h2>
+          <div className="ai-chat__info" style={{ minWidth: 0 }}>
+            <h2 style={{ overflowWrap: 'anywhere' }}>{character.name}</h2>
             <span className="ai-chat__status-text">
               {isTyping ? 'typing...' : 'online'}
             </span>
@@ -138,7 +181,7 @@ const AIChat: React.FC = () => {
               <span
                 key={i}
                 className={classNames('heart', {
-                  'heart--active': i < character.relationshipLevel
+                  'heart--active': i < (character.relationshipLevel || 1),
                 })}
               >
                 ♥
@@ -151,11 +194,11 @@ const AIChat: React.FC = () => {
         </div>
 
         {showMenu && (
-          <div className="ai-chat__menu">
+          <div className="ai-chat__menu" style={{ zIndex: 1000 }}>
             <button onClick={handleClearChat}>
               <i className="fas fa-trash" /> Clear Chat
             </button>
-            <button onClick={() => history.push(`/ai/create`)}>
+            <button onClick={() => history.push('/ai/create')}>
               <i className="fas fa-edit" /> Edit Character
             </button>
           </div>
@@ -188,13 +231,13 @@ const AIChat: React.FC = () => {
             key={msg.id}
             className={classNames('ai-chat__message', {
               'ai-chat__message--user': msg.sender === 'user',
-              'ai-chat__message--character': msg.sender === 'character'
+              'ai-chat__message--character': msg.sender === 'character',
             })}
           >
             {msg.sender === 'character' && (
               <div className="ai-chat__message-avatar">
                 {character.avatar ? (
-                  <img src={character.avatar} alt={character.name} />
+                  <img src={character.avatar} alt={character.name} style={{ maxWidth: '100%' }} />
                 ) : (
                   <div
                     className="ai-chat__message-initial"
@@ -205,8 +248,8 @@ const AIChat: React.FC = () => {
                 )}
               </div>
             )}
-            <div className="ai-chat__message-content">
-              <blockquote>{msg.content}</blockquote>
+            <div className="ai-chat__message-content" style={{ minWidth: 0 }}>
+              <blockquote style={{ overflowWrap: 'anywhere' }}>{msg.content}</blockquote>
               <time>{formatTime(msg.timestamp)}</time>
             </div>
           </article>
@@ -216,7 +259,7 @@ const AIChat: React.FC = () => {
           <article className="ai-chat__message ai-chat__message--character">
             <div className="ai-chat__message-avatar">
               {character.avatar ? (
-                <img src={character.avatar} alt={character.name} />
+                <img src={character.avatar} alt={character.name} style={{ maxWidth: '100%' }} />
               ) : (
                 <div
                   className="ai-chat__message-initial"
@@ -237,9 +280,19 @@ const AIChat: React.FC = () => {
 
       <footer className="ai-chat__footer">
         <div className="ai-chat__input-wrapper">
-          <button className="btn-emoji">
-            <i className="far fa-smile" />
-          </button>
+          {/* User avatar in composer */}
+          <div className="ai-chat__composer-avatar">
+            {userAvatarUrl ? (
+              <img src={userAvatarUrl} alt="You" style={{ maxWidth: '100%' }} />
+            ) : (
+              <div
+                className="ai-chat__initial"
+                style={{ backgroundColor: userAvatarColor }}
+              >
+                {userInitial}
+              </div>
+            )}
+          </div>
           <textarea
             className="ai-chat__input"
             placeholder="Send a message..."
@@ -248,9 +301,6 @@ const AIChat: React.FC = () => {
             onKeyPress={handleKeyPress}
             rows={1}
           />
-          <button className="btn-camera">
-            <i className="fas fa-camera" />
-          </button>
           <button
             className={classNames('btn-send', { 'btn-send--active': message.trim() })}
             onClick={handleSubmit}

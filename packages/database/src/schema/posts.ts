@@ -68,4 +68,19 @@ export const postComments = pgTable('post_comments', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+}, (table) => ({
+  postIdx: index('idx_post_comments_post').on(table.postId, table.createdAt),
+  parentIdx: index('idx_post_comments_parent').on(table.parentCommentId, table.createdAt),
+}));
+
+export const postCommentReactions = pgTable('post_comment_reactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  commentId: uuid('comment_id').notNull().references(() => postComments.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  characterId: uuid('character_id').references(() => characters.id, { onDelete: 'cascade' }),
+  reactionType: postReactionTypeEnum('reaction_type').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  userReactionUnique: uniqueIndex('comment_reactions_comment_user_unique').on(table.commentId, table.userId),
+  characterReactionUnique: uniqueIndex('comment_reactions_comment_character_unique').on(table.commentId, table.characterId),
+}));

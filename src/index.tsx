@@ -11,9 +11,12 @@ import snapMap from 'features/SnapMap/SnapMapStore';
 import snap from 'features/Snap/SnapStore';
 import chat from 'features/Chat/ChatStore';
 import aiCharacters from 'features/AICharacters/AICharactersStore';
+import social from 'features/Social/SocialStore';
 
 import AppShell from 'AppShell/AppShell';
 import Camera from 'features/Camera/Camera';
+import Feed from 'features/Feed/Feed';
+import Discover from 'features/Discover/Discover';
 import AICharacters from 'features/AICharacters/AICharacters';
 import AIChat from 'features/AICharacters/AIChat';
 import AICreate from 'features/AICharacters/AICreate';
@@ -27,7 +30,7 @@ import 'animate.css';
 import './styles/app.scss';
 
 export const store = configureStore({
-  reducer: { app, camera, user, snapMap, snap, chat, aiCharacters }
+  reducer: { app, camera, user, snapMap, snap, chat, aiCharacters, social }
 });
 
 const App = () => (
@@ -36,8 +39,11 @@ const App = () => (
       <BrowserRouter>
         <AppShell>
           <Switch>
+            {/* Feed Tab — Home */}
+            <Route path="/" component={Feed} exact />
+
             {/* Camera Tab */}
-            <Route path="/" component={Camera} exact />
+            <Route path="/camera" component={Camera} exact />
 
             {/* AI Tab */}
             <Route path="/ai" component={AICharacters} exact />
@@ -46,6 +52,9 @@ const App = () => (
 
             {/* Chats Tab */}
             <Route path="/chats" component={ChatTab} exact />
+
+            {/* Discover */}
+            <Route path="/discover" component={Discover} exact />
 
             {/* Map Tab */}
             <Route path="/map" component={SnapMap} exact />

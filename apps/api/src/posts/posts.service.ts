@@ -1,12 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, Optional, forwardRef } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import {
-  posts, postReactions, postComments, characterFollows, characters,
+  posts, postReactions, postComments, postCommentReactions, characterFollows, characters,
   userFriends, users, reports,
 } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { HashtagsService } from '../hashtags/hashtags.service';
 
 /**
  * Parse @handle mentions from post content.
@@ -61,7 +62,10 @@ export async function findCharacterByHandle(
 
 @Injectable()
 export class PostsService {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    @Inject(forwardRef(() => HashtagsService)) private readonly hashtags: HashtagsService,
+  ) {}
 
   async createPost(
     userId: string,
@@ -91,8 +95,17 @@ export class PostsService {
 
     // Parse mentions and notify mentioned characters
     this.notifyMentions(post.id, data.content, userId).catch(() => {});
+    // Parse hashtags and sync
+    this.syncHashtags(post.id, data.content).catch(() => {});
 
     return post;
+  }
+
+  private async syncHashtags(postId: string, content: string) {
+    const tags = HashtagsService.parseHashtags(content);
+    if (tags.length > 0) {
+      await this.hashtags.syncPostHashtags(postId, tags);
+    }
   }
 
   /**
@@ -152,7 +165,7 @@ export class PostsService {
       );
     const friendIds = friendRows.map((f) => f.friendId);
 
-    // Build feed: user's posts + followed characters + friends + public character posts
+    // Build feed: user's posts + followed characters + friends
     const conditions: any[] = [];
     conditions.push(eq(posts.authorUserId, userId));
 
@@ -162,13 +175,6 @@ export class PostsService {
     if (friendIds.length > 0) {
       conditions.push(inArray(posts.authorUserId, friendIds));
     }
-    // Always include public posts from ALL characters (discover-style feed)
-    conditions.push(
-      and(
-        sql`${posts.authorCharacterId} IS NOT NULL`,
-        eq(posts.visibility, 'public'),
-      ),
-    );
 
     const feed = await db
       .select({
@@ -209,12 +215,44 @@ export class PostsService {
       .limit(Math.min(limit, 50))
       .offset((page - 1) * limit);
 
-    return feed;
+    // Enrich with viewer's reaction to each post
+    if (feed.length > 0) {
+      const postIds = feed.map((p) => p.id);
+      const allUserReactions = await db
+        .select({
+          postId: postReactions.postId,
+          reactionType: postReactions.reactionType,
+        })
+        .from(postReactions)
+        .where(eq(postReactions.userId, userId));
+
+      const reactMap = new Map<string, string>();
+      for (const r of allUserReactions) {
+        reactMap.set(r.postId, r.reactionType);
+      }
+
+      return feed.map((p) => ({
+        ...p,
+        likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
+        commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
+        shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
+        viewCount: Number.isFinite(Number(p.viewCount)) ? Number(p.viewCount) : 0,
+        viewerReaction: reactMap.get(p.id) ?? null,
+      }));
+    }
+
+    return feed.map((p) => ({
+      ...p,
+      likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
+      commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
+      shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
+      viewCount: Number.isFinite(Number(p.viewCount)) ? Number(p.viewCount) : 0,
+    }));
   }
 
   async getUserPosts(userId: string, targetUserId: string, page = 1, limit = 20) {
     const db = getDb();
-    return db
+    const results = await db
       .select({
         id: posts.id,
         authorUserId: posts.authorUserId,
@@ -253,11 +291,19 @@ export class PostsService {
       .orderBy(desc(posts.createdAt))
       .limit(Math.min(limit, 50))
       .offset((page - 1) * limit);
+
+    return results.map((p) => ({
+      ...p,
+      likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
+      commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
+      shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
+      viewCount: Number.isFinite(Number(p.viewCount)) ? Number(p.viewCount) : 0,
+    }));
   }
 
   async getCharacterPosts(characterId: string, page = 1, limit = 20) {
     const db = getDb();
-    return db
+    const results = await db
       .select({
         id: posts.id,
         authorUserId: posts.authorUserId,
@@ -296,6 +342,14 @@ export class PostsService {
       .orderBy(desc(posts.createdAt))
       .limit(Math.min(limit, 50))
       .offset((page - 1) * limit);
+
+    return results.map((p) => ({
+      ...p,
+      likeCount: Number.isFinite(Number(p.likeCount)) ? Number(p.likeCount) : 0,
+      commentCount: Number.isFinite(Number(p.commentCount)) ? Number(p.commentCount) : 0,
+      shareCount: Number.isFinite(Number(p.shareCount)) ? Number(p.shareCount) : 0,
+      viewCount: Number.isFinite(Number(p.viewCount)) ? Number(p.viewCount) : 0,
+    }));
   }
 
   async deletePost(userId: string, postId: string) {
@@ -399,12 +453,33 @@ export class PostsService {
       .select({ count: sql<number>`count(*)` })
       .from(postReactions)
       .where(eq(postReactions.postId, postId));
+    const reactionCount = Number(r1?.count ?? 0);
     await db
       .update(posts)
-      .set({ likeCount: Number(r1?.count ?? 0) })
+      .set({ likeCount: reactionCount })
       .where(eq(posts.id, postId));
 
-    return { reacted: true, postId, reactionType };
+    // Get reaction breakdown
+    const reactionRows = await db
+      .select({
+        type: postReactions.reactionType,
+        count: sql<number>`count(*)`,
+      })
+      .from(postReactions)
+      .where(eq(postReactions.postId, postId))
+      .groupBy(postReactions.reactionType);
+
+    const reactions = reactionRows.map((r) => ({
+      type: r.type,
+      count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+    }));
+
+    return {
+      postId,
+      viewerReaction: reactionType,
+      reactionCount: Number.isFinite(reactionCount) ? reactionCount : 0,
+      reactions,
+    };
   }
 
   async unlikePost(userId: string, postId: string) {
@@ -423,12 +498,33 @@ export class PostsService {
       .select({ count: sql<number>`count(*)` })
       .from(postReactions)
       .where(eq(postReactions.postId, postId));
+    const reactionCount = Number(r2?.count ?? 0);
     await db
       .update(posts)
-      .set({ likeCount: Number(r2?.count ?? 0) })
+      .set({ likeCount: reactionCount })
       .where(eq(posts.id, postId));
 
-    return { unreacted: true, postId };
+    // Get reaction breakdown
+    const reactionRows = await db
+      .select({
+        type: postReactions.reactionType,
+        count: sql<number>`count(*)`,
+      })
+      .from(postReactions)
+      .where(eq(postReactions.postId, postId))
+      .groupBy(postReactions.reactionType);
+
+    const reactions = reactionRows.map((r) => ({
+      type: r.type,
+      count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+    }));
+
+    return {
+      postId,
+      viewerReaction: null,
+      reactionCount: Number.isFinite(reactionCount) ? reactionCount : 0,
+      reactions,
+    };
   }
 
   async addComment(
@@ -476,7 +572,7 @@ export class PostsService {
       .where(and(eq(postComments.postId, postId), isNull(postComments.deletedAt)));
     await db
       .update(posts)
-      .set({ commentCount: Number(r3?.count ?? 0) })
+      .set({ commentCount: Number.isFinite(Number(r3?.count ?? 0)) ? Number(r3?.count) : 0 })
       .where(eq(posts.id, postId));
 
     // Get author info to return a rich comment shape
@@ -522,7 +618,7 @@ export class PostsService {
       .where(and(eq(postComments.postId, comment.postId), isNull(postComments.deletedAt)));
     await db
       .update(posts)
-      .set({ commentCount: Number(r4?.count ?? 0) })
+      .set({ commentCount: Number.isFinite(Number(r4?.count ?? 0)) ? Number(r4?.count) : 0 })
       .where(eq(posts.id, comment.postId));
 
     return { deleted: true, id: commentId };
@@ -600,6 +696,113 @@ export class PostsService {
     return result;
   }
 
+  async addCommentReaction(userId: string, commentId: string, reactionType: string) {
+    const db = getDb();
+
+    const [comment] = await db
+      .select()
+      .from(postComments)
+      .where(and(eq(postComments.id, commentId), isNull(postComments.deletedAt)))
+      .limit(1);
+    if (!comment) throw new NotFoundException('Comment not found');
+
+    const validTypes = ['like', 'love', 'haha', 'wow', 'sad', 'angry', 'care'];
+    if (!validTypes.includes(reactionType)) {
+      throw new BadRequestException(`Invalid reaction type. Valid: ${validTypes.join(', ')}`);
+    }
+
+    // Upsert reaction
+    await db
+      .insert(postCommentReactions)
+      .values({
+        commentId,
+        userId,
+        reactionType: reactionType as any,
+      })
+      .onConflictDoUpdate({
+        target: [postCommentReactions.commentId, postCommentReactions.userId],
+        set: { reactionType: reactionType as any },
+      });
+
+    // Update comment like count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(postCommentReactions)
+      .where(eq(postCommentReactions.commentId, commentId));
+    const reactionCount = Number(countResult?.count ?? 0);
+    await db
+      .update(postComments)
+      .set({ likeCount: reactionCount, updatedAt: new Date() })
+      .where(eq(postComments.id, commentId));
+
+    // Get reaction breakdown
+    const reactionRows = await db
+      .select({
+        type: postCommentReactions.reactionType,
+        count: sql<number>`count(*)`,
+      })
+      .from(postCommentReactions)
+      .where(eq(postCommentReactions.commentId, commentId))
+      .groupBy(postCommentReactions.reactionType);
+
+    const reactions = reactionRows.map((r) => ({
+      type: r.type,
+      count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+    }));
+
+    return {
+      commentId,
+      viewerReaction: reactionType,
+      reactionCount: Number.isFinite(reactionCount) ? reactionCount : 0,
+      reactions,
+    };
+  }
+
+  async removeCommentReaction(userId: string, commentId: string) {
+    const db = getDb();
+
+    await db
+      .delete(postCommentReactions)
+      .where(
+        and(
+          eq(postCommentReactions.commentId, commentId),
+          eq(postCommentReactions.userId, userId),
+        ),
+      );
+
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(postCommentReactions)
+      .where(eq(postCommentReactions.commentId, commentId));
+    const reactionCount = Number(countResult?.count ?? 0);
+    await db
+      .update(postComments)
+      .set({ likeCount: reactionCount, updatedAt: new Date() })
+      .where(eq(postComments.id, commentId));
+
+    // Get reaction breakdown
+    const reactionRows = await db
+      .select({
+        type: postCommentReactions.reactionType,
+        count: sql<number>`count(*)`,
+      })
+      .from(postCommentReactions)
+      .where(eq(postCommentReactions.commentId, commentId))
+      .groupBy(postCommentReactions.reactionType);
+
+    const reactions = reactionRows.map((r) => ({
+      type: r.type,
+      count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+    }));
+
+    return {
+      commentId,
+      viewerReaction: null,
+      reactionCount: Number.isFinite(reactionCount) ? reactionCount : 0,
+      reactions,
+    };
+  }
+
   async getPostReactions(postId: string) {
     const db = getDb();
 
@@ -614,7 +817,7 @@ export class PostsService {
 
     const counts: Record<string, number> = {};
     for (const r of reactions) {
-      counts[r.reactionType] = Number(r.count);
+      counts[r.reactionType] = Number.isFinite(Number(r.count)) ? Number(r.count) : 0;
     }
 
     return { postId, reactions: counts };

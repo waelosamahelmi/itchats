@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { X, Copy, Send, RefreshCw, Check, Image } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Copy, Send, RefreshCw, Check } from 'lucide-react';
 import type { Post } from '@/app/store';
 import { useAppDispatch } from '@/app/store';
 import { shareToFeedThunk } from '@/app/store';
@@ -81,19 +82,18 @@ export default function ShareBottomSheet({ post, onClose }: ShareBottomSheetProp
     }
   };
 
-  // Post preview image
-  const previewImage = post.mediaUrl || (post.authorAvatar
-    ? post.authorAvatar
-    : `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(post.authorName)}`);
-
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[var(--z-modal-backdrop,1100)] flex items-end sm:items-center justify-center bg-black/60 animate-fade-in"
+      style={{ backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
         className="bg-bg-canvas w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 animate-slide-up max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--color-bg-canvas, #08080f)',
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
@@ -254,6 +254,7 @@ export default function ShareBottomSheet({ post, onClose }: ShareBottomSheetProp
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

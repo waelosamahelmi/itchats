@@ -6,6 +6,8 @@ import {
   moderationQueue, mediaQueue, notificationQueue,
   cleanupQueue, costReconciliationQueue,
   characterAutonomyQueue, aiPostReactionsQueue,
+  characterReplyQueue, aiSocialInteractionQueue,
+  characterReengagementQueue, voiceTranscriptionQueue,
   QUEUES, getAllQueues,
 } from './queues';
 import { videoGenerationProcessor } from './processors/video-processor';
@@ -15,6 +17,10 @@ import { mediaProcessingProcessor } from './processors/media-processor';
 import { notificationProcessor } from './processors/notification-processor';
 import { cleanupProcessor } from './processors/cleanup-processor';
 import { characterAutonomyProcessor, aiPostReactionsProcessor } from './processors/autonomy.processor';
+import { characterReplyProcessor } from './processors/character-reply.processor';
+import { aiSocialInteractionProcessor } from './processors/ai-social.processor';
+import { characterReengagementProcessor } from './processors/reengagement.processor';
+import { voiceTranscriptionProcessor } from './processors/voice-transcription.processor';
 
 const config = getConfig();
 const connection = { url: config.REDIS_URL };
@@ -62,8 +68,12 @@ async function main() {
   const cleanupWorker = createWorker(QUEUES.CLEANUP, cleanupProcessor, 1);
   const autonomyWorker = createWorker(QUEUES.CHARACTER_AUTONOMY, characterAutonomyProcessor, 1);
   const aiReactionsWorker = createWorker(QUEUES.AI_POST_REACTIONS, aiPostReactionsProcessor, 3);
+  const characterReplyWorker = createWorker(QUEUES.CHARACTER_REPLY, characterReplyProcessor, 3);
+  const aiSocialWorker = createWorker(QUEUES.AI_SOCIAL_INTERACTION, aiSocialInteractionProcessor, 3);
+  const reengagementWorker = createWorker(QUEUES.CHARACTER_REENGAGEMENT, characterReengagementProcessor, 2);
+  const voiceTranscriptionWorker = createWorker(QUEUES.VOICE_TRANSCRIPTION, voiceTranscriptionProcessor, 3);
 
-  const workers = [videoWorker, imageWorker, memoryWorker, mediaWorker, notificationWorker, cleanupWorker, autonomyWorker, aiReactionsWorker];
+  const workers = [videoWorker, imageWorker, memoryWorker, mediaWorker, notificationWorker, cleanupWorker, autonomyWorker, aiReactionsWorker, characterReplyWorker, aiSocialWorker, reengagementWorker, voiceTranscriptionWorker];
 
   // Scheduled cleanup jobs
   await cleanupQueue.add('daily-cleanup', { task: 'expired_stories' } as any, {
@@ -79,6 +89,11 @@ async function main() {
   // Scheduled autonomy check every 15 minutes
   await characterAutonomyQueue.add('autonomy-check', { processAll: true } as any, {
     repeat: { every: 15 * 60 * 1000 },
+  });
+
+  // Scheduled re-engagement check every 30 minutes
+  await characterReengagementQueue.add('reengagement-sweep', { sweepAll: true } as any, {
+    repeat: { every: 30 * 60 * 1000 },
   });
 
   console.log(`✅ ${workers.length} workers initialized`);

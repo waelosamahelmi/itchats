@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, MoreHorizontal, Phone, Sparkles, MessageCircle, Trash2 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
@@ -68,7 +69,9 @@ export default function AIChatPage() {
   const auth = useSelector((state: RootState) => state.auth);
   const dispatch = useAppDispatch();
   const characters = useSelector((state: RootState) => [...state.characters.mine, ...state.characters.discover]);
-  const character = characters.find((item) => item.id === characterId);
+  const storeCharacter = characters.find((item) => item.id === characterId);
+  const [directCharacter, setDirectCharacter] = useState<{ name: string; avatarUrl?: string } | null>(null);
+  const character = storeCharacter || directCharacter;
   const name = character?.name || 'Character';
   const avatarUrl = character?.avatarUrl || fallbackAvatar(name);
   const userAvatar = userAvatarUrl(auth.user);
@@ -99,6 +102,16 @@ export default function AIChatPage() {
   const [cooldownUntil, setCooldownUntil] = useState<Date | null>(null);
   const [cooldownMessage, setCooldownMessage] = useState<string | null>(null);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const headerMoreRef = useRef<HTMLButtonElement>(null);
+  const [headerMenuPos, setHeaderMenuPos] = useState({ top: 0, right: 0 });
+
+  const openHeaderMenu = () => {
+    if (headerMoreRef.current) {
+      const rect = headerMoreRef.current.getBoundingClientRect();
+      setHeaderMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+    setHeaderMenuOpen(true);
+  };
 
   // ── Voice Call State ──
   const [callActive, setCallActive] = useState(false);
@@ -156,9 +169,14 @@ export default function AIChatPage() {
     if (!auth.token || !characterId) return;
     let active = true;
     Promise.all([
+      fetch(`${API}/characters/${characterId}`, { headers: headers() }).then(r => r.ok ? r.json() : null),
       fetch(`${API}/ai/chat/history/${characterId}`, { headers: headers() }),
       fetch(`${API}/ai/relationship/${characterId}`, { headers: headers() }),
-    ]).then(async ([historyResponse, relationshipResponse]) => {
+    ]).then(async ([characterData, historyResponse, relationshipResponse]) => {
+      // Store directly-fetched character for header display
+      if (characterData && active) {
+        setDirectCharacter({ name: characterData.name, avatarUrl: characterData.avatarUrl });
+      }
       if (!historyResponse.ok) throw new Error('Conversation history could not be loaded.');
       const history = await historyResponse.json();
       const relation = relationshipResponse.ok ? await relationshipResponse.json() : null;
@@ -817,22 +835,35 @@ export default function AIChatPage() {
         </div>
         <div className="relative">
           <button type="button" className="chat-header-button" aria-label="Conversation options"
-            onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
+            ref={headerMoreRef}
+            onClick={openHeaderMenu}
           >
             <MoreHorizontal size={20} />
           </button>
-          {headerMenuOpen && (
+          {headerMenuOpen && createPortal(
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
-              <div className="chat-header-dropdown">
+              <div className="fixed inset-0 z-[var(--z-dropdown,1000)]" onClick={() => setHeaderMenuOpen(false)} />
+              <div
+                className="fixed z-[var(--z-dropdown,1000)] py-1.5 rounded-xl bg-bg-overlay border border-border-subtle shadow-xl animate-fade-in"
+                style={{
+                  top: headerMenuPos.top,
+                  right: headerMenuPos.right,
+                  minWidth: 180,
+                  backdropFilter: 'blur(24px)',
+                  WebkitBackdropFilter: 'blur(24px)',
+                  background: 'rgba(30, 30, 48, 0.95)',
+                }}
+              >
                 <button
                   onClick={() => { setHeaderMenuOpen(false); void updateMode('chat'); }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-text-primary hover:bg-white/5 transition-colors"
                 >
                   <MessageCircle size={14} />
                   {t('chat.switchChat')}
                 </button>
                 <button
                   onClick={() => { setHeaderMenuOpen(false); void updateMode('roleplay'); }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-text-primary hover:bg-white/5 transition-colors"
                 >
                   <Sparkles size={14} />
                   {t('chat.switchRoleplay')}
@@ -843,13 +874,14 @@ export default function AIChatPage() {
                     if (conversationId) dispatch(deleteConv(conversationId) as any);
                     navigate('/chats');
                   }}
-                  className="text-danger"
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-danger hover:bg-white/5 transition-colors"
                 >
                   <Trash2 size={14} />
                   {t('chat.deleteConversation')}
                 </button>
               </div>
-            </>
+            </>,
+            document.body
           )}
         </div>
       </header>

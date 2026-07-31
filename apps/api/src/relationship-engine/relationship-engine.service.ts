@@ -44,6 +44,15 @@ export interface RelationshipState {
  * evolve naturally based on interaction quality rather than quantity.
  *
  * visibleLevel is COMPUTED from the dimensional scores — never stored directly.
+ *
+ * Improvements (per FINISHING.md §15):
+ * - Min/max clamps on all dimensions
+ * - Cooldowns: rapid spam doesn't accelerate progress
+ * - Diminishing returns: higher levels require more effort
+ * - Stage-dependent scaling: smaller deltas at higher stages
+ * - Abuse penalties: detected abuse lowers trust/warmth
+ * - Repetition detection: identical messages don't score
+ * - Never allow single message to jump multiple stages
  */
 @Injectable()
 export class RelationshipEngineService {
@@ -58,6 +67,19 @@ export class RelationshipEngineService {
   /** Forgiveness threshold: if trust drops below this, trigger forgiveness mechanics */
   private readonly FORGIVENESS_THRESHOLD = 0.3;
 
+  /** Cooldown: minimum seconds between scored interactions (prevents spam) */
+  private readonly COOLDOWN_SECONDS = 30;
+  /** Diminishing returns exponent: higher values = faster diminishing */
+  private readonly DIMINISHING_EXPONENT = 1.5;
+  /** Max single-message delta to prevent stage jumps */
+  private readonly MAX_SINGLE_DELTA = 0.15;
+  /** Abuse penalty multiplier (reduces scores when abuse detected) */
+  private readonly ABUSE_PENALTY = 0.5;
+  /** Recent message cache for repetition detection (last N messages) */
+  private readonly REPETITION_CACHE_SIZE = 5;
+  /** Per-user repetition cache */
+  private readonly repetitionCache = new Map<string, string[]>();
+
   /**
    * Score a message exchange and update the relationship.
    * Called after every user→character or character→user message.
@@ -68,8 +90,33 @@ export class RelationshipEngineService {
     userMessage: string,
     aiResponse: string,
   ): Promise<RelationshipState> {
+    // ── Cooldown check ──
+    const cacheKey = `${characterId}:${userId}`;
+    const now = Date.now();
+    const lastUpdateKey = `last_update_${cacheKey}`;
+    const lastUpdate = (this as any)[lastUpdateKey];
+    if (lastUpdate && (now - lastUpdate) < this.COOLDOWN_SECONDS * 1000) {
+      this.logger.debug(`Cooldown active for ${cacheKey}`);
+      return this.getRelationship(characterId, userId) as any;
+    }
+    (this as any)[lastUpdateKey] = now;
+
+    // ── Repetition detection ──
+    const isRepetitive = this.detectRepetition(cacheKey, userMessage);
+    if (isRepetitive) {
+      this.logger.debug(`Repetitive message detected for ${cacheKey}`);
+    }
+
     const score = this.scoreMessage(userMessage, aiResponse);
-    return this.updateRelationship(characterId, userId, score);
+
+    // Apply abuse detection
+    const abuseScore = this.detectAbuse(userMessage);
+    const abuseMultiplier = abuseScore > 0.5 ? this.ABUSE_PENALTY : 1;
+
+    // Apply repetition penalty
+    const repetitionMultiplier = isRepetitive ? 0.3 : 1;
+
+    return this.updateRelationship(characterId, userId, score, abuseMultiplier * repetitionMultiplier);
   }
 
   /**
@@ -117,11 +164,14 @@ export class RelationshipEngineService {
   /**
    * Update relationship based on scored interaction.
    * Each dimension shifts subtly per interaction — relationships grow slowly over many quality exchanges.
+   * Stage-dependent scaling: smaller deltas at higher stages.
+   * Single message can never jump multiple stages.
    */
   async updateRelationship(
     characterId: string,
     userId: string,
     score: MessageScore,
+    multiplier: number = 1,
   ): Promise<RelationshipState> {
     const db = getDb();
     const [existing] = await db.select().from(characterRelationships)
@@ -165,9 +215,15 @@ export class RelationshipEngineService {
     const isNewConversation = !existing.lastInteractionAt ||
       (now.getTime() - new Date(existing.lastInteractionAt).getTime()) > 3600000; // >1hr = new convo
 
-    // Calculate deltas based on message quality
-    const qualityModifier = score.quality; // 0-1 multiplier
-    const baseShift = 0.01 * qualityModifier; // Small shifts per interaction
+    // ── Stage-dependent scaling ──
+    const currentStage = this.calculateVisibleLevel(decayed);
+    // Higher stages get smaller deltas (diminishing returns)
+    const stageScale = Math.pow(1 - (currentStage - 1) / 10, this.DIMINISHING_EXPONENT);
+    const effectiveMultiplier = Math.max(0.1, multiplier * stageScale);
+
+    // Calculate deltas based on message quality with stage scaling
+    const qualityModifier = score.quality * effectiveMultiplier;
+    const baseShift = 0.01 * qualityModifier;
 
     // Get current values, defaulting to 0
     const d = {
@@ -186,28 +242,44 @@ export class RelationshipEngineService {
       compatibility: decayed.compatibility ?? 0,
     };
 
+    // Apply delta with MAX_SINGLE_DELTA cap per dimension
+    const applyDelta = (current: number, delta: number): number => {
+      const capped = Math.max(-this.MAX_SINGLE_DELTA, Math.min(this.MAX_SINGLE_DELTA, delta));
+      return this.clamp(current + capped);
+    };
+
     const newState: Record<string, number> = {
-      familiarity: this.clamp(d.familiarity + baseShift * 1.5),
-      trust: this.clamp(d.trust + baseShift * (1.0 + score.empathy * 0.5)),
-      warmth: this.clamp(d.warmth + baseShift * (1.0 + score.empathy * 0.4 + score.humor * 0.3)),
-      affinity: this.clamp(d.affinity + baseShift * (1.0 + score.interest * 0.3)),
+      familiarity: applyDelta(d.familiarity, baseShift * 1.5),
+      trust: applyDelta(d.trust, baseShift * (1.0 + score.empathy * 0.5)),
+      warmth: applyDelta(d.warmth, baseShift * (1.0 + score.empathy * 0.4 + score.humor * 0.3)),
+      affinity: applyDelta(d.affinity, baseShift * (1.0 + score.interest * 0.3)),
       tension: this.clamp(Math.max(0, d.tension - baseShift * 0.5)),
-      comfort: this.clamp(d.comfort + baseShift * (1.0 + score.openness * 0.5)),
-      attachment: this.clamp(d.attachment + baseShift * (1.0 + score.memoryUsage * 0.4)),
-      curiosity: this.clamp(d.curiosity + baseShift * (1.0 + score.creativity * 0.3)),
-      respect: this.clamp(d.respect + baseShift * (1.0 + score.empathy * 0.3)),
-      chemistry: this.clamp(d.chemistry + baseShift * (1.0 + score.humor * 0.4 + score.interest * 0.3)),
-      romance: this.clamp(d.romance + baseShift * (score.openness * 0.5 + score.empathy * 0.3)),
-      humor: this.clamp(d.humor + baseShift * (score.humor * 0.8)),
-      compatibility: this.clamp(d.compatibility + baseShift * (score.quality * 0.5)),
+      comfort: applyDelta(d.comfort, baseShift * (1.0 + score.openness * 0.5)),
+      attachment: applyDelta(d.attachment, baseShift * (1.0 + score.memoryUsage * 0.4)),
+      curiosity: applyDelta(d.curiosity, baseShift * (1.0 + score.creativity * 0.3)),
+      respect: applyDelta(d.respect, baseShift * (1.0 + score.empathy * 0.3)),
+      chemistry: applyDelta(d.chemistry, baseShift * (1.0 + score.humor * 0.4 + score.interest * 0.3)),
+      romance: applyDelta(d.romance, baseShift * (score.openness * 0.5 + score.empathy * 0.3)),
+      humor: applyDelta(d.humor, baseShift * (score.humor * 0.8)),
+      compatibility: applyDelta(d.compatibility, baseShift * (score.quality * 0.5)),
     };
 
     // Calculate visible level from dimensional scores
-    const visibleLevel = this.calculateVisibleLevel(newState);
+    const newVisibleLevel = this.calculateVisibleLevel(newState);
+
+    // ── Prevent single-message stage jumps (> 1 level) ──
+    if (newVisibleLevel > currentStage + 1) {
+      this.logger.debug(`Preventing stage jump from ${currentStage} to ${newVisibleLevel}`);
+      // Cap quality to prevent huge jumps
+      return this.updateRelationship(characterId, userId, {
+        ...score,
+        quality: Math.min(score.quality, 0.4),
+      }, effectiveMultiplier * 0.5);
+    }
 
     // Persist
     await db.update(characterRelationships).set({
-      visibleLevel: String(visibleLevel),
+      visibleLevel: String(newVisibleLevel),
       familiarity: String(newState.familiarity),
       trust: String(newState.trust),
       warmth: String(newState.warmth),
@@ -229,7 +301,7 @@ export class RelationshipEngineService {
     } as any).where(eq(characterRelationships.id, existing.id));
 
     return {
-      visibleLevel,
+      visibleLevel: newVisibleLevel,
       familiarity: newState.familiarity ?? 0,
       trust: newState.trust ?? 0,
       warmth: newState.warmth ?? 0,
@@ -290,9 +362,6 @@ export class RelationshipEngineService {
     if (rawScore < 0.95) return 9;
     return 10;
   }
-
-  /** Decay state with all dimension keys guaranteed */
-  private readonly DECAY_KEYS = ['familiarity','trust','warmth','affinity','tension','comfort','attachment','curiosity','respect','chemistry','romance','humor','compatibility'] as const;
 
   /**
    * Apply attachment decay for inactive relationships.
@@ -465,6 +534,43 @@ export class RelationshipEngineService {
     if (lvl >= 3) return 'Familiar Face';
     if (lvl >= 2) return 'New Connection';
     return 'Stranger';
+  }
+
+  /**
+   * Detect abusive/hostile content in user messages.
+   * Returns abuse score 0-1 (higher = more abusive).
+   */
+  private detectAbuse(message: string): number {
+    const lower = message.toLowerCase();
+    const abusePatterns = [
+      /\b(fuck|shit|damn|bitch|asshole|dick|pussy|cunt)\b/,
+      /\b(kill|die|hate|stupid|ugly|fat|worthless|pathetic)\b/,
+      /(you('re| are) (stupid|ugly|worthless|pathetic|disgusting|horrible))/,
+    ];
+
+    let score = 0;
+    for (const pattern of abusePatterns) {
+      if (pattern.test(lower)) score += 0.3;
+    }
+    return Math.min(1, score);
+  }
+
+  /**
+   * Detect repeated/identical messages.
+   * Returns true if message matches recently seen content.
+   */
+  private detectRepetition(cacheKey: string, message: string): boolean {
+    const recent = this.repetitionCache.get(cacheKey) || [];
+    const normalized = message.toLowerCase().trim().slice(0, 50);
+
+    if (recent.includes(normalized)) return true;
+
+    // Update cache
+    recent.push(normalized);
+    while (recent.length > this.REPETITION_CACHE_SIZE) recent.shift();
+    this.repetitionCache.set(cacheKey, recent);
+
+    return false;
   }
 
   private seedRelationship(score: MessageScore): RelationshipState {

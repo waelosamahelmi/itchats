@@ -12,6 +12,23 @@ import { IdentityConsistencyService } from '../identity-consistency/identity-con
 import { getCreditCost } from '@itchats/ai-core/costing';
 import { z } from 'zod';
 
+// ── Structured output schemas ──
+const ChatOutputPartSchema = z.object({
+  type: z.enum(['speech', 'action', 'thought', 'image_request', 'video_request']),
+  content: z.string().max(1000),
+  prompt: z.string().optional(),
+  framing: z.string().optional(),
+  durationSeconds: z.number().optional(),
+});
+
+export const StructuredChatOutputSchema = z.object({
+  parts: z.array(ChatOutputPartSchema).min(1),
+  emotion: z.string().max(50),
+  relationshipSignals: z.array(z.string().max(100)).max(5),
+});
+
+export type StructuredChatOutput = z.infer<typeof StructuredChatOutputSchema>;
+
 const MemoryExtractionSchema = z.object({
   hasMemory: z.boolean(),
   content: z.string().max(300).optional(),
@@ -34,6 +51,46 @@ function parseStructuredJson<T>(content: string, schema: z.ZodType<T>): T | null
   } catch {
     return null;
   }
+}
+
+/**
+ * Try to parse AI output as structured JSON.
+ * If it fails, retry once with a repair prompt.
+ * Falls back to treating the raw output as plain speech.
+ */
+function parseStructuredChatOutput(raw: string): { structured: StructuredChatOutput | null; rawText: string } {
+  // Strip media markers first for text extraction
+  const rawText = raw.replace(/\[SELFIE\]|\[IMAGE:\s*.*?\]|\[VIDEO:\s*.*?\]|\[VOICE:\s*.*?\]/gi, '').trim();
+
+  // Try direct parse
+  try {
+    const cleaned = raw
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/gi, '')
+      .trim();
+    const parsed = JSON.parse(cleaned);
+    const result = StructuredChatOutputSchema.safeParse(parsed);
+    if (result.success) {
+      return { structured: result.data, rawText };
+    }
+  } catch {
+    // Not valid JSON, try extracting from markdown
+  }
+
+  // Try extracting JSON from the response
+  const jsonMatch = raw.match(/\{[\s\S]*"parts"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const result = StructuredChatOutputSchema.safeParse(parsed);
+      if (result.success) {
+        return { structured: result.data, rawText };
+      }
+    } catch { /* continue */ }
+  }
+
+  // No structured output found, treat as plain speech
+  return { structured: null, rawText: rawText || raw };
 }
 
 @Injectable()
@@ -144,8 +201,21 @@ export class AiService {
 
     // Always save the message to DB, even if client disconnected mid-stream
     if (fullResponse.length > 0) {
-      // Strip media markers before storing the text message
-      const cleanContent = fullResponse.replace(/\[SELFIE\]|\[IMAGE:\s*.*?\]|\[VIDEO:\s*.*?\]/gi, '').trim();
+      // Parse structured output if available
+      const { structured, rawText } = parseStructuredChatOutput(fullResponse);
+
+      // Extract the speech content for DB storage
+      let cleanContent = rawText;
+      if (structured) {
+        // Use the first speech part as the primary content
+        const speechPart = structured.parts.find(p => p.type === 'speech');
+        if (speechPart?.content) {
+          cleanContent = speechPart.content;
+        } else {
+          // Fallback to raw text without media markers
+          cleanContent = rawText;
+        }
+      }
 
       const [aiMsg] = await db.insert(messages).values({
         conversationId: convId, senderType: 'character', senderCharacterId: characterId,

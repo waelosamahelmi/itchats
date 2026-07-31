@@ -10,12 +10,14 @@ export interface Character {
   followersCount?: number; score?: number; online?: boolean;
   voiceId?: string; ttsVoice?: string; city?: string; interests?: string[];
   occupation?: string; speakingStyle?: string; humorStyle?: string;
+  isFollowing?: boolean;
 }
 export interface Post {
   id: string; authorId: string; authorName: string; authorAvatar: string;
   authorIsAI: boolean; content: string; mediaUrl?: string; mediaType?: 'image' | 'video';
   createdAt: string; privacy: 'public' | 'friends';
   likes: number; liked: boolean; likeCount?: number;
+  viewerReaction?: string | null;
   topReactions: { emoji: string; count: number }[];
   comments: Comment[]; commentCount: number; shares: number;
   shareCount?: number; viewCount?: number;
@@ -98,10 +100,12 @@ export const fetchDiscover = createAsyncThunk('chars/discover', async (p?: numbe
   return (await apiFetch(`/characters/discover?page=${page}&limit=20`)) as Character[];
 });
 export const followChar = createAsyncThunk('chars/follow', async (id: string) => {
-  await apiFetch(`/characters/${id}/follow`, { method: 'POST' }); return id;
+  const res = await apiFetch(`/characters/${id}/follow`, { method: 'POST' });
+  return { id, followerCount: res?.followerCount ?? 0 };
 });
 export const unfollowChar = createAsyncThunk('chars/unfollow', async (id: string) => {
-  await apiFetch(`/characters/${id}/follow`, { method: 'DELETE' }); return id;
+  const res = await apiFetch(`/characters/${id}/follow`, { method: 'DELETE' });
+  return { id, followerCount: res?.followerCount ?? 0 };
 });
 const chars = createSlice({
   name: 'chars',
@@ -126,13 +130,19 @@ const chars = createSlice({
   extraReducers: (b) => {
     b.addCase(fetchMine.fulfilled, (s, a) => { s.mine = a.payload; s.myCharacters = a.payload; });
     b.addCase(fetchDiscover.fulfilled, (s, a) => { s.discover = a.payload; s.discoverCharacters = a.payload; });
-    b.addCase(followChar.fulfilled, (s, id) => {
-      const char = s.discoverCharacters.find(c => c.id === id.payload);
-      if (char) char.followersCount = (char.followersCount || 0) + 1;
+    b.addCase(followChar.fulfilled, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.payload.id);
+      if (char) {
+        char.isFollowing = true;
+        char.followersCount = Number.isFinite(Number(a.payload.followerCount)) ? a.payload.followerCount : 0;
+      }
     });
-    b.addCase(unfollowChar.fulfilled, (s, id) => {
-      const char = s.discoverCharacters.find(c => c.id === id.payload);
-      if (char && char.followersCount) char.followersCount = Math.max(0, char.followersCount - 1);
+    b.addCase(unfollowChar.fulfilled, (s, a) => {
+      const char = s.discoverCharacters.find(c => c.id === a.payload.id);
+      if (char) {
+        char.isFollowing = false;
+        char.followersCount = Number.isFinite(Number(a.payload.followerCount)) ? a.payload.followerCount : 0;
+      }
     });
     b.addCase(fetchSuggestedCharacters.fulfilled, (s, a) => { s.suggestedCharacters = a.payload; });
   },
@@ -147,17 +157,44 @@ export const createNewPost = createAsyncThunk('posts/create', async (data: { con
   return (await apiFetch('/posts', { method: 'POST', body: JSON.stringify(data) })) as Post;
 });
 // Map frontend emojis to backend reactionType enum values
-const EMOJI_TO_REACTION: Record<string, string> = {
+export const EMOJI_TO_REACTION: Record<string, string> = {
   '👍': 'like', '❤️': 'love', '😂': 'haha', '😮': 'wow', '😢': 'sad', '😡': 'angry', '🔥': 'care',
   '👏': 'like', '🎉': 'like', '💯': 'like',
 };
 export const reactToPostThunk = createAsyncThunk('posts/react', async ({ postId, emoji }: { postId: string; emoji: string }) => {
   const reactionType = EMOJI_TO_REACTION[emoji] || 'like';
-  await apiFetch(`/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ reactionType }) });
-  return { postId, emoji };
+  const res = await apiFetch(`/posts/${postId}/reaction`, { method: 'PUT', body: JSON.stringify({ reactionType }) });
+  return {
+    postId,
+    viewerReaction: (res as any)?.viewerReaction ?? reactionType,
+    reactionCount: (res as any)?.reactionCount ?? 0,
+    reactions: (res as any)?.reactions ?? [],
+  };
 });
-export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId, content }: { postId: string; content: string }) => {
-  return { postId, comment: (await apiFetch(`/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) })) as Comment };
+
+export const unreactToPostThunk = createAsyncThunk('posts/unreact', async (postId: string) => {
+  const res = await apiFetch(`/posts/${postId}/reaction`, { method: 'DELETE' });
+  return {
+    postId,
+    viewerReaction: null,
+    reactionCount: (res as any)?.reactionCount ?? 0,
+    reactions: (res as any)?.reactions ?? [],
+  };
+});
+export const addCommentThunk = createAsyncThunk('posts/comment', async ({ postId, content, parentCommentId }: { postId: string; content: string; parentCommentId?: string }) => {
+  const body: any = { content };
+  if (parentCommentId) body.parentCommentId = parentCommentId;
+  return { postId, comment: (await apiFetch(`/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify(body) })) as Comment };
+});
+
+export const reactToCommentThunk = createAsyncThunk('posts/commentReact', async ({ commentId, reactionType }: { commentId: string; reactionType: string }) => {
+  const res = await apiFetch(`/posts/comments/${commentId}/reaction`, { method: 'PUT', body: JSON.stringify({ reactionType }) });
+  return { commentId, ...res };
+});
+
+export const unreactToCommentThunk = createAsyncThunk('posts/commentUnreact', async (commentId: string) => {
+  const res = await apiFetch(`/posts/comments/${commentId}/reaction`, { method: 'DELETE' });
+  return { commentId, viewerReaction: null, ...res };
 });
 export const deletePostThunk = createAsyncThunk('posts/delete', async (postId: string) => {
   await apiFetch(`/posts/${postId}`, { method: 'DELETE' }); return postId;
@@ -197,12 +234,29 @@ const posts = createSlice({
       if (!Array.isArray(s.feedPosts)) s.feedPosts = [];
       const post = s.feedPosts.find(p => p.id === a.payload.postId);
       if (post) {
-        post.liked = true;
-        post.likes = (post.likes || 0) + 1;
-        if (!Array.isArray(post.topReactions)) post.topReactions = [];
-        const existing = post.topReactions.find(r => r.emoji === a.payload.emoji);
-        if (existing) existing.count += 1;
-        else post.topReactions.push({ emoji: a.payload.emoji, count: 1 });
+        post.viewerReaction = a.payload.viewerReaction;
+        post.liked = a.payload.viewerReaction != null;
+        post.likes = Number.isFinite(Number(a.payload.reactionCount)) ? a.payload.reactionCount : 0;
+        post.likeCount = Number.isFinite(Number(a.payload.reactionCount)) ? a.payload.reactionCount : 0;
+        // Map reaction types to topReactions
+        post.topReactions = (a.payload.reactions || []).map((r: any) => ({
+          emoji: Object.entries(EMOJI_TO_REACTION).find(([, v]) => v === r.type)?.[0] || '👍',
+          count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+        }));
+      }
+    });
+    b.addCase(unreactToPostThunk.fulfilled, (s, a) => {
+      if (!Array.isArray(s.feedPosts)) s.feedPosts = [];
+      const post = s.feedPosts.find(p => p.id === a.payload.postId);
+      if (post) {
+        post.viewerReaction = null;
+        post.liked = false;
+        post.likes = Number.isFinite(Number(a.payload.reactionCount)) ? a.payload.reactionCount : 0;
+        post.likeCount = Number.isFinite(Number(a.payload.reactionCount)) ? a.payload.reactionCount : 0;
+        post.topReactions = (a.payload.reactions || []).map((r: any) => ({
+          emoji: Object.entries(EMOJI_TO_REACTION).find(([, v]) => v === r.type)?.[0] || '👍',
+          count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
+        }));
       }
     });
     b.addCase(addCommentThunk.fulfilled, (s, a) => {

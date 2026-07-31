@@ -10,11 +10,11 @@ import { Badge } from '@itchats/ui';
 function CharacterCard({ char, index }: { char: Character; index: number }) {
   const dispatch = useAppDispatch();
   const nav = useNavigate();
-  const [following, setFollowing] = useState(false);
+  // Use server state — no local useState(false) that resets on refresh
+  const following = Boolean(char.isFollowing);
 
   const handleFollow = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setFollowing(!following);
     if (following) dispatch(unfollowChar(char.id));
     else dispatch(followChar(char.id));
   };

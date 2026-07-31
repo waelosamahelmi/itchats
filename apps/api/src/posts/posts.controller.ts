@@ -4,6 +4,7 @@ import {
   Post,
   Delete,
   Patch,
+  Put,
   Param,
   Body,
   Query,
@@ -110,6 +111,22 @@ export class PostsController {
     return this.postsService.likePost(req.user.userId, id, body.reactionType);
   }
 
+  @Put(':id/reaction')
+  @UseGuards(JwtAuthGuard)
+  async putReaction(
+    @Param('id') id: string,
+    @Body() body: { reactionType: string },
+    @Req() req: any,
+  ) {
+    return this.postsService.likePost(req.user.userId, id, body.reactionType);
+  }
+
+  @Delete(':id/reaction')
+  @UseGuards(JwtAuthGuard)
+  async deleteReaction(@Param('id') id: string, @Req() req: any) {
+    return this.postsService.unlikePost(req.user.userId, id);
+  }
+
   @Delete(':id/react')
   @UseGuards(JwtAuthGuard)
   async removeReaction(@Param('id') id: string, @Req() req: any) {
@@ -126,7 +143,7 @@ export class PostsController {
     const comment = await this.postsService.addComment(req.user.userId, id, body.content, body.parentCommentId);
 
     // If user comments on a character's post, schedule character reply
-    void this.aiReactions.scheduleCommentReply(id, comment.id, req.user.userId, body.content).catch(() => {});
+    void this.aiReactions.scheduleCommentReply(id, comment.id, req.user.userId, body.content, body.parentCommentId).catch(() => {});
 
     return comment;
   }
@@ -153,5 +170,25 @@ export class PostsController {
   @Get(':id/reactions')
   async getReactions(@Param('id') id: string) {
     return this.postsService.getPostReactions(id);
+  }
+
+  // ── Comment Reactions ──
+  @Put('comments/:commentId/reaction')
+  @UseGuards(JwtAuthGuard)
+  async reactToComment(
+    @Param('commentId') commentId: string,
+    @Body() body: { reactionType: string },
+    @Req() req: any,
+  ) {
+    return this.postsService.addCommentReaction(req.user.userId, commentId, body.reactionType);
+  }
+
+  @Delete('comments/:commentId/reaction')
+  @UseGuards(JwtAuthGuard)
+  async removeCommentReaction(
+    @Param('commentId') commentId: string,
+    @Req() req: any,
+  ) {
+    return this.postsService.removeCommentReaction(req.user.userId, commentId);
   }
 }

@@ -29,9 +29,19 @@ html {
 html,
 body {
   height: 100%;
-  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
   user-select: none;
   touch-action: manipulation;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  min-width: 0;
 }
 
 body {
@@ -95,5 +105,31 @@ img {
 ::selection {
   background: rgba($color-primary, 0.3);
   color: $color-text-primary;
+}
+
+// ── Z-Index Scale ──
+:root {
+  --z-content: 1;
+  --z-sticky: 20;
+  --z-dropdown: 1000;
+  --z-modal-backdrop: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+}
+
+// ── Horizontal Overflow Guards ──
+img, video, iframe, canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+.flex-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wrap-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 

@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, NotFoundException, Inject, Logger, InternalServerErrorException } from '@nestjs/common';
+
 import { getDb } from '@itchats/database';
 import { conversations, messages, characters, conversationParticipants } from '@itchats/database/schema';
 import { eq, and, desc, sql, isNull, gt } from 'drizzle-orm';
@@ -239,5 +240,57 @@ export class ConversationsController {
     @Req() req: any,
   ) {
     return this.messageReactions.remove(convId, msgId, req.user.userId);
+  }
+
+  // ── Conversation Settings (mute, proactive messages) ──
+  @Patch(':conversationId/settings')
+  @UseGuards(JwtAuthGuard)
+  async updateSettings(
+    @Param('conversationId') id: string,
+    @Body() body: { mutedUntil?: string | null; proactiveMessagesEnabled?: boolean },
+    @Req() req: any,
+  ) {
+    const db = getDb();
+
+    // Verify ownership
+    const [conv] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, id), eq(conversations.createdByUserId, req.user.userId)))
+      .limit(1);
+    if (!conv) throw new NotFoundException('Conversation not found');
+
+    // Build update payload for conversation_participants
+    const updates: Record<string, any> = {};
+
+    if (body.mutedUntil !== undefined) {
+      updates.mutedUntil = body.mutedUntil ? new Date(body.mutedUntil) : null;
+    }
+
+    if (body.proactiveMessagesEnabled !== undefined) {
+      // Store proactive setting in participant metadata or a new column
+      // For now, store as part of metadata jsonb if available
+      // We'll use mutedUntil=far-future as a proxy for now
+      if (!body.proactiveMessagesEnabled) {
+        // Disable proactive by setting muted far in future
+        if (!updates.mutedUntil && body.mutedUntil === undefined) {
+          updates.mutedUntil = new Date('2099-12-31T23:59:59Z');
+        }
+      }
+    }
+
+    // Upsert participant record
+    await db.execute(sql`
+      INSERT INTO conversation_participants (conversation_id, user_id, muted_until)
+      VALUES (${id}, ${req.user.userId}, ${updates.mutedUntil || null})
+      ON CONFLICT (conversation_id, user_id) 
+      DO UPDATE SET muted_until = ${updates.mutedUntil === undefined ? sql`conversation_participants.muted_until` : sql`${updates.mutedUntil}`}
+    `);
+
+    return {
+      conversationId: id,
+      mutedUntil: body.mutedUntil || null,
+      proactiveMessagesEnabled: body.proactiveMessagesEnabled ?? true,
+    };
   }
 }

@@ -8,8 +8,9 @@ export class StoriesController {
   constructor(@Inject(StoriesService) private readonly storiesService: StoriesService) {}
 
   @Get()
-  async getAllStories() {
-    return this.storiesService.getAllStories();
+  @UseGuards(OptionalJwtAuthGuard)
+  async getAllStories(@Req() req: any) {
+    return this.storiesService.getAllStories(req?.user?.userId);
   }
 
   @Get('feed')

@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject, NotFoundException } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { characters, characterFollows, characterLocations, characterVoiceProfiles } from '@itchats/database/schema';
-import { eq, and, or, ilike, sql } from 'drizzle-orm';
+import { eq, and, or, ilike, sql, desc } from 'drizzle-orm';
 import { CharactersService } from './characters.service';
 import { CharacterCreationService } from './character-creation.service';
 import { CreateCharacterSchema } from '@itchats/contracts';
@@ -41,8 +41,8 @@ export class CharactersController {
   // ── Updated discover with grid fields ──
   @Get('discover')
   @UseGuards(OptionalJwtAuthGuard)
-  async discover(@Query('page') page = '1', @Query('limit') limit = '20') {
-    return this.charactersService.findPublic(Number(page), Number(limit));
+  async discover(@Query('page') page = '1', @Query('limit') limit = '20', @Req() req: any) {
+    return this.charactersService.findPublic(Number(page), Number(limit), req?.user?.userId);
   }
 
   @Get('suggested')
@@ -63,6 +63,43 @@ export class CharactersController {
       ))
       .limit(Number(limit)).offset((Number(page) - 1) * Number(limit));
     return { results, query: q };
+  }
+
+  // ── Mention search — lightweight autocomplete endpoint ──
+  @Get('mention-search')
+  @UseGuards(OptionalJwtAuthGuard)
+  async mentionSearch(@Query('q') q: string, @Query('limit') limit = '10', @Req() req: any) {
+    const prefix = (q || '').trim();
+    const db = getDb();
+    const currentUserId = req?.user?.userId;
+
+    const results = await db.select({
+      id: characters.id,
+      name: characters.name,
+      handle: characters.handle,
+      avatarUrl: characters.avatarUrl,
+      visibility: characters.visibility,
+    }).from(characters)
+      .where(and(
+        sql`${characters.deletedAt} IS NULL`,
+        eq(characters.status, 'published'),
+        or(
+          eq(characters.visibility, 'public'),
+          currentUserId ? eq(characters.ownerUserId, currentUserId) : undefined,
+        ),
+        prefix ? or(
+          sql`LOWER(${characters.handle}) LIKE ${prefix.toLowerCase() + '%'}`,
+          sql`LOWER(${characters.name}) LIKE ${prefix.toLowerCase() + '%'}`,
+        ) : undefined,
+      ))
+      .orderBy(
+        sql`CASE WHEN LOWER(${characters.handle}) = ${prefix.toLowerCase()} THEN 0 ELSE 1 END`,
+        desc(characters.followerCount),
+        characters.name,
+      )
+      .limit(Number(limit));
+
+    return { results, query: prefix };
   }
 
   // ── Updated single character detail ──
@@ -149,11 +186,12 @@ export class CharactersController {
       .select({ count: sql<number>`count(*)` })
       .from(characterFollows)
       .where(eq(characterFollows.characterId, id));
+    const followerCount = Number.isFinite(Number(fResult?.count)) ? Number(fResult?.count ?? 0) : 0;
     await db.update(characters)
-      .set({ followerCount: Number(fResult?.count ?? 0) })
+      .set({ followerCount })
       .where(eq(characters.id, id));
 
-    return { followed: true, characterId: id };
+    return { followed: true, characterId: id, followerCount };
   }
 
   @Delete(':characterId/follow')
@@ -168,11 +206,12 @@ export class CharactersController {
       .select({ count: sql<number>`count(*)` })
       .from(characterFollows)
       .where(eq(characterFollows.characterId, id));
+    const followerCount = Number.isFinite(Number(ufResult?.count)) ? Number(ufResult?.count ?? 0) : 0;
     await db.update(characters)
-      .set({ followerCount: Number(ufResult?.count ?? 0) })
+      .set({ followerCount })
       .where(eq(characters.id, id));
 
-    return { unfollowed: true, characterId: id };
+    return { unfollowed: true, characterId: id, followerCount };
   }
 
   // ── Followers ──

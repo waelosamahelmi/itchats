@@ -23,6 +23,7 @@ import { RoleplayModule } from './roleplay/roleplay.module';
 import { RelationshipModule } from './relationship/relationship.module';
 import { AutonomyModule } from './autonomy/autonomy.module';
 import { SeedModule } from './seed/seed.module';
+import { HashtagsModule } from './hashtags/hashtags.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SeedModule } from './seed/seed.module';
     RelationshipModule,
     AutonomyModule,
     SeedModule,
+    HashtagsModule,
   ],
 })
 export class AppModule {}
