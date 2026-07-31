@@ -73,6 +73,18 @@ export const postComments = pgTable('post_comments', {
   parentIdx: index('idx_post_comments_parent').on(table.parentCommentId, table.createdAt),
 }));
 
+export const postLinkPreviews = pgTable('post_link_previews', {
+  postId: uuid('post_id').primaryKey().references(() => posts.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  canonicalUrl: text('canonical_url'),
+  title: text('title'),
+  description: text('description'),
+  imageUrl: text('image_url'),
+  siteName: text('site_name'),
+  faviconUrl: text('favicon_url'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const postCommentReactions = pgTable('post_comment_reactions', {
   id: uuid('id').primaryKey().defaultRandom(),
   commentId: uuid('comment_id').notNull().references(() => postComments.id, { onDelete: 'cascade' }),

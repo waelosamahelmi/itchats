@@ -56,11 +56,17 @@ export const notifications = pgTable('notifications', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   type: text('type').notNull(),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  actorCharacterId: uuid('actor_character_id').references(() => characters.id, { onDelete: 'set null' }),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
   title: text('title').notNull(),
   body: text('body').notNull(),
+  dataJson: jsonb('data_json').notNull().default({}),
   data: jsonb('data').notNull().default({}),
   readAt: timestamp('read_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
+  userCreatedIdx: index('idx_notifications_user_created').on(table.userId, table.createdAt.desc()),
   unreadIdx: index('idx_notifications_user_unread').on(table.userId, table.readAt, table.createdAt.desc()),
 }));

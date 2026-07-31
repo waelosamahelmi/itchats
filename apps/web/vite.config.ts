@@ -11,8 +11,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
+      includeAssets: ['sw-push.js', 'icons/*.svg'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        globIgnores: ['**/sw-push.js'],
         navigateFallbackDenylist: [/^\/v1\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
@@ -24,6 +26,8 @@ export default defineConfig({
             options: { cacheName: 'api-cache', expiration: { maxEntries: 100, maxAgeSeconds: 300 } },
           },
         ],
+        // Import the push service worker script into the generated SW
+        importScripts: ['sw-push.js'],
       },
       manifest: {
         name: 'ItChats AI',

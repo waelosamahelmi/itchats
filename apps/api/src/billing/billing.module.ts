@@ -2,9 +2,10 @@ import { Module, OnModuleInit, Logger } from '@nestjs/common';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { AuthModule } from '../auth/auth.module';
+import { UsageModule } from '../usage/usage.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, UsageModule],
   controllers: [BillingController],
   providers: [BillingService],
   exports: [BillingService],

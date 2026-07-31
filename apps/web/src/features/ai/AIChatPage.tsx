@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, MoreHorizontal, Phone, Sparkles, MessageCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal, Phone, Sparkles, MessageCircle, Trash2, BellOff, Bell } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@/app/store';
 import { deleteConv, useAppDispatch } from '@/app/store';
+import { apiFetch } from '@/lib/api';
 import { ChatComposer } from './ChatComposer';
 import { MessageBubble } from './MessageBubble';
 import {
@@ -104,6 +105,33 @@ export default function AIChatPage() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const headerMoreRef = useRef<HTMLButtonElement>(null);
   const [headerMenuPos, setHeaderMenuPos] = useState({ top: 0, right: 0 });
+
+  // ── Mute / Conversation Settings ──
+  const [mutedUntil, setMutedUntil] = useState<string | null>(null);
+  const [proactiveEnabled, setProactiveEnabled] = useState<boolean>(true);
+
+  const updateConversationSettings = useCallback(async (settings: { mutedUntil?: string | null; proactiveMessagesEnabled?: boolean }) => {
+    if (!conversationIdRef.current || !auth.token) return;
+    try {
+      await apiFetch(`/conversations/${conversationIdRef.current}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      if (settings.mutedUntil !== undefined) setMutedUntil(settings.mutedUntil);
+      if (settings.proactiveMessagesEnabled !== undefined) setProactiveEnabled(settings.proactiveMessagesEnabled);
+    } catch (err) {
+      console.warn('Failed to update conversation settings:', err);
+    }
+  }, [auth.token]);
+
+  const muteOptions = [
+    { label: 'Mute 1 hour', value: new Date(Date.now() + 3600000).toISOString() },
+    { label: 'Mute 8 hours', value: new Date(Date.now() + 28800000).toISOString() },
+    { label: 'Mute 1 week', value: new Date(Date.now() + 604800000).toISOString() },
+    { label: 'Mute indefinitely', value: new Date(Date.now() + 365 * 86400000 * 100).toISOString() },
+    { label: 'Unmute', value: null },
+  ];
 
   const openHeaderMenu = () => {
     if (headerMoreRef.current) {
@@ -868,6 +896,37 @@ export default function AIChatPage() {
                   <Sparkles size={14} />
                   {t('chat.switchRoleplay')}
                 </button>
+                {/* Mute options */}
+                <div className="border-t border-border-subtle my-1" />
+                {muteOptions.map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      void updateConversationSettings({ mutedUntil: opt.value });
+                    }}
+                    className={`flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-white/5 transition-colors ${
+                      mutedUntil === opt.value || (opt.value === null && !mutedUntil)
+                        ? 'text-brand-primary font-medium'
+                        : 'text-text-secondary'
+                    }`}
+                  >
+                    {opt.value === null ? <Bell size={14} /> : <BellOff size={14} />}
+                    {opt.label}
+                  </button>
+                ))}
+                {/* Proactive messages toggle */}
+                <button
+                  onClick={() => {
+                    setHeaderMenuOpen(false);
+                    void updateConversationSettings({ proactiveMessagesEnabled: !proactiveEnabled });
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-text-secondary hover:bg-white/5 transition-colors"
+                >
+                  <MessageCircle size={14} />
+                  Proactive messages: {proactiveEnabled ? 'ON' : 'OFF'}
+                </button>
+                <div className="border-t border-border-subtle my-1" />
                 <button
                   onClick={() => {
                     setHeaderMenuOpen(false);

@@ -29,10 +29,15 @@ export interface Comment {
   authorCharacterId?: string; authorUserId?: string;
 }
 export interface UserProfile {
-  id: string; username: string; email: string; avatarUrl: string;
-  coverUrl: string; bio: string; website: string; location: string;
-  joinDate: string; score: number; rank: string; friendCount: number;
+  id: string; username: string; avatarUrl: string;
+  coverUrl: string; coverPhotoUrl?: string;
+  displayName?: string;
+  bio: string; website: string; location: string;
+  score: number; rank: string; friendCount: number;
+  friendshipCount?: number;
   characterCount: number; followerCount: number;
+  about?: string;
+  createdAt?: string;
 }
 export interface Voice {
   id: string; name: string; gender: 'male' | 'female';
@@ -202,6 +207,9 @@ export const deletePostThunk = createAsyncThunk('posts/delete', async (postId: s
 export const editPostThunk = createAsyncThunk('posts/edit', async ({ postId, content }: { postId: string; content: string }) => {
   return (await apiFetch(`/posts/${postId}`, { method: 'PATCH', body: JSON.stringify({ content }) })) as Post;
 });
+export const fetchLinkPreview = createAsyncThunk('posts/linkPreview', async (url: string) => {
+  return await apiFetch('/link-preview', { method: 'POST', body: JSON.stringify({ url }) });
+});
 export const reportPostThunk = createAsyncThunk('posts/report', async ({ postId, reason }: { postId: string; reason: string }) => {
   await apiFetch(`/posts/${postId}/report`, { method: 'POST', body: JSON.stringify({ reason }) });
   return postId;
@@ -279,12 +287,27 @@ export const { setFeedPosts, appendFeedPosts, setUserPosts } = posts.actions;
 export const fetchProfile = createAsyncThunk('profile/fetch', async () => {
   return (await apiFetch('/users/me')) as UserProfile;
 });
-export const updateProfileThunk = createAsyncThunk('profile/update', async (data: Partial<UserProfile>) => {
-  return (await apiFetch('/users/me', { method: 'PATCH', body: JSON.stringify(data) })) as UserProfile;
+export const updateProfileThunk = createAsyncThunk('profile/update', async (data: { displayName?: string; bio?: string; website?: string; location?: string }) => {
+  return (await apiFetch('/users/profile', { method: 'PATCH', body: JSON.stringify(data) })) as UserProfile;
+});
+export const updateAvatarThunk = createAsyncThunk('profile/updateAvatar', async (file: File) => {
+  const formData = new FormData();
+  formData.append('avatar', file);
+  const token = localStorage.getItem('accessToken');
+  const res = await fetch('/v1/users/avatar', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
+  if (!res.ok) throw new Error('Avatar upload failed');
+  return await res.json();
+});
+export const updateCoverThunk = createAsyncThunk('profile/updateCover', async (file: File) => {
+  const formData = new FormData();
+  formData.append('cover', file);
+  const token = localStorage.getItem('accessToken');
+  const res = await fetch('/v1/users/cover', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
+  if (!res.ok) throw new Error('Cover upload failed');
+  return await res.json();
 });
 export const fetchFriendsThunk = createAsyncThunk('profile/friends', async () => {
   const data = await apiFetch('/users/friends');
-  // Backend returns { friends: [...], count: N } — extract array if wrapped
   if (data && Array.isArray(data.friends)) return data.friends as UserProfile[];
   if (Array.isArray(data)) return data as UserProfile[];
   return [] as UserProfile[];

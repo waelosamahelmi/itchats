@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req, Inject, NotFoundException, forwardRef } from '@nestjs/common';
 import { getDb } from '@itchats/database';
 import { characters, characterFollows, characterLocations, characterVoiceProfiles } from '@itchats/database/schema';
 import { eq, and, or, ilike, sql, desc } from 'drizzle-orm';
@@ -6,12 +6,14 @@ import { CharactersService } from './characters.service';
 import { CharacterCreationService } from './character-creation.service';
 import { CreateCharacterSchema } from '@itchats/contracts';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt.guard';
+import { NotificationsService, NOTIFICATION_TYPES } from '../notifications/notifications.service';
 
 @Controller('v1/characters')
 export class CharactersController {
   constructor(
     @Inject(CharactersService) private readonly charactersService: CharactersService,
     @Inject(CharacterCreationService) private readonly creationService: CharacterCreationService,
+    @Inject(forwardRef(() => NotificationsService)) private readonly notifications: NotificationsService,
   ) {}
 
   @Post()
@@ -190,6 +192,27 @@ export class CharactersController {
     await db.update(characters)
       .set({ followerCount })
       .where(eq(characters.id, id));
+
+    // Notify character owner about new follower
+    const [character] = await db.select({ ownerUserId: characters.ownerUserId, name: characters.name })
+      .from(characters).where(eq(characters.id, id)).limit(1);
+    if (character?.ownerUserId && character.ownerUserId !== req.user.userId) {
+      const [follower] = await db.select({ username: sql<string>`COALESCE(${sql.raw('(SELECT display_name FROM user_profiles WHERE user_id = users.id)')}, users.username)` })
+        .from(sql`users`).where(eq(sql`users.id`, req.user.userId)).limit(1);
+      const followerName = follower?.username ?? 'Someone';
+
+      this.notifications.create({
+        userId: character.ownerUserId,
+        type: NOTIFICATION_TYPES.NEW_FOLLOWER,
+        actorUserId: req.user.userId,
+        actorCharacterId: null,
+        entityType: 'character',
+        entityId: id,
+        title: 'New follower!',
+        body: `${followerName} started following ${character.name}`,
+        data: { characterId: id },
+      }).catch(() => {});
+    }
 
     return { followed: true, characterId: id, followerCount };
   }

@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { getDb, getPool } from '@itchats/database';
-import { refreshTokens, authAccounts } from '@itchats/database/schema';
+import { refreshTokens, authAccounts, userSessions } from '@itchats/database/schema';
 import { eq, and } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import { randomBytes, createHash } from 'node:crypto';
@@ -19,6 +19,12 @@ export class AuthService {
     return argon2.hash(password, { type: argon2.argon2id, memoryCost: 65536, timeCost: 3, parallelism: 4 });
   }
   async verifyPassword(hash: string, password: string) { return argon2.verify(hash, password); }
+
+  /** Hash the user's IP for session tracking (privacy-preserving) */
+  private hashIp(ip?: string): string | undefined {
+    if (!ip) return undefined;
+    return createHash('sha256').update(ip).digest('hex').slice(0, 16);
+  }
 
   async register(email: string, username: string, password: string, dateOfBirth?: string, agreedToTerms?: boolean, gender?: string, lookingFor?: string, interestedIn?: string) {
     const pool = getPool();
@@ -50,7 +56,9 @@ export class AuthService {
     }
 
     await pool.query('INSERT INTO credit_wallets (user_id, balance) VALUES ($1, 1000) ON CONFLICT DO NOTHING', [user.id]);
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    const tokens = await this.generateTokens(user.id, user.email, user.role, {
+      deviceName: 'registration',
+    });
     return {
       user: {
         id: user.id,
@@ -80,36 +88,81 @@ export class AuthService {
     if (deviceInfo?.userAgent) {
       await pool.query('INSERT INTO devices (user_id, user_agent, last_ip, last_seen_at) VALUES ($1, $2, $3, NOW())', [row.id, deviceInfo.userAgent, deviceInfo.ip ?? null]);
     }
-    const tokens = await this.generateTokens(row.id, row.email, row.role);
+    const tokens = await this.generateTokens(row.id, row.email, row.role, {
+      deviceName: deviceInfo?.userAgent?.slice(0, 100) ?? 'login',
+      userAgent: deviceInfo?.userAgent,
+      ip: deviceInfo?.ip,
+    });
     return { user: { id: row.id, email: row.email, username: row.username, role: row.role }, ...tokens };
   }
 
-  async generateTokens(userId: string, email: string, role: string): Promise<TokenPair> {
+  async generateTokens(
+    userId: string,
+    email: string,
+    role: string,
+    sessionInfo?: { deviceName?: string; userAgent?: string; ip?: string },
+  ): Promise<TokenPair> {
     const config = getConfig();
     const accessToken = this.jwtService.sign({ sub: userId, email, role });
     const refreshValue = randomBytes(48).toString('hex');
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
+    const expiresAt = new Date(Date.now() + 3650 * 86400000);
     const db = getDb();
-    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt: new Date(Date.now() + 3650 * 86400000) } as any);
+
+    // Store refresh token
+    await db.insert(refreshTokens).values({ userId, tokenHash, expiresAt } as any);
+
+    // Store session record for token reuse detection
+    await db.insert(userSessions).values({
+      userId,
+      refreshTokenHash: tokenHash,
+      deviceName: sessionInfo?.deviceName ?? null,
+      userAgent: sessionInfo?.userAgent ?? null,
+      ipHash: this.hashIp(sessionInfo?.ip),
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      expiresAt,
+    } as any);
+
     return { accessToken, refreshToken: refreshValue, expiresIn: 900 };
   }
 
-  async refresh(refreshValue: string): Promise<TokenPair> {
+  async refresh(refreshValue: string, sessionInfo?: { userAgent?: string; ip?: string }): Promise<TokenPair> {
     const db = getDb();
     const tokenHash = createHash('sha256').update(refreshValue).digest('hex');
     const [s] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash)).limit(1);
-    if (!s || s.revokedAt) throw new UnauthorizedException('Invalid token');
+    if (!s) throw new UnauthorizedException('Invalid token');
+
+    // Token reuse detection: if token was already revoked, someone else used it — revoke ALL sessions
+    if (s.revokedAt) {
+      // Revoke all refresh tokens and sessions for this user
+      await db.update(refreshTokens).set({ revokedAt: new Date() } as any)
+        .where(and(eq(refreshTokens.userId, s.userId)));
+      await db.update(userSessions).set({ revokedAt: new Date() } as any)
+        .where(and(eq(userSessions.userId, s.userId)));
+      throw new UnauthorizedException('Token reuse detected — all sessions revoked');
+    }
+
+    // Revoke the old refresh token (rotating refresh)
     await db.update(refreshTokens).set({ revokedAt: new Date() } as any).where(eq(refreshTokens.id, s.id));
+
+    // Mark the old session as used and expired
+    await db.update(userSessions).set({ lastUsedAt: new Date(), revokedAt: new Date() } as any)
+      .where(and(eq(userSessions.refreshTokenHash, tokenHash)));
+
     const pool = getPool();
     const uResult = await pool.query('SELECT id, email, role FROM users WHERE id = $1 LIMIT 1', [s.userId]);
     const user = uResult.rows[0] as { id: string; email: string; role: string } | undefined;
     if (!user) throw new UnauthorizedException('User not found');
-    return this.generateTokens(user.id, user.email, user.role);
+    return this.generateTokens(user.id, user.email, user.role, sessionInfo);
   }
 
   async logout(userId: string) {
+    const db = getDb();
     const pool = getPool();
     await pool.query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1', [userId]);
+    await db.update(userSessions).set({ revokedAt: new Date() } as any)
+      .where(and(eq(userSessions.userId, userId)));
     return { loggedOut: true };
   }
 

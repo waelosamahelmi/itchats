@@ -6,6 +6,8 @@ import {
   date,
   pgEnum,
   integer,
+  primaryKey,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const userStatusEnum = pgEnum('user_status', ['pending', 'active', 'suspended', 'deleted']);
@@ -89,6 +91,33 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   endpoint: text('endpoint').notNull(),
   p256dh: text('p256dh').notNull(),
   auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
   enabled: text('enabled').notNull().default('true'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
 });
+
+export const userSessions = pgTable('user_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  refreshTokenHash: text('refresh_token_hash').notNull(),
+  deviceName: text('device_name'),
+  userAgent: text('user_agent'),
+  ipHash: text('ip_hash'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+});
+
+export const userSettings = pgTable('user_settings', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.key] }),
+  userIdx: index('idx_user_settings_user').on(table.userId),
+}));

@@ -1,7 +1,7 @@
 import { Job } from 'bullmq';
 import { getDb } from '@itchats/database';
-import { notifications, pushSubscriptions } from '@itchats/database/schema';
-import { eq } from 'drizzle-orm';
+import { notifications, pushSubscriptions, conversationParticipants, conversations, messages } from '@itchats/database/schema';
+import { eq, and } from 'drizzle-orm';
 import { getConfig } from '@itchats/config';
 import type { NotificationJob } from '../queues';
 
@@ -10,22 +10,60 @@ import type { NotificationJob } from '../queues';
  *
  * 1. Persists notification in DB
  * 2. Sends push notification to all user's subscribed devices via Web Push
+ * 3. Respects conversation mute settings for message-type notifications
  */
 export async function notificationProcessor(job: Job<NotificationJob>) {
   const db = getDb();
   const config = getConfig();
   const { userId, type, title, body, data } = job.data;
 
+  // For incoming_message or character_reply notifications, check mute
+  if ((type === 'incoming_message' || type === 'character_reply') && data?.conversationId) {
+    // Check if this conversation is muted for this user
+    const [participant] = await db
+      .select({ mutedUntil: conversationParticipants.mutedUntil })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, data.conversationId),
+          eq(conversationParticipants.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (participant?.mutedUntil) {
+      const mutedUntil = new Date(participant.mutedUntil);
+      if (mutedUntil > new Date()) {
+        // Still persist the notification silently, but don't send push
+        const [n] = await db.insert(notifications).values({
+          userId, type, title, body,
+          dataJson: (data ?? {}),
+          data: (data ?? {}),
+          entityType: data?.entityType ?? null,
+          entityId: data?.entityId ?? null,
+        } as any).returning();
+        return { success: true, notificationId: n!.id, pushSent: 0, muted: true };
+      }
+    }
+  }
+
   // Persist notification
   const [n] = await db.insert(notifications).values({
-    userId, type, title, body, data: data ?? {},
-  }).returning();
+    userId, type, title, body,
+    dataJson: (data ?? {}),
+    data: (data ?? {}),
+    entityType: data?.entityType ?? null,
+    entityId: data?.entityId ?? null,
+  } as any).returning();
 
   // Send push notifications to subscribed devices
   if (config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY) {
     try {
       const subs = await db.select().from(pushSubscriptions)
-        .where(eq(pushSubscriptions.userId, userId));
+        .where(and(
+          eq(pushSubscriptions.userId, userId),
+          eq(pushSubscriptions.enabled, 'true' as any),
+        ));
 
       if (subs.length > 0) {
         // Dynamic import web-push to avoid requiring it in non-push environments
@@ -37,7 +75,16 @@ export async function notificationProcessor(job: Job<NotificationJob>) {
             config.VAPID_PRIVATE_KEY,
           );
 
-          const payload = JSON.stringify({ title, body, type, data, notificationId: n!.id });
+          // Include navigation data for deep linking
+          const payload = JSON.stringify({
+            title,
+            body,
+            type,
+            data: data ?? {},
+            notificationId: n!.id,
+            // Deep link data for the service worker
+            url: data?.url || `/notifications`,
+          });
 
           const results = await Promise.allSettled(
             subs.map(sub =>
@@ -51,9 +98,10 @@ export async function notificationProcessor(job: Job<NotificationJob>) {
                 },
                 payload,
               ).catch(async (err: any) => {
-                // Remove invalid subscriptions (410 Gone)
+                // Remove invalid subscriptions (410 Gone, 404 Not Found)
                 if (err.statusCode === 410 || err.statusCode === 404) {
-                  await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
+                  await db.update(pushSubscriptions).set({ revokedAt: new Date(), enabled: 'false' } as any)
+                    .where(eq(pushSubscriptions.id, sub.id));
                 }
                 throw err;
               })

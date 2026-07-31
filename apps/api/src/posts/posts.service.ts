@@ -2,12 +2,13 @@ import { Injectable, NotFoundException, BadRequestException, Inject, Optional, f
 import { getDb } from '@itchats/database';
 import {
   posts, postReactions, postComments, postCommentReactions, characterFollows, characters,
-  userFriends, users, reports,
+  userFriends, users, reports, postLinkPreviews, userProfiles,
 } from '@itchats/database/schema';
 import { eq, and, sql, desc, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsService, NOTIFICATION_TYPES } from '../notifications/notifications.service';
 import { HashtagsService } from '../hashtags/hashtags.service';
+import { LinkPreviewService } from './link-preview.service';
 
 /**
  * Parse @handle mentions from post content.
@@ -65,6 +66,7 @@ export class PostsService {
   constructor(
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => HashtagsService)) private readonly hashtags: HashtagsService,
+    @Inject(forwardRef(() => LinkPreviewService)) private readonly linkPreview: LinkPreviewService,
   ) {}
 
   async createPost(
@@ -76,6 +78,13 @@ export class PostsService {
       visibility?: 'public' | 'friends' | 'private';
       nsfw?: boolean;
       repostOfPostId?: string;
+      linkPreview?: {
+        url: string;
+        title?: string;
+        description?: string;
+        imageUrl?: string;
+        siteName?: string;
+      };
     },
   ) {
     const db = getDb();
@@ -92,6 +101,17 @@ export class PostsService {
       })
       .returning();
     if (!post) throw new Error('Failed to create post');
+
+    // Save link preview if provided
+    if (data.linkPreview?.url) {
+      this.linkPreview.savePostLinkPreview(post.id, {
+        url: data.linkPreview.url,
+        title: data.linkPreview.title,
+        description: data.linkPreview.description,
+        imageUrl: data.linkPreview.imageUrl,
+        siteName: data.linkPreview.siteName,
+      }).catch(() => {});
+    }
 
     // Parse mentions and notify mentioned characters
     this.notifyMentions(post.id, data.content, userId).catch(() => {});
@@ -129,13 +149,16 @@ export class PostsService {
       if (char.ownerUserId === authorUserId) continue; // Don't notify self
 
       try {
-        await this.notifications.create(
-          char.ownerUserId,
-          'mention',
-          `@${char.name} was mentioned`,
-          `${authorName} mentioned @${char.name} in a post`,
-          { postId, characterId: char.id, type: 'mention' },
-        );
+        await this.notifications.create({
+          userId: char.ownerUserId,
+          type: NOTIFICATION_TYPES.MENTION,
+          title: `@${char.name} was mentioned`,
+          body: `${authorName} mentioned @${char.name} in a post`,
+          entityType: 'post',
+          entityId: postId,
+          actorCharacterId: char.id,
+          data: { postId, characterId: char.id, type: 'mention' },
+        });
       } catch {
         // Silent — notification failure shouldn't block post creation
       }
@@ -474,6 +497,24 @@ export class PostsService {
       count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
     }));
 
+    // Notify post author (if it's not the reactor themselves)
+    if (post.authorUserId && post.authorUserId !== userId) {
+      // Get reactor display name
+      const [reactor] = await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
+      const reactorName = reactor?.username ?? 'Someone';
+
+      this.notifications.create({
+        userId: post.authorUserId,
+        type: NOTIFICATION_TYPES.POST_REACTION,
+        actorUserId: userId,
+        entityType: 'post',
+        entityId: postId,
+        title: 'New reaction on your post',
+        body: `${reactorName} reacted with ${reactionType} to your post`,
+        data: { postId, reactionType },
+      }).catch(() => {});
+    }
+
     return {
       postId,
       viewerReaction: reactionType,
@@ -564,6 +605,48 @@ export class PostsService {
 
     // Parse mentions and notify
     this.notifyMentions(postId, content, userId).catch(() => {});
+
+    // Notify post author about new comment (unless it's their own post)
+    if (post.authorUserId && post.authorUserId !== userId) {
+      const [commenter] = await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
+      const commenterName = commenter?.username ?? 'Someone';
+
+      this.notifications.create({
+        userId: post.authorUserId,
+        type: NOTIFICATION_TYPES.COMMENT_REPLY,
+        actorUserId: userId,
+        entityType: parentCommentId ? 'comment' : 'post',
+        entityId: parentCommentId || postId,
+        title: parentCommentId ? 'New reply to a comment' : 'New comment on your post',
+        body: `${commenterName} ${parentCommentId ? 'replied to a comment' : 'commented'} on your post`,
+        data: { postId, commentId: comment.id, parentCommentId },
+      }).catch(() => {});
+    }
+
+    // If replying to a specific parent comment, notify the parent comment's author
+    if (parentCommentId) {
+      const [parentComment] = await db
+        .select({ userId: postComments.userId })
+        .from(postComments)
+        .where(eq(postComments.id, parentCommentId))
+        .limit(1);
+
+      if (parentComment?.userId && parentComment.userId !== userId && parentComment.userId !== post.authorUserId) {
+        const [replier] = await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
+        const replierName = replier?.username ?? 'Someone';
+
+        this.notifications.create({
+          userId: parentComment.userId,
+          type: NOTIFICATION_TYPES.COMMENT_REPLY,
+          actorUserId: userId,
+          entityType: 'comment',
+          entityId: parentCommentId,
+          title: 'Someone replied to your comment',
+          body: `${replierName} replied to your comment`,
+          data: { postId, commentId: comment.id, parentCommentId },
+        }).catch(() => {});
+      }
+    }
 
     // Update comment count
     const [r3] = await db
@@ -749,6 +832,23 @@ export class PostsService {
       type: r.type,
       count: Number.isFinite(Number(r.count)) ? Number(r.count) : 0,
     }));
+
+    // Notify comment author about reaction (unless it's themselves)
+    if (comment.userId && comment.userId !== userId) {
+      const [reactor] = await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
+      const reactorName = reactor?.username ?? 'Someone';
+
+      this.notifications.create({
+        userId: comment.userId,
+        type: NOTIFICATION_TYPES.COMMENT_REACTION,
+        actorUserId: userId,
+        entityType: 'comment',
+        entityId: commentId,
+        title: 'New reaction on your comment',
+        body: `${reactorName} reacted with ${reactionType} to your comment`,
+        data: { commentId, postId: comment.postId, reactionType },
+      }).catch(() => {});
+    }
 
     return {
       commentId,

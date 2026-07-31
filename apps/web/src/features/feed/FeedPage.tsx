@@ -34,6 +34,13 @@ import PostMenu from '@/components/PostMenu';
 import ShareBottomSheet from '@/components/ShareBottomSheet';
 import MentionAutocomplete from '@/components/MentionAutocomplete';
 import FeelingPicker from '@/components/FeelingPicker';
+import LinkPreviewCard, { LinkPreviewSkeleton, LinkPreviewData } from '@/components/LinkPreviewCard';
+import { SkeletonLine } from '@/components/Skeleton';
+
+/** Trigger haptic feedback if available (Section 22) */
+function haptic(ms: number = 10) {
+  try { navigator?.vibrate?.(ms); } catch {}
+}
 
 // ── Character cache (handle → id, name) ──
 let characterCache: Map<string, { id: string; name: string; handle: string }> | null = null;
@@ -243,6 +250,7 @@ function PostCard({ post }: { post: Post }) {
   const displayContent = expandedContent ? post.content : post.content.slice(0, 200);
 
   const handleLike = () => {
+    haptic(5);
     if (liked) {
       dispatch(unreactToPostThunk(post.id));
     } else {
@@ -251,6 +259,7 @@ function PostCard({ post }: { post: Post }) {
   };
 
   const handleReaction = (emoji: string) => {
+    haptic(5);
     // If already reacted with same type, remove
     const reactionType = EMOJI_TO_REACTION[emoji] || 'like';
     if (post.viewerReaction === reactionType) {
@@ -628,9 +637,21 @@ function PostCard({ post }: { post: Post }) {
   );
 }
 
+// ── URL Regex ──
+const URL_REGEX = /https?:\/\/[^\s<>"]+/gi;
+
+function extractFirstUrl(text: string): string | null {
+  const matches = text.match(URL_REGEX);
+  if (!matches || matches.length === 0) return null;
+  // Return the longest match (most likely the pasted URL)
+  let best = matches[0]!;
+  for (const m of matches) if (m.length > best.length) best = m;
+  return best;
+}
+
 // ── Composer ──
 function Composer({ onPost, userAvatar, username, onStoryCreate }: {
-  onPost: (text: string, mediaUrl?: string, feeling?: string, mediaType?: string) => void;
+  onPost: (text: string, mediaUrl?: string, feeling?: string, mediaType?: string, linkPreview?: LinkPreviewData) => void;
   userAvatar?: string;
   username?: string;
   onStoryCreate?: () => void;
@@ -642,6 +663,14 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
   const [selectedFeeling, setSelectedFeeling] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showFeelingPicker, setShowFeelingPicker] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Link preview state
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
+  const [linkPreviewLoading, setLinkPreviewLoading] = useState(false);
+  const prevUrlRef = useRef<string | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -659,11 +688,70 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
 
   const handleTextChange = (value: string) => {
     setText(value);
+
+    // URL detection with debounce (500ms)
+    const url = extractFirstUrl(value);
+    if (url !== prevUrlRef.current) {
+      prevUrlRef.current = url;
+
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+
+      if (!url) {
+        setLinkPreview(null);
+        setLinkPreviewLoading(false);
+        return;
+      }
+
+      setLinkPreviewLoading(true);
+      debounceTimerRef.current = setTimeout(async () => {
+        try {
+          const token = localStorage.getItem('accessToken');
+          const res = await fetch('/v1/link-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ url }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setLinkPreview(data);
+          }
+        } catch {
+          // Silent — link preview is non-critical
+        }
+        setLinkPreviewLoading(false);
+      }, 500);
+    }
   };
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Validate file type
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowedVideoTypes = ['video/mp4', 'video/webm'];
+    const allowedTypes = [...allowedImageTypes, ...allowedVideoTypes];
+
+    if (!allowedTypes.includes(file.type)) {
+      setUploadError(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM.`);
+      return;
+    }
+
+    // Size validation
+    const maxImageSize = 10 * 1024 * 1024; // 10MB
+    const maxVideoSize = 100 * 1024 * 1024; // 100MB
+    const isVideo = file.type.startsWith('video/');
+    const maxSize = isVideo ? maxVideoSize : maxImageSize;
+
+    if (file.size > maxSize) {
+      const maxMB = (maxSize / (1024 * 1024)).toFixed(0);
+      setUploadError(`File too large. Maximum: ${maxMB}MB.`);
+      return;
+    }
+
+    setUploadError(null);
     setSelectedMedia(file);
     const reader = new FileReader();
     reader.onload = () => setMediaPreview(reader.result as string);
@@ -673,17 +761,26 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
   const handleSubmit = async () => {
     if (!text.trim() && !selectedMedia) return;
     setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
     let mediaUrl: string | undefined;
     let mediaType: string | undefined;
     if (selectedMedia) {
       mediaType = selectedMedia.type.startsWith('video/') ? 'video' : 'image';
       try {
+        setUploadProgress(10);
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+          reader.onprogress = (e) => {
+            if (e.lengthComputable) {
+              setUploadProgress(10 + Math.round((e.loaded / e.total) * 30));
+            }
+          };
           reader.readAsDataURL(selectedMedia);
         });
         const token = localStorage.getItem('accessToken');
+        setUploadProgress(40);
         const uploadRes = await fetch('/v1/media/upload-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -697,6 +794,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json();
           const { mediaAssetId, uploadUrl } = uploadData;
+          setUploadProgress(60);
           if (uploadUrl) {
             try {
               await fetch(uploadUrl, {
@@ -704,12 +802,14 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
                 headers: { 'Content-Type': selectedMedia.type },
                 body: selectedMedia,
               });
+              setUploadProgress(80);
               await fetch('/v1/media/confirm-upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ mediaAssetId }),
               });
             } catch {
+              setUploadProgress(70);
               await fetch('/v1/media/upload-local', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -717,6 +817,7 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
               });
             }
           }
+          setUploadProgress(90);
           const dlRes = await fetch(`/v1/media/${mediaAssetId}/download-url`, {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -724,21 +825,32 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
             const { url } = await dlRes.json();
             mediaUrl = url;
           }
+          setUploadProgress(100);
+        } else {
+          throw new Error('Upload URL request failed');
         }
       } catch (err) {
         console.error('Upload failed:', err);
+        setUploadError('Upload failed. Retry or post without media.');
+        setUploading(false);
+        return;
       }
       if (!mediaUrl) {
         mediaUrl = mediaPreview ?? undefined;
       }
     }
-    onPost(text.trim(), mediaUrl, selectedFeeling ?? undefined, mediaType);
+    onPost(text.trim(), mediaUrl, selectedFeeling ?? undefined, mediaType, linkPreview ?? undefined);
     setText('');
     setSelectedMedia(null);
     setMediaPreview(null);
     setSelectedFeeling(null);
+    setLinkPreview(null);
+    setLinkPreviewLoading(false);
+    prevUrlRef.current = null;
     setExpanded(false);
     setUploading(false);
+    setUploadProgress(0);
+    setUploadError(null);
   };
 
   return (
@@ -780,11 +892,56 @@ function Composer({ onPost, userAvatar, username, onStoryCreate }: {
         <div className="mt-3 relative rounded-xl overflow-hidden">
           <img src={mediaPreview} alt="Preview" className="w-full max-h-[200px] object-cover rounded-xl" />
           <button
-            onClick={() => { setSelectedMedia(null); setMediaPreview(null); }}
+            onClick={() => { setSelectedMedia(null); setMediaPreview(null); setUploadError(null); }}
             className="absolute top-2 right-2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
           >
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Upload Progress Bar */}
+      {uploading && uploadProgress > 0 && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-text-muted">Uploading...</span>
+            <span className="text-[10px] text-text-muted">{uploadProgress}%</span>
+          </div>
+          <div className="h-1.5 bg-bg-elevated rounded-full overflow-hidden">
+            <div
+              className="h-full bg-brand-primary rounded-full transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Upload Error */}
+      {uploadError && (
+        <div className="mt-3 p-3 rounded-xl bg-danger/10 border border-danger/20">
+          <p className="text-xs text-danger">{uploadError}</p>
+          <button
+            onClick={() => { setSelectedMedia(null); setMediaPreview(null); setUploadError(null); }}
+            className="text-[10px] text-text-secondary mt-1 hover:text-text-primary"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Link Preview */}
+      {linkPreviewLoading && !linkPreview && (
+        <div className="mt-3">
+          <LinkPreviewSkeleton compact />
+        </div>
+      )}
+      {linkPreview && (
+        <div className="mt-3">
+          <LinkPreviewCard
+            preview={linkPreview}
+            compact
+            onRemove={() => { setLinkPreview(null); prevUrlRef.current = null; }}
+          />
         </div>
       )}
 
@@ -1037,9 +1194,13 @@ export default function FeedPage() {
     setRefreshing(false);
   }
 
-  const handleCreatePost = (text: string, mediaUrl?: string, feeling?: string, mediaType?: string) => {
+  const handleCreatePost = (text: string, mediaUrl?: string, feeling?: string, mediaType?: string, linkPreview?: LinkPreviewData) => {
     const content = feeling ? `${feeling} — ${text}` : text;
-    dispatch(createNewPost({ content, mediaUrl, mediaType }));
+    const payload: any = { content, mediaUrl, mediaType };
+    if (linkPreview) {
+      payload.linkPreview = linkPreview;
+    }
+    dispatch(createNewPost(payload));
   };
 
   const handleCreateStory = async (caption: string, mediaUrl?: string) => {
@@ -1131,39 +1292,39 @@ export default function FeedPage() {
         <div className="px-4 pb-24 space-y-4">
           {loading ? (
             Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="glass rounded-2xl p-4 space-y-3 animate-pulse">
+              <div key={i} className="card-solid rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-bg-elevated" />
+                  <div className="skeleton rounded-full" style={{ width: 40, height: 40 }} />
                   <div className="space-y-1.5 flex-1">
-                    <div className="h-3 w-24 bg-bg-elevated rounded-full" />
-                    <div className="h-2 w-16 bg-bg-elevated rounded-full" />
+                    <SkeletonLine width={96} height={14} />
+                    <SkeletonLine width={64} height={10} />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="h-3 bg-bg-elevated rounded-full w-3/4" />
-                  <div className="h-3 bg-bg-elevated rounded-full w-1/2" />
+                  <SkeletonLine width="75%" height={14} />
+                  <SkeletonLine width="50%" height={14} />
                 </div>
-                <div className="h-48 bg-bg-elevated rounded-xl" />
+                <div className="skeleton rounded-xl" style={{ height: 180 }} />
               </div>
             ))
           ) : error ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-4">
-              <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
-                <Home size={28} className="text-text-muted opacity-50" />
+            <div className="empty-state">
+              <div className="empty-state-icon">
+                <Home size={28} />
               </div>
-              <p className="text-text-muted text-sm">{t('feed.loadFailed')}</p>
-              <p className="text-text-muted text-xs text-center max-w-[260px]">{error}</p>
-              <button onClick={handleRefresh} className="rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium">
+              <p className="empty-state-title">{t('feed.loadFailed')}</p>
+              <p className="empty-state-desc">{error}</p>
+              <button onClick={handleRefresh} className="mt-4 rounded-full bg-brand-primary px-5 py-2 text-white text-sm font-medium touch-target">
                 {t('feed.retry')}
               </button>
             </div>
           ) : feedPosts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
-                <Home size={28} className="text-text-muted opacity-50" />
+            <div className="empty-state">
+              <div className="empty-state-icon">
+                <Home size={28} />
               </div>
-              <p className="text-text-muted text-sm">{t('feed.noPosts')}</p>
-              <p className="text-text-muted text-xs text-center max-w-[260px]">{t('feed.feedWillFill')}</p>
+              <p className="empty-state-title">{t('feed.noPosts')}</p>
+              <p className="empty-state-desc">{t('feed.feedWillFill')}</p>
             </div>
           ) : (
             feedPosts.map(post => (

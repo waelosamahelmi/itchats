@@ -34,6 +34,13 @@ export class PostsController {
       visibility?: 'public' | 'friends' | 'private';
       nsfw?: boolean;
       repostOfPostId?: string;
+      linkPreview?: {
+        url: string;
+        title?: string;
+        description?: string;
+        imageUrl?: string;
+        siteName?: string;
+      };
     },
     @Req() req: any,
   ) {

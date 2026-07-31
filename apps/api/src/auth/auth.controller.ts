@@ -7,46 +7,89 @@ import { getConfig } from '@itchats/config';
 import type { OAuthProfile } from './google.strategy';
 import type { FastifyReply } from 'fastify';
 
+const REFRESH_COOKIE = 'itchats_refresh';
+const REFRESH_TTL_MS = 3650 * 86400000; // 10 years
+
+function setRefreshCookie(res: FastifyReply, refreshToken: string) {
+  const config = getConfig();
+  const secure = config.NODE_ENV === 'production';
+  res.setCookie(REFRESH_COOKIE, refreshToken, {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/v1/auth/refresh',
+    maxAge: REFRESH_TTL_MS / 1000,
+  });
+}
+
+function clearRefreshCookie(res: FastifyReply) {
+  res.setCookie(REFRESH_COOKIE, '', {
+    httpOnly: true,
+    secure: getConfig().NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/v1/auth/refresh',
+    maxAge: 0,
+  });
+}
+
 @Controller('v1/auth')
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(@Body() body: unknown) {
+  async register(@Body() body: unknown, @Res({ passthrough: true }) res: FastifyReply) {
     const data = RegisterSchema.parse(body);
-    return this.authService.register(
+    const result = await this.authService.register(
       data.email, data.username, data.password, data.dateOfBirth, data.agreedToTerms,
       (data as any).gender, (data as any).lookingFor, (data as any).interestedIn,
     );
+    setRefreshCookie(res, result.refreshToken);
+    return result;
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() body: unknown, @Req() req: any) {
+  async login(@Body() body: unknown, @Req() req: any, @Res({ passthrough: true }) res: FastifyReply) {
     const { email, password } = LoginSchema.parse(body);
-    return this.authService.login(email, password, {
+    const result = await this.authService.login(email, password, {
       userAgent: req.headers?.['user-agent'],
       ip: req.ip,
     });
+    setRefreshCookie(res, result.refreshToken);
+    return result;
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body() body: { refreshToken: string }) {
-    return this.authService.refresh(body.refreshToken);
+  async refresh(
+    @Body() body: { refreshToken?: string },
+    @Req() req: any,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    // Accept refresh token from body OR HttpOnly cookie
+    const refreshToken = body?.refreshToken || req.cookies?.[REFRESH_COOKIE];
+    if (!refreshToken) throw new (await import('@nestjs/common')).UnauthorizedException('No refresh token');
+    const result = await this.authService.refresh(refreshToken, {
+      userAgent: req.headers?.['user-agent'],
+      ip: req.ip,
+    });
+    setRefreshCookie(res, result.refreshToken);
+    return result;
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@Req() req: any) {
+  async logout(@Req() req: any, @Res({ passthrough: true }) res: FastifyReply) {
+    clearRefreshCookie(res);
     return this.authService.logout(req.user.userId);
   }
 
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logoutAll(@Req() req: any) {
+  async logoutAll(@Req() req: any, @Res({ passthrough: true }) res: FastifyReply) {
+    clearRefreshCookie(res);
     return this.authService.logout(req.user.userId);
   }
 

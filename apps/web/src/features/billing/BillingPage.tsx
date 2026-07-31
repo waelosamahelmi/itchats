@@ -1,18 +1,31 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { CreditCard, Wallet, Zap, ArrowLeft, Sparkles, Check, Crown, Star, Shield, Image, Mic, MessageCircle, Bot, TrendingUp, Key, BarChart3, Video, Heart, ThumbsUp, Phone, AlertCircle } from 'lucide-react';
+import { CreditCard, Wallet, Zap, ArrowLeft, Sparkles, Check, Crown, Star, Shield, Image, Mic, MessageCircle, Bot, TrendingUp, Key, BarChart3, Video, Heart, ThumbsUp, Phone, AlertCircle, Activity, PieChart } from 'lucide-react';
 import type { RootState } from '@/app/store';
+import { apiFetch } from '@/lib/api';
 
 const API = (import.meta as any).env?.VITE_API_URL || '/v1';
 
-async function fetchJson(url: string, token: string, opts?: RequestInit) {
-  const res = await fetch(`${API}${url}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...opts?.headers },
-  });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+// ── Usage stats types ──
+interface UsageBreakdown {
+  count: number;
+  credits: number;
+  costMinor: number;
+}
+interface UsageStats {
+  periodDays: number;
+  totalCreditsUsed: number;
+  totalProviderCostMinor: number;
+  breakdown: {
+    chatMessages: UsageBreakdown;
+    imageGenerations: UsageBreakdown;
+    videoGenerations: UsageBreakdown;
+    voiceTranscriptions: UsageBreakdown;
+    ttsGenerations: UsageBreakdown;
+    reactions: UsageBreakdown;
+    relationshipEvals: UsageBreakdown;
+  };
 }
 
 interface PlanFeature {
@@ -57,20 +70,24 @@ export default function BillingPage() {
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
   const [stripeConfigured, setStripeConfigured] = useState(true);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token) return;
     try {
       const [w, p, s, billingConfig] = await Promise.all([
-        fetchJson('/billing/wallet', token),
-        fetchJson('/billing/plans', token),
-        fetchJson('/billing/subscription', token).catch(() => null),
-        fetchJson('/billing/config', token).catch(() => ({ stripeConfigured: true, mode: 'full' })),
+        apiFetch('/billing/wallet'),
+        apiFetch('/billing/plans'),
+        apiFetch('/billing/subscription').catch(() => null),
+        apiFetch('/billing/config').catch(() => ({ stripeConfigured: true, mode: 'full' })),
       ]);
       setWallet(w);
       setPlans(Array.isArray(p) ? p : []);
       setSub(s);
       setStripeConfigured(billingConfig?.stripeConfigured !== false);
+
+      // Load usage stats
+      apiFetch<UsageStats>('/billing/usage-stats').then(setUsageStats).catch(() => {});
     } catch {} finally { setLoading(false); }
   }, [token]);
 
@@ -85,7 +102,7 @@ export default function BillingPage() {
     setCheckingOut(planId);
     setCheckoutMessage(null);
     try {
-      const result = await fetchJson('/billing/checkout', token, {
+      const result = await apiFetch('/billing/checkout', {
         method: 'POST',
         body: JSON.stringify({ planId }),
       });
@@ -158,6 +175,74 @@ export default function BillingPage() {
             {sub?.status === 'active' ? 'Active' : sub?.status ?? 'No subscription'}
           </p>
         </div>
+
+        {/* Usage Stats (Section 27) */}
+        {usageStats && usageStats.totalCreditsUsed > 0 && (
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+              <Activity size={16} className="text-brand-primary" /> Your Usage (Last {usageStats.periodDays} Days)
+            </h2>
+            <div className="glass rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs text-text-muted">Total Credits Used</span>
+                <span className="text-lg font-bold text-text-primary">{usageStats.totalCreditsUsed.toLocaleString()}</span>
+              </div>
+
+              {/* Breakdown bars */}
+              <div className="space-y-3">
+                {Object.entries(usageStats.breakdown)
+                  .filter(([, v]) => v.count > 0)
+                  .sort(([, a], [, b]) => b.credits - a.credits)
+                  .map(([key, val]) => {
+                    const pct = usageStats.totalCreditsUsed > 0
+                      ? (val.credits / usageStats.totalCreditsUsed) * 100
+                      : 0;
+                    const labels: Record<string, string> = {
+                      chatMessages: 'Chat Messages',
+                      imageGenerations: 'Image Generations',
+                      videoGenerations: 'Video Generations',
+                      voiceTranscriptions: 'Voice Transcriptions',
+                      ttsGenerations: 'TTS Generations',
+                      reactions: 'Reactions',
+                      relationshipEvals: 'Relationship Evaluations',
+                    };
+                    return (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-text-secondary">{labels[key] || key}</span>
+                          <span className="text-xs text-text-muted">{val.credits.toLocaleString()} credits ({val.count}×)</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-bg-glass overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-brand-primary to-brand-secondary transition-all"
+                            style={{ width: `${Math.max(pct, 2)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {/* Cost summary */}
+              {usageStats.totalProviderCostMinor > 0 && (
+                <div className="mt-4 pt-4 border-t border-border-subtle space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Provider Cost</span>
+                    <span className="text-text-secondary">{'\u2248'}{' '}{(usageStats.totalProviderCostMinor / 1000000).toFixed(4)} EUR</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Estimated Margin</span>
+                    <span className="text-success">
+                      {usageStats.totalCreditsUsed > 0
+                        ? Math.round((1 - usageStats.totalProviderCostMinor / (usageStats.totalCreditsUsed * 200)) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Plan cards */}
         <div>

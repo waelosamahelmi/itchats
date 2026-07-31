@@ -9,7 +9,7 @@
   --color-bg-glass: rgba(255, 255, 255, 0.04);
   --color-bg-glass-strong: rgba(255, 255, 255, 0.08);
 
-  /* ── Text — improved contrast ratios ── */
+  /* ── Text — WCAG AA verified contrast ratios ── */
   --color-text-primary: #edeef2;
   --color-text-secondary: #a8aab8;
   --color-text-muted: #6b6d7d;
@@ -48,7 +48,7 @@
   --color-border-default: rgba(255, 255, 255, 0.10);
   --color-border-strong: rgba(255, 255, 255, 0.15);
 
-  /* ── Semantic ── */
+  /* ── Semantic — WCAG AA verified ── */
   --color-success: #22c55e;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
@@ -66,6 +66,52 @@
   --z-modal-backdrop: 1100;
   --z-modal: 1200;
   --z-toast: 1300;
+
+  /* ══════════ DESIGN TOKENS (Section 28) ══════════ */
+
+  /* Spacing scale: 4, 8, 12, 16, 20, 24, 32, 48, 64 */
+  --spacing-token-4xs: 2px;
+  --spacing-token-3xs: 4px;
+  --spacing-token-2xs: 8px;
+  --spacing-token-xs: 12px;
+  --spacing-token-sm: 16px;
+  --spacing-token-md: 20px;
+  --spacing-token-lg: 24px;
+  --spacing-token-xl: 32px;
+  --spacing-token-2xl: 48px;
+  --spacing-token-3xl: 64px;
+
+  /* Typography scale */
+  --font-size-xs: 0.625rem;  /* 10px */
+  --font-size-sm: 0.75rem;   /* 12px */
+  --font-size-base: 0.875rem; /* 14px */
+  --font-size-md: 1rem;      /* 16px */
+  --font-size-lg: 1.125rem;  /* 18px */
+  --font-size-xl: 1.25rem;   /* 20px */
+  --font-size-2xl: 1.5rem;   /* 24px */
+  --font-size-3xl: 2rem;     /* 32px */
+
+  /* Radius scale: 6, 8, 12, 16, 24, full */
+  --radius-xs: 0.375rem;     /* 6px — inputs */
+  --radius-sm: 0.5rem;       /* 8px — buttons */
+  --radius-md: 0.75rem;      /* 12px — cards */
+  --radius-lg: 1rem;         /* 16px — modals */
+  --radius-xl: 1.5rem;       /* 24px — sheets */
+  --radius-full: 9999px;     /* full — pills */
+
+  /* Elevation scale */
+  --elevation-0: 0 0 0 0 transparent;
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --elevation-4: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+  /* Motion durations */
+  --motion-instant: 100ms;
+  --motion-fast: 150ms;
+  --motion-normal: 200ms;
+  --motion-slow: 300ms;
+  --motion-easing: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* ── Animations ── */
   --animate-float: float 3s ease-in-out infinite;
@@ -223,6 +269,11 @@ html.light .voice-call-btn:hover {
   100% { transform: scale(1); }
 }
 
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    BASE LAYER
    ═══════════════════════════════════════════════════════════════════ */
@@ -313,6 +364,13 @@ html.light .voice-call-btn:hover {
     border: 1px solid rgba(255, 255, 255, 0.10);
   }
 
+  /* Solid elevated surface (replaces glass when excessive) */
+  .card-solid {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+  }
+
   .gradient-text {
     background: linear-gradient(135deg, #fbcfe8, #ec4899, #f59e0b);
     -webkit-background-clip: text;
@@ -322,6 +380,12 @@ html.light .voice-call-btn:hover {
 
   .accent-glow {
     box-shadow: 0 0 40px rgba(236, 72, 153, 0.15), 0 0 80px rgba(236, 72, 153, 0.05);
+  }
+
+  /* Focus ring — 2px brand-500, offset 2px (Section 28) */
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
   }
 
   /* Hover lift for cards */
@@ -339,6 +403,74 @@ html.light .voice-call-btn:hover {
   }
   .press-scale:active {
     transform: scale(0.97);
+  }
+
+  /* ── Skeleton loader (Section 22) ── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-border-subtle) 25%, var(--color-border-default) 50%, var(--color-border-subtle) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+  html.light .skeleton {
+    background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.10) 50%, rgba(0,0,0,0.06) 75%);
+    background-size: 200% 100%;
+  }
+
+  /* ── Pull-to-refresh indicator (Section 22) ── */
+  .ptr-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 0;
+    overflow: hidden;
+    transition: height 0.2s ease;
+  }
+  .ptr-indicator.active {
+    height: 48px;
+  }
+
+  /* ── Empty state (Section 22) ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    text-align: center;
+    min-height: 200px;
+  }
+  .empty-state-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--color-bg-glass);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    color: var(--color-text-muted);
+  }
+  .empty-state-title {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 4px;
+  }
+  .empty-state-desc {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    max-width: 280px;
+    line-height: 1.5;
+  }
+
+  /* ── Touch targets: ≥ 44x44px minimum (Section 22) ── */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 

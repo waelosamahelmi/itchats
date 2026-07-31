@@ -65,6 +65,13 @@ async function bootstrap() {
   // Manual CORS — handles all requests including SSE raw writes
   const fastify = app.getHttpAdapter().getInstance();
 
+  // Cookie support for refresh token HttpOnly cookies
+  const { default: fastifyCookie } = await import('@fastify/cookie');
+  await fastify.register(fastifyCookie, {
+    secret: process.env.COOKIE_SECRET || config.JWT_SECRET,
+    parseOptions: {},
+  });
+
   function isAllowedOrigin(origin: string | undefined): string {
     if (!origin) return config.CORS_ORIGIN;
     // Allow localhost origins

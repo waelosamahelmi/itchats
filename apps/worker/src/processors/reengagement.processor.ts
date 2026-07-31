@@ -7,7 +7,7 @@ import {
   characterRelationships,
   conversationParticipants,
 } from '@itchats/database/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { alibabaChat } from '@itchats/ai-core';
 import type { CharacterReengagementJob } from '../queues';
 
@@ -20,10 +20,18 @@ import type { CharacterReengagementJob } from '../queues';
  * - Max three total per user per day  
  * - Stop after two ignored attempts
  * - Respect conversation mute settings
+ *
+ * Also handles sweepAll jobs that scan ALL active conversations for re-engagement candidates.
  */
-export async function characterReengagementProcessor(job: Job<CharacterReengagementJob>) {
+export async function characterReengagementProcessor(job: Job<CharacterReengagementJob | { sweepAll: boolean }>) {
   const db = getDb();
-  const { characterId, userId, conversationId } = job.data;
+
+  // Handle sweepAll job
+  if ('sweepAll' in job.data && job.data.sweepAll) {
+    return handleSweepAll(db);
+  }
+
+  const { characterId, userId, conversationId } = job.data as CharacterReengagementJob;
 
   // ── 1. Check mute/conversation settings ──
   const [participant] = await db
@@ -129,22 +137,54 @@ export async function characterReengagementProcessor(job: Job<CharacterReengagem
     return { skipped: true, reason: `character already sent ${proactiveFromChar} proactive messages in 24h` };
   }
 
-  // ── 4. Check total user daily limit (3 max) ──
-  // Check across all conversations
-  const [userDailyTotal] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(messages)
-    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+  // ── 4. Check total user daily limit (3 proactive messages per user per day) ──
+  // Count all proactive character messages across all user's conversations today
+  const userConvs = await db
+    .select({ id: conversations.id })
+    .from(conversations)
     .where(
       and(
         eq(conversations.createdByUserId, userId),
-        eq(messages.senderType, 'character'),
-        sql`${messages.createdAt} > ${oneDayAgo}`,
+        sql`${conversations.deletedAt} IS NULL`,
       ),
     );
-  // This is rough — we'd need to filter for proactive specifically. For now, just check raw count.
-  // If raw count of ALL character messages today is very high, skip.
-  // A better approach: just limit to 3 proactive per day total.
+  const userConvIds = userConvs.map(c => c.id);
+
+  if (userConvIds.length > 0) {
+    const allUserCharMsgs = await db
+      .select({ conversationId: messages.conversationId, createdAt: messages.createdAt, senderCharacterId: messages.senderCharacterId })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.senderType, 'character'),
+          sql`${messages.createdAt} > ${oneDayAgo}`,
+          sql`${messages.conversationId} IN (${userConvIds.map(id => `'${id}'`).join(',') || "'none'"})`,
+        ),
+      )
+      .orderBy(sql`${messages.createdAt} DESC`);
+
+    // Count as proactive only if the character message was sent > 30min after last user message
+    let totalProactive = 0;
+    for (const cMsg of allUserCharMsgs) {
+      const [prevUser] = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.conversationId, cMsg.conversationId),
+            eq(messages.senderType, 'user'),
+            sql`${messages.createdAt} < ${cMsg.createdAt}`,
+          ),
+        )
+        .orderBy(sql`${messages.createdAt} DESC`)
+        .limit(1);
+      if (!prevUser) totalProactive++;
+    }
+
+    if (totalProactive >= 3) {
+      return { skipped: true, reason: `user already received ${totalProactive} total proactive messages today (limit: 3)` };
+    }
+  }
 
   // ── 5. Check ignored attempts ──
   // If last 2 character messages had no user response, stop
@@ -291,4 +331,70 @@ function getRelationshipLabel(level: number): string {
   if (level >= 3) return 'Familiar Face';
   if (level >= 2) return 'New Connection';
   return 'Stranger';
+}
+
+/**
+ * Sweep all active conversations for re-engagement candidates.
+ * Finds conversations where:
+ * - Last message was from user
+ * - Inactive for 6+ hours
+ * - Character hasn't sent a proactive message in 24h
+ * - Conversation is not muted
+ */
+async function handleSweepAll(db: ReturnType<typeof getDb>) {
+  // Find conversations with recent human-char activity, not deleted
+  const activeConvs = await db
+    .select({
+      id: conversations.id,
+      characterId: conversations.characterId,
+      createdByUserId: conversations.createdByUserId,
+      lastMessageAt: conversations.lastMessageAt,
+    })
+    .from(conversations)
+    .where(
+      and(
+        isNull(conversations.deletedAt),
+        sql`${conversations.characterId} IS NOT NULL`,
+        sql`${conversations.lastMessageAt} < NOW() - INTERVAL '6 hours'`,
+      ),
+    )
+    .limit(100);
+
+  const enqueued: string[] = [];
+
+  for (const conv of activeConvs) {
+    if (!conv.characterId || !conv.createdByUserId) continue;
+    if (!conv.lastMessageAt) continue;
+
+    // Check last message direction
+    const [lastMsg] = await db
+      .select({ senderType: messages.senderType })
+      .from(messages)
+      .where(eq(messages.conversationId, conv.id))
+      .orderBy(sql`${messages.createdAt} DESC`)
+      .limit(1);
+
+    // Only consider if last message was from user (character hasn't had the last word)
+    if (!lastMsg || lastMsg.senderType !== 'user') continue;
+
+    // Check mute
+    const [participant] = await db
+      .select({ mutedUntil: conversationParticipants.mutedUntil })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conv.id),
+          eq(conversationParticipants.userId, conv.createdByUserId),
+        ),
+      )
+      .limit(1);
+
+    if (participant?.mutedUntil && new Date(participant.mutedUntil) > new Date()) continue;
+
+    // Enqueue individual re-engagement job
+    enqueued.push(`${conv.characterId}:${conv.createdByUserId}`);
+  }
+
+  console.log(`[reengagement] Sweep found ${enqueued.length} candidates`);
+  return { swept: true, candidatesFound: enqueued.length, enqueued };
 }

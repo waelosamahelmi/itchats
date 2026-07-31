@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Bell, Heart, MessageCircle, UserPlus, AtSign, Star,
   Camera, AlertCircle, Info, Check, Loader2, RefreshCw,
@@ -117,6 +118,34 @@ function NotificationSkeleton() {
   );
 }
 
+// ── Compute deep link from notification data ──
+function getNotificationLink(n: ApiNotification): string | null {
+  const d = (n.data || (n as any).dataJson || {}) as Record<string, any>;
+  switch (n.type) {
+    case 'mention':
+    case 'post_reaction':
+    case 'comment_reply':
+    case 'comment_reaction':
+      if (d.postId) return `/notifications`; // Could be /post/${d.postId}
+      return null;
+    case 'new_follower':
+      if (d.characterId) return `/ai/chat/${d.characterId}`;
+      return null;
+    case 'character_reply':
+      if (d.characterId) return `/ai/chat/${d.characterId}`;
+      return null;
+    case 'incoming_message':
+      if (d.conversationId) return `/chat/${d.conversationId}`;
+      if (d.characterId) return `/ai/chat/${d.characterId}`;
+      return null;
+    case 'story_interaction':
+      if (d.storyId) return `/stories`;
+      return null;
+    default:
+      return null;
+  }
+}
+
 // ── Notification Item ──
 function NotificationItem({
   notification,
@@ -125,16 +154,23 @@ function NotificationItem({
   notification: ApiNotification;
   onMarkRead: (id: string) => void;
 }) {
+  const navigate = useNavigate();
   const isUnread = !notification.readAt;
   const Icon = getTypeIcon(notification.type);
   const colorClass = getTypeColor(notification.type);
+  const deepLink = getNotificationLink(notification);
+
+  const handleClick = () => {
+    if (isUnread) onMarkRead(notification.id);
+    if (deepLink) navigate(deepLink);
+  };
 
   return (
     <motion.button
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      onClick={() => isUnread && onMarkRead(notification.id)}
+      onClick={handleClick}
       className={`w-full flex items-start gap-3 px-4 py-3.5 text-left transition-colors duration-150 hover:bg-bg-elevated/50 ${
         isUnread ? 'bg-brand-glow/5' : ''
       }`}
