@@ -80,7 +80,8 @@ export class CharactersService {
         eq(characters.status, 'published'),
         sql`${characters.deletedAt} IS NULL`,
       )
-    ).limit(Math.min(limit, 50)).offset((page - 1) * limit);
+    ).orderBy(sql`${characters.followerCount} DESC NULLS LAST`)
+    .limit(Math.min(limit, 50)).offset((page - 1) * limit);
 
     // Compute isFollowing for each character if viewer is provided
     if (viewerUserId && results.length > 0) {

@@ -138,6 +138,22 @@ export class NotificationsService {
   }
 
   /**
+   * Mark all unread notifications for a specific conversation as read.
+   * Called when the user opens a conversation to clear stale "incoming_message" notifications.
+   */
+  async markConversationRead(userId: string, conversationId: string) {
+    const db = getDb();
+    await db.update(notifications).set({ readAt: new Date() } as any)
+      .where(and(
+        eq(notifications.userId, userId),
+        eq(notifications.entityType, 'conversation'),
+        eq(notifications.entityId, conversationId),
+        isNull(notifications.readAt),
+      ));
+    return { read: true };
+  }
+
+  /**
    * Get unread notification count for a user.
    */
   async unreadCount(userId: string) {

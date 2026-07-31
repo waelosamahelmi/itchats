@@ -44,9 +44,6 @@ function StoryCircle({ story, isYours, userAvatar, onYourStoryClick, onClick }: 
             </div>
           )}
         </div>
-        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-primary flex items-center justify-center border-[3px] border-bg-canvas">
-          <Plus size={12} className="text-white" />
-        </div>
         <span className="text-[10px] text-text-secondary truncate w-full text-center leading-tight">{t('feed.yourStory')}</span>
       </button>
     );

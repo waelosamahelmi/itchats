@@ -19,6 +19,7 @@ import {
 import { detectTextLanguage, getCharacterCooldown, setCharacterCooldown, clearCharacterCooldown } from '@/lib/translate';
 import { t } from '@/lib/i18n';
 import { RelationshipRing, type RelationshipInfo } from './RelationshipRing';
+import { refreshNotificationBell } from '@/hooks/useUnreadNotifications';
 
 const API = '/v1';
 
@@ -244,6 +245,9 @@ export default function AIChatPage() {
     fetch(`${API}/conversations/${conversationId}/read`, {
       method: 'POST',
       headers: headers(),
+    }).then(() => {
+      // Refresh the bell counter after marking conversation read (Bug 2 fix)
+      refreshNotificationBell();
     }).catch(() => {});
   }, [conversationId, auth.token, headers]);
 

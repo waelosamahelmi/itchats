@@ -78,7 +78,8 @@ export class CharacterCreationService {
       languages: parsed.languages ?? ['en'],
       defaultLanguage: parsed.defaultLanguage ?? 'en',
       identityOrigin,
-      status: 'draft',
+      status: parsed.visibility === 'public' ? 'published' : 'draft',
+      publishedAt: parsed.visibility === 'public' ? new Date() : undefined,
       autonomyConfig: parsed.autonomyLevel ? { level: parsed.autonomyLevel, cadence: parsed.storyCadence } : {},
     }).returning();
 

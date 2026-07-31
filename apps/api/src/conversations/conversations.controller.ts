@@ -6,12 +6,16 @@ import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { SendMessageSchema } from '@itchats/contracts';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { MessageReactionsService } from './message-reactions.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Controller('v1/conversations')
 export class ConversationsController {
   private readonly logger = new Logger(ConversationsController.name);
 
-  constructor(@Inject(MessageReactionsService) private readonly messageReactions: MessageReactionsService) {}
+  constructor(
+    @Inject(MessageReactionsService) private readonly messageReactions: MessageReactionsService,
+    @Inject(NotificationsService) private readonly notificationsService: NotificationsService,
+  ) {}
 
   @Get()
   @UseGuards(JwtAuthGuard)
@@ -224,6 +228,9 @@ export class ConversationsController {
         ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_message_id = ${latestMsg.id}
       `);
     }
+
+    // Mark unread conversation notifications as read (Bug 2 fix)
+    await this.notificationsService.markConversationRead(req.user.userId, id);
 
     return { read: true, conversationId: id };
   }

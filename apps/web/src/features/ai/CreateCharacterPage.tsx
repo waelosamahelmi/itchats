@@ -309,6 +309,13 @@ export default function CreateCharacterPage() {
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || 'Save failed'); }
       const char = await res.json();
+      // If public, trigger publish (best-effort: server already sets published status on create)
+      if (vis === 'public') {
+        const charId = isEdit ? characterId : char.id;
+        fetch(`${API}/characters/${charId}/publish`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => { /* publish is best-effort; character is already published via server */ });
+      }
       nav(`/ai/chat/${isEdit ? characterId : char.id}`);
     } catch (e: any) { setError(e.message); }
     setSaving(false);

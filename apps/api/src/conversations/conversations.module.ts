@@ -6,8 +6,10 @@ import {
   MESSAGE_REACTIONS_REPOSITORY,
   MessageReactionsService,
 } from './message-reactions.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [ConversationsController],
   providers: [
     ChatGateway,

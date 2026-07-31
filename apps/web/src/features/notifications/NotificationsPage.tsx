@@ -8,6 +8,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiGet, apiPost } from '@/lib/api';
 import { timeAgo } from '@/lib/timeAgo';
+import { refreshNotificationBell } from '@/hooks/useUnreadNotifications';
 
 // ── Types ──
 interface ApiNotification {
@@ -230,6 +231,15 @@ export default function NotificationsPage() {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  // Mark all notifications as read when the page mounts (Bug 1 fix)
+  useEffect(() => {
+    apiPost('/notifications/read-all').then(() => {
+      refreshNotificationBell();
+    }).catch(() => {
+      // Silent — read-all is best-effort
+    });
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
