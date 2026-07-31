@@ -56,12 +56,15 @@ cat > apps/api/tsconfig.json << 'TSCEOF'
 }
 TSCEOF
 
-# 3. Ensure env files exist
-for dir in apps/api apps/web apps/worker packages/database; do
-  if [ ! -f "$dir/.env" ]; then
-    cp apps/api/.env "$dir/.env" 2>/dev/null || true
-  fi
+# 3. Sync env files from apps/api/.env (single source of truth).
+# Always overwrite worker/database copies — "copy only if missing" let them
+# drift and serve stale API keys (worker 401s while the API worked).
+for dir in apps/worker packages/database; do
+  cp apps/api/.env "$dir/.env" 2>/dev/null || true
 done
+if [ ! -f "apps/web/.env" ]; then
+  cp apps/api/.env "apps/web/.env" 2>/dev/null || true
+fi
 
 # 4. Install dependencies
 echo "📦 Installing dependencies..."
